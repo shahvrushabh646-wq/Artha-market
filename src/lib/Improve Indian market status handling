@@ -1,0 +1,54 @@
+export type IndianMarketStatus =
+  | "open"
+  | "closed"
+  | "weekend"
+  | "holiday";
+
+/**
+ * NSE/BSE regular equity-market hours in Asia/Kolkata.
+ *
+ * Note:
+ * - Saturday/Sunday are treated as weekend.
+ * - NSE/BSE holidays are handled separately by the quote/history fallback.
+ * - Pre-open starts at 09:00, regular equity trading starts at 09:15.
+ */
+export function getIndianMarketStatus(
+  now = new Date(),
+): IndianMarketStatus {
+  const parts = new Intl.DateTimeFormat("en-IN", {
+    timeZone: "Asia/Kolkata",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(now);
+
+  const weekday =
+    parts.find((part) => part.type === "weekday")?.value ?? "";
+
+  const hour = Number(
+    parts.find((part) => part.type === "hour")?.value ?? NaN,
+  );
+
+  const minute = Number(
+    parts.find((part) => part.type === "minute")?.value ?? NaN,
+  );
+
+  if (weekday === "Sat" || weekday === "Sun") {
+    return "weekend";
+  }
+
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) {
+    return "closed";
+  }
+
+  const minutes = hour * 60 + minute;
+  const marketOpen = 9 * 60 + 15;
+  const marketClose = 15 * 60 + 30;
+
+  if (minutes < marketOpen || minutes > marketClose) {
+    return "closed";
+  }
+
+  return "open";
+}
