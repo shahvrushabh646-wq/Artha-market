@@ -13,8 +13,8 @@
   --color-up: #4eae7a;
   --color-down: #d15c5c;
   --color-border: #ffffff14;
-  --font-sans: Arial, Helvetica, sans-serif;
-  --font-display: Arial, Helvetica, sans-serif;
+  --font-sans: Aptos, Arial, Helvetica, sans-serif;
+  --font-display: Aptos, Arial, Helvetica, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
   --radius-sm: 8px;
   --radius-md: 12px;
@@ -33,7 +33,7 @@
     -moz-osx-font-smoothing: grayscale;
     background: var(--color-bg);
     color: var(--color-fg);
-    font-size: 18px;
+    font-size: 38px;
   }
 
   body {
@@ -42,7 +42,7 @@
     background: var(--color-bg);
     color: var(--color-fg);
     font-family: var(--font-sans);
-    font-size: 18px;
+    font-size: 38px;
     line-height: 1.45;
   }
 
