@@ -9,6 +9,10 @@ export type Quote = {
   exchange: string | null;
   high52w: number | null;
   low52w: number | null;
+  high5y?: number | null;
+  low5y?: number | null;
+  price75?: number | null;
+  signal75?: "BUY" | "WAIT" | null;
   volume: number | null;
   dayHigh: number | null;
   dayLow: number | null;
