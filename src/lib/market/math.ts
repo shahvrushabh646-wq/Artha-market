@@ -8,11 +8,11 @@ export function periodHighLow(bars: Bar[]): { high: number | null; highT: number
 export function customValuation(high5y: number | null, current: number | null): Valuation | null {
   if (high5y == null || current == null) return null;
 
-  // Stocks below ₹20 use the 95% rule: buy at 5% of the 5Y high.
+  // Stocks below ₹20 use the 90% rule: buy at 10% of the 5Y high.
   // Stocks at or above ₹20 use the 75% rule: buy at 25% of the 5Y high.
   const lowPriceRule = current < 20;
-  const buyFraction = lowPriceRule ? 0.05 : 0.25;
-  const activeRuleLabel = lowPriceRule ? "95% RULE" : "75% RULE";
+  const buyFraction = lowPriceRule ? 0.10 : 0.25;
+  const activeRuleLabel = lowPriceRule ? "90% RULE" : "75% RULE";
   const buyPrice = round2(high5y * buyFraction);
   const buy = current <= buyPrice;
 
