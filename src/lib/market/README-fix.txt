@@ -1,0 +1,1 @@
+Market stability helpers are present. The deployment must provide a persistent DATABASE_URL (Neon/Postgres) for cross-restart user data.
