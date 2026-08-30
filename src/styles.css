@@ -13,8 +13,8 @@
   --color-up: #4eae7a;
   --color-down: #d15c5c;
   --color-border: #ffffff14;
-  --font-sans: "Figtree", ui-sans-serif, system-ui, sans-serif;
-  --font-display: "Newsreader", ui-serif, Georgia, serif;
+  --font-sans: Arial, Helvetica, sans-serif;
+  --font-display: Arial, Helvetica, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
   --radius-sm: 8px;
   --radius-md: 12px;
@@ -33,6 +33,7 @@
     -moz-osx-font-smoothing: grayscale;
     background: var(--color-bg);
     color: var(--color-fg);
+    font-size: 12px;
   }
 
   body {
@@ -41,6 +42,8 @@
     background: var(--color-bg);
     color: var(--color-fg);
     font-family: var(--font-sans);
+    font-size: 12px;
+    line-height: 1.45;
   }
 
   button:not(:disabled),
