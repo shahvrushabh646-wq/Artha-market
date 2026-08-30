@@ -8,6 +8,16 @@ import { useDesk } from "@/lib/store";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 
+const LOCAL_ALIASES = [
+  { keys: ["INDIAN INFOTECH", "INDIAN INFOTECH AND SOFTWARE", "INDIAN INFOTECH & SOFTWARE", "INDINFO", "509051"], symbol: "509051.BO", name: "Indian Infotech & Software Ltd.", exchange: "BSE" },
+];
+
+function localSearch(query: string) {
+  const q = query.trim().toUpperCase();
+  if (!q) return [];
+  return LOCAL_ALIASES.filter((item) => item.keys.some((key) => key.includes(q) || q.includes(key))).map(({ symbol, name, exchange }) => ({ symbol, name, exchange }));
+}
+
 export function SymbolSearch({ initial = "" }: { initial?: string }) {
   const navigate = useNavigate();
   const setLast = useDesk((s) => s.setLastSymbol);
@@ -15,18 +25,17 @@ export function SymbolSearch({ initial = "" }: { initial?: string }) {
   const [searchQ, setSearchQ] = useState(initial);
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
+  const localHits = localSearch(q);
 
-  // Wait until the user pauses typing before calling the server.
-  // This prevents a request for every single keystroke.
   useEffect(() => {
     const timer = window.setTimeout(() => setSearchQ(q.trim()), 300);
     return () => window.clearTimeout(timer);
   }, [q]);
 
   const search = useQuery({
-    queryKey: ["search", searchQ],
+    queryKey: ["search", searchQ.toUpperCase()],
     queryFn: () => searchSymbols({ data: { q: searchQ } }),
-    enabled: searchQ.length >= 2,
+    enabled: searchQ.length >= 2 && localHits.length === 0,
     staleTime: 30_000,
     gcTime: 5 * 60_000,
     refetchOnWindowFocus: false,
@@ -40,57 +49,37 @@ export function SymbolSearch({ initial = "" }: { initial?: string }) {
     return () => document.removeEventListener("mousedown", onDoc);
   }, []);
 
+  const resolveSymbol = (value: string) => {
+    const upper = value.trim().toUpperCase();
+    const alias = LOCAL_ALIASES.find((item) => item.keys.some((key) => key === upper));
+    return alias?.symbol ?? normalizeSymbol(value);
+  };
+
   const go = (symbol: string) => {
-    const s = normalizeSymbol(symbol);
+    const s = resolveSymbol(symbol);
     setLast(s);
     setOpen(false);
     void navigate({ to: "/stock", search: { symbol: s, period: "1Y" } });
   };
 
+  const results = localHits.length ? localHits : search.data ?? [];
+
   return (
     <div ref={box} className="relative">
-      <form
-        className="flex gap-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (q.trim()) go(q);
-        }}
-      >
+      <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); if (q.trim()) go(q); }}>
         <div className="relative flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-subtle" />
-          <Input
-            value={q}
-            onChange={(e) => {
-              setQ(e.target.value);
-              setOpen(true);
-            }}
-            onFocus={() => setOpen(true)}
-            placeholder="RELIANCE, TCS, INFY…"
-            autoCapitalize="characters"
-            autoCorrect="off"
-            spellCheck={false}
-            enterKeyHint="search"
-            className="pl-10"
-            aria-label="Search stock symbol"
-          />
+          <Input value={q} onChange={(e) => { setQ(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)} placeholder="RELIANCE, TCS, INFY…" autoCapitalize="characters" autoCorrect="off" spellCheck={false} enterKeyHint="search" className="pl-10" aria-label="Search stock symbol" />
         </div>
-        <Button type="submit" className="shrink-0">
-          Open
-        </Button>
+        <Button type="submit" className="shrink-0">Open</Button>
       </form>
       {open && (
         <div className="absolute z-20 mt-2 w-full overflow-hidden rounded-xl bg-surface-2 shadow-[var(--shadow-border)]">
-          {search.isFetching ? (
-            <div className="px-3 py-3 text-sm text-muted">Searching…</div>
-          ) : search.data && search.data.length > 0 ? (
+          {results.length > 0 ? (
             <ul>
-              {search.data.map((hit) => (
+              {results.map((hit) => (
                 <li key={hit.symbol}>
-                  <button
-                    type="button"
-                    className="flex w-full items-center justify-between gap-3 px-3 py-3 text-left hover:bg-surface-3"
-                    onClick={() => go(hit.symbol)}
-                  >
+                  <button type="button" className="flex w-full items-center justify-between gap-3 px-3 py-3 text-left hover:bg-surface-3" onClick={() => go(hit.symbol)}>
                     <span className="min-w-0">
                       <span className="block text-sm text-fg">{hit.name}</span>
                       <span className="block text-xs text-muted">{hit.symbol}</span>
@@ -100,18 +89,11 @@ export function SymbolSearch({ initial = "" }: { initial?: string }) {
                 </li>
               ))}
             </ul>
+          ) : search.isFetching ? (
+            <div className="px-3 py-3 text-sm text-muted">Searching…</div>
           ) : (
             <div className="flex flex-wrap gap-1.5 p-3">
-              {POPULAR.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => go(s)}
-                  className="rounded-full bg-surface px-3 py-1.5 text-xs text-muted hover:text-fg"
-                >
-                  {displaySymbol(s)}
-                </button>
-              ))}
+              {POPULAR.map((s) => <button key={s} type="button" onClick={() => go(s)} className="rounded-full bg-surface px-3 py-1.5 text-xs text-muted hover:text-fg">{displaySymbol(s)}</button>)}
             </div>
           )}
         </div>
