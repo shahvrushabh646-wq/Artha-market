@@ -40,9 +40,17 @@ export function periodHighLow(bars: Bar[]): {
 
 export function customValuation(high5y: number | null, current: number | null): Valuation | null {
   if (high5y == null || current == null) return null;
-  const price75 = round2(high5y * 0.25);
+
+  // Rule switch:
+  // Current price < ₹20 -> 90% below 5Y high rule (buy at 10% of high).
+  // Current price >= ₹20 -> 75% below 5Y high rule (buy at 25% of high).
+  const isLowPriceRule = current < 20;
+  const activePercent = isLowPriceRule ? 0.10 : 0.25;
+  const activeRuleLabel = isLowPriceRule ? "90% rule" : "75% rule";
+  const price75 = round2(high5y * activePercent);
   const price85 = round2(high5y * 0.15);
   const price95 = round2(high5y * 0.05);
+
   return {
     high5y,
     price75,
@@ -50,7 +58,8 @@ export function customValuation(high5y: number | null, current: number | null): 
     price95,
     currentPrice: current,
     signal: current <= price75 ? "BUY" : "WAIT",
-  };
+    activeRuleLabel,
+  } as Valuation & { activeRuleLabel: string };
 }
 
 export function optionalBelowHighLevels(high: number | null): { label: string; price: number }[] {
