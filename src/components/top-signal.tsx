@@ -2,7 +2,7 @@ import { cn } from "@/lib/utils";
 
 export function TopSignal({ signal, price75 }: { signal: string | null | undefined; price75: number | null | undefined }) {
   const buy = Boolean(signal?.includes("BUY"));
-  const rule = signal?.includes("95% RULE") ? "95% Rule Signal" : "75% Rule Signal";
+  const rule = signal?.includes("95% RULE") ? "90% Rule Signal" : "75% Rule Signal";
   return (
     <div className={cn("mt-4 rounded-2xl border-2 p-4 text-center shadow-sm", buy ? "border-up/50 bg-up/10" : "border-down/50 bg-down/10")}>
       <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-muted">{rule}</div>
