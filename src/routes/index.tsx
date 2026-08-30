@@ -1,20 +1,35 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
+import { useMemo, useState } from "react";
 import { SymbolSearch } from "@/components/symbol-search";
 import { IndexCard, MoverRow, Panel, Section, SkeletonBlock } from "@/components/widgets";
-import { DATA_NOTE } from "@/lib/market/config";
+import { DATA_NOTE, displaySymbol } from "@/lib/market/config";
 import { getMarketClock } from "@/lib/market/math";
-import { fetchDashboard } from "@/lib/market/server";
+import { fetchDashboard, fetchQuotes } from "@/lib/market/server";
+import { useDesk } from "@/lib/store";
 
 export const Route = createFileRoute("/")({ component: Home });
 
 function Home() {
   const clock = getMarketClock();
+  const watchlist = useDesk((s) => s.watchlist);
+  const [dismissed, setDismissed] = useState<string[]>([]);
   const dash = useQuery({
     queryKey: ["dashboard"],
     queryFn: () => fetchDashboard(),
     refetchInterval: 60_000,
   });
+  const watchQuotes = useQuery({
+    queryKey: ["home-watchlist-signals", watchlist],
+    queryFn: () => fetchQuotes({ data: { symbols: watchlist } }),
+    enabled: watchlist.length > 0,
+    refetchInterval: 60_000,
+  });
+
+  const buyAlerts = useMemo(
+    () => (watchQuotes.data ?? []).filter((q) => q.ok && q.signal75 === "BUY" && !dismissed.includes(q.symbol)),
+    [watchQuotes.data, dismissed],
+  );
 
   return (
     <div>
@@ -25,6 +40,34 @@ function Home() {
       <div className="mt-5">
         <SymbolSearch />
       </div>
+
+      {buyAlerts.length ? (
+        <div className="mt-5 rounded-2xl border-2 border-up/50 bg-up/10 p-4 shadow-sm">
+          <div className="text-center text-[11px] font-semibold uppercase tracking-[0.2em] text-muted">
+            WATCHLIST BUY ALERT
+          </div>
+          <div className="mt-3 space-y-2">
+            {buyAlerts.map((q) => (
+              <div key={q.symbol} className="rounded-xl bg-surface p-3 shadow-[var(--shadow-border)]">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate text-lg font-bold text-fg">🟢 {displaySymbol(q.symbol)} — BUY</div>
+                    <div className="mt-1 text-sm text-muted">Buy signal detected at ₹{q.price?.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setDismissed((current) => [...current, q.symbol])}
+                    className="shrink-0 rounded-lg bg-surface-2 px-3 py-2 text-xs font-semibold text-muted hover:text-fg"
+                    aria-label={`Remove ${displaySymbol(q.symbol)} BUY alert from Home`}
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       <Section title="Overview" hint="NIFTY, Sensex and sector indices">
         {dash.isLoading ? (
