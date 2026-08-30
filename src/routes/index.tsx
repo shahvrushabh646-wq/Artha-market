@@ -26,8 +26,8 @@ function Home() {
     refetchInterval: 60_000,
   });
 
-  const buyAlerts = useMemo(
-    () => (watchQuotes.data ?? []).filter((q) => q.ok && q.signal75 === "BUY" && !dismissed.includes(q.symbol)),
+  const buyAlert = useMemo(
+    () => (watchQuotes.data ?? []).find((q) => q.ok && q.signal75 === "BUY" && !dismissed.includes(q.symbol)),
     [watchQuotes.data, dismissed],
   );
 
@@ -41,30 +41,26 @@ function Home() {
         <SymbolSearch />
       </div>
 
-      {buyAlerts.length ? (
+      {buyAlert ? (
         <div className="mt-5 rounded-2xl border-2 border-up/50 bg-up/10 p-4 shadow-sm">
           <div className="text-center text-[11px] font-semibold uppercase tracking-[0.2em] text-muted">
             WATCHLIST BUY ALERT
           </div>
-          <div className="mt-3 space-y-2">
-            {buyAlerts.map((q) => (
-              <div key={q.symbol} className="rounded-xl bg-surface p-3 shadow-[var(--shadow-border)]">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="truncate text-lg font-bold text-fg">🟢 {displaySymbol(q.symbol)} — BUY</div>
-                    <div className="mt-1 text-sm text-muted">Buy signal detected at ₹{q.price?.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setDismissed((current) => [...current, q.symbol])}
-                    className="shrink-0 rounded-lg bg-surface-2 px-3 py-2 text-xs font-semibold text-muted hover:text-fg"
-                    aria-label={`Remove ${displaySymbol(q.symbol)} BUY alert from Home`}
-                  >
-                    Remove
-                  </button>
-                </div>
+          <div className="mt-3 rounded-xl bg-surface p-3 shadow-[var(--shadow-border)]">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="truncate text-lg font-bold text-fg">🟢 {displaySymbol(buyAlert.symbol)} — BUY</div>
+                <div className="mt-1 text-sm text-muted">Buy signal detected at ₹{buyAlert.price?.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</div>
               </div>
-            ))}
+              <button
+                type="button"
+                onClick={() => setDismissed((current) => [...current, buyAlert.symbol])}
+                className="shrink-0 rounded-lg bg-surface-2 px-3 py-2 text-xs font-semibold text-muted hover:text-fg"
+                aria-label={`Remove ${displaySymbol(buyAlert.symbol)} BUY alert from Home`}
+              >
+                Remove
+              </button>
+            </div>
           </div>
         </div>
       ) : null}
