@@ -35,8 +35,9 @@ export function customValuation(high5y: number | null, current: number | null): 
   //   current >= ₹20 => 75% below the 5Y high => buy at 25% of the 5Y high.
   const lowPriceRule = current < 20;
   const buyFraction = lowPriceRule ? 0.10 : 0.25;
-  const activeRuleLabel = lowPriceRule ? "90% rule" : "75% rule";
+  const activeRuleLabel = lowPriceRule ? "90% RULE" : "75% RULE";
   const price75 = round2(high5y * buyFraction);
+  const buy = current <= price75;
 
   return {
     high5y,
@@ -44,7 +45,7 @@ export function customValuation(high5y: number | null, current: number | null): 
     price85: round2(high5y * 0.15),
     price95: round2(high5y * 0.05),
     currentPrice: current,
-    signal: current <= price75 ? "BUY" : "WAIT",
+    signal: `${activeRuleLabel} · ${buy ? "BUY" : "WAIT"}` as Valuation["signal"],
     activeRuleLabel,
   } as Valuation & { activeRuleLabel: string };
 }
@@ -164,7 +165,7 @@ export function stockScore(tech: TechnicalSummary, pe: number | null, eps: numbe
   if (eps != null) { fundMax += 10; fundScore += eps > 0 ? 10 : 2; }
   if (de != null) { fundMax += 10; const dePct = de < 5 ? de * 100 : de; fundScore += dePct < 100 ? 10 : 4; }
   const fundamental = fundMax ? Math.round((fundScore / fundMax) * 30) : 0;
-  const valuationScore = valuation ? (valuation.signal === "BUY" ? 30 : 12) : 0;
+  const valuationScore = valuation ? (String(valuation.signal).includes("BUY") ? 30 : 12) : 0;
   return { technical, fundamental, valuation: valuationScore, total: technical + fundamental + valuationScore };
 }
 
