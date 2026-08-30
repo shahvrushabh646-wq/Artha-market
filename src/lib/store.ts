@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { createJSONStorage, persist } from "zustand/middleware";
 import { DEFAULT_WATCHLIST, normalizeSymbol } from "@/lib/market/config";
 
 export type Holding = {
@@ -69,40 +69,40 @@ export const useDesk = create<DeskState>()(
       updateHolding: (id, patch) => {
         if (patch.quantity != null && patch.quantity <= 0) throw new Error("Quantity must be greater than 0");
         if (patch.buyPrice != null && patch.buyPrice <= 0) throw new Error("Buy price must be greater than 0");
-        set({
-          holdings: get().holdings.map((h) => (h.id === id ? { ...h, ...patch } : h)),
-        });
+        set({ holdings: get().holdings.map((h) => (h.id === id ? { ...h, ...patch } : h)) });
       },
       deleteHolding: (id) => set({ holdings: get().holdings.filter((h) => h.id !== id) }),
       clearHoldings: () => set({ holdings: [] }),
       addAlert: (a) => {
         if (a.targetPrice <= 0) throw new Error("Target price must be greater than 0");
         set({
-          alerts: [
-            {
-              ...a,
-              id: uid(),
-              symbol: normalizeSymbol(a.symbol),
-              status: "ACTIVE",
-              createdAt: new Date().toISOString(),
-              triggeredAt: null,
-            },
-            ...get().alerts,
-          ],
+          alerts: [{ ...a, id: uid(), symbol: normalizeSymbol(a.symbol), status: "ACTIVE", createdAt: new Date().toISOString(), triggeredAt: null }, ...get().alerts],
         });
       },
       deleteAlert: (id) => set({ alerts: get().alerts.filter((a) => a.id !== id) }),
       clearAlerts: () => set({ alerts: [] }),
       markTriggered: (ids) => {
         const now = new Date().toISOString();
-        set({
-          alerts: get().alerts.map((a) =>
-            ids.includes(a.id) && a.status === "ACTIVE" ? { ...a, status: "TRIGGERED", triggeredAt: now } : a,
-          ),
-        });
+        set({ alerts: get().alerts.map((a) => ids.includes(a.id) && a.status === "ACTIVE" ? { ...a, status: "TRIGGERED", triggeredAt: now } : a) });
       },
       setLastSymbol: (symbol) => set({ lastSymbol: normalizeSymbol(symbol) }),
     }),
-    { name: "artha-desk" },
+    {
+      name: "artha-desk",
+      version: 2,
+      storage: createJSONStorage(() => localStorage),
+      // Never replace a saved watchlist with DEFAULT_WATCHLIST during hydration.
+      merge: (persistedState, currentState) => {
+        const persisted = persistedState as Partial<DeskState> | undefined;
+        return {
+          ...currentState,
+          ...persisted,
+          watchlist: Array.isArray(persisted?.watchlist)
+            ? persisted.watchlist.map(normalizeSymbol).filter(Boolean)
+            : currentState.watchlist,
+        };
+      },
+      migrate: (persistedState) => persistedState as DeskState,
+    },
   ),
 );
