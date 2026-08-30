@@ -12,6 +12,7 @@ export type Quote = {
   volume: number | null;
   dayHigh: number | null;
   dayLow: number | null;
+  lastPriceTime?: number | null;
   ok: boolean;
 };
 
