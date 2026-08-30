@@ -3,7 +3,7 @@ import { z } from "zod";
 import { CHART_PERIODS, INDICES, MOVERS_UNIVERSE, PERIOD_MAP, displaySymbol, normalizeSymbol, type ChartPeriod } from "./config";
 import type { Bar, Dividend, Quote, SearchHit } from "./types";
 
-const UA = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/122 Safari/537.36";
+const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/138 Safari/537.36";
 type CacheEntry = { exp: number; val: unknown };
 type YahooMeta = { currency?: string; symbol?: string; exchangeName?: string; fullExchangeName?: string; regularMarketPrice?: number; regularMarketChangePercent?: number; fiftyTwoWeekHigh?: number; fiftyTwoWeekLow?: number; regularMarketDayHigh?: number; regularMarketDayLow?: number; regularMarketVolume?: number; longName?: string; shortName?: string; chartPreviousClose?: number; previousClose?: number };
 const cache = new Map<string, CacheEntry>();
@@ -13,8 +13,21 @@ function number(v: unknown): number | null { if (typeof v === "number" && Number
 function string(v: unknown): string | null { return typeof v === "string" && v.trim() ? v : null; }
 
 async function getJson(url: string, headers?: HeadersInit): Promise<unknown> {
-  const res = await fetch(url, { headers: { "User-Agent": UA, Accept: "application/json,text/plain,*/*", ...headers }, cache: "no-store" });
+  const res = await fetch(url, { headers: { "User-Agent": UA, Accept: "application/json,text/plain,*/*", "Accept-Language": "en-US,en;q=0.9", ...headers }, cache: "no-store" });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+async function nseJson(symbol: string): Promise<unknown> {
+  const bare = displaySymbol(symbol).toUpperCase().replace(/\.NS$|\.BO$/i, "").trim();
+  const homeUrl = `https://www.nseindia.com/get-quotes/equity?symbol=${encodeURIComponent(bare)}`;
+  const apiUrl = `https://www.nseindia.com/api/quote-equity?symbol=${encodeURIComponent(bare)}`;
+  const home = await fetch(homeUrl, { headers: { "User-Agent": UA, Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", "Accept-Language": "en-US,en;q=0.9", "Upgrade-Insecure-Requests": "1" }, cache: "no-store" });
+  const cookieParts = typeof (home.headers as Headers & { getSetCookie?: () => string[] }).getSetCookie === "function"
+    ? (home.headers as Headers & { getSetCookie: () => string[] }).getSetCookie().map((v) => v.split(";", 1)[0])
+    : ((home.headers.get("set-cookie") ?? "").split(/,(?=[^;]+=)/).map((v) => v.split(";", 1)[0]));
+  const res = await fetch(apiUrl, { headers: { "User-Agent": UA, Accept: "application/json,text/plain,*/*", "Accept-Language": "en-US,en;q=0.9", Referer: homeUrl, Origin: "https://www.nseindia.com", "X-Requested-With": "XMLHttpRequest", ...(cookieParts.length ? { Cookie: cookieParts.join("; ") } : {}) }, cache: "no-store" });
+  if (!res.ok) throw new Error(`NSE HTTP ${res.status}`);
   return res.json();
 }
 
@@ -83,11 +96,7 @@ async function nseQuote(symbol: string): Promise<Quote | null> {
   const bare = displaySymbol(symbol).toUpperCase().replace(/\.NS$|\.BO$/i, "").trim();
   if (!bare || bare.startsWith("^")) return null;
   try {
-    const raw = await cached(`nse:${bare}`, 30_000, async () => {
-      const home = `https://www.nseindia.com/get-quotes/equity?symbol=${encodeURIComponent(bare)}`;
-      try { await getJson(home, { Referer: "https://www.nseindia.com/", Accept: "text/html,*/*" }); } catch {}
-      return getJson(`https://www.nseindia.com/api/quote-equity?symbol=${encodeURIComponent(bare)}`, { Referer: home, "X-Requested-With": "XMLHttpRequest" });
-    });
+    const raw = await cached(`nse:${bare}`, 30_000, () => nseJson(bare));
     const root = record(raw), p = record(root?.priceInfo), meta = record(root?.metadata), info = record(root?.info);
     const price = number(p?.lastPrice);
     if (price == null) return null;
@@ -100,10 +109,13 @@ async function nseQuote(symbol: string): Promise<Quote | null> {
 }
 
 async function latestQuote(symbol: string): Promise<Quote> {
+  // Prefer NSE for the latest Indian market price; Yahoo is the history fallback.
+  const nse = await nseQuote(symbol);
+  if (nse?.ok) return nse;
   for (const [range, interval] of [["1d", "1m"], ["5d", "1d"], ["1mo", "1d"]] as const) {
     try { const parsed = parseYahoo(await yahooChart(symbol, range, interval)); if (parsed.bars.length) return quoteFromParsed(parsed, symbol); } catch {}
   }
-  return (await nseQuote(symbol)) ?? emptyQuote(symbol);
+  return emptyQuote(symbol);
 }
 
 async function withFiveYear(quote: Quote, symbol: string, bars?: Bar[]): Promise<Quote> {
@@ -139,18 +151,21 @@ export const fetchHistory = createServerFn({ method: "POST" }).validator((data: 
   const symbol = normalizeSymbol(data.symbol), spec = PERIOD_MAP[data.period];
   let parsed = { bars: [] as Bar[], meta: {} as YahooMeta, dividends: [] as Dividend[] };
   try { parsed = parseYahoo(await yahooChart(symbol, spec.range, spec.interval)); } catch {}
-  const quote = await withFiveYear(parsed.bars.length ? quoteFromParsed(parsed, symbol) : await latestQuote(symbol), symbol, parsed.bars.length && data.period === "5Y" ? parsed.bars : undefined);
+  const latest = await latestQuote(symbol);
+  const fallback = parsed.bars.length ? quoteFromParsed(parsed, symbol) : emptyQuote(symbol);
+  const quote = await withFiveYear(latest.ok ? latest : fallback, symbol, parsed.bars.length && data.period === "5Y" ? parsed.bars : undefined);
   return { symbol, bars: limitBars(parsed.bars, data.period), quote };
 });
 
 export const fetchAnalysis = createServerFn({ method: "POST" }).validator((data: unknown) => z.object({ symbol: z.string().min(1).max(80), period: z.enum(CHART_PERIODS).default("1Y") }).parse(data)).handler(async ({ data }) => {
   const symbol = normalizeSymbol(data.symbol), spec = PERIOD_MAP[data.period];
-  const [fiveResult, periodResult] = await Promise.allSettled([yahooChart(symbol, "5y", "1d", true), data.period === "1D" || data.period === "1W" ? yahooChart(symbol, spec.range, spec.interval) : Promise.resolve(null)]);
+  const [fiveResult, periodResult, latestResult] = await Promise.allSettled([yahooChart(symbol, "5y", "1d", true), data.period === "1D" || data.period === "1W" ? yahooChart(symbol, spec.range, spec.interval) : Promise.resolve(null), latestQuote(symbol)]);
   const five = fiveResult.status === "fulfilled" ? parseYahoo(fiveResult.value) : { bars: [], meta: {}, dividends: [] };
   const period = periodResult.status === "fulfilled" && periodResult.value ? parseYahoo(periodResult.value) : five;
   const source = five.bars.length ? five : period;
-  const base = source.bars.length ? quoteFromParsed(source, symbol) : await latestQuote(symbol);
-  const quote = await withFiveYear(base, symbol, five.bars.length ? five.bars : undefined);
+  const historicalQuote = source.bars.length ? quoteFromParsed(source, symbol) : emptyQuote(symbol);
+  const latest = latestResult.status === "fulfilled" ? latestResult.value : historicalQuote;
+  const quote = await withFiveYear(latest.ok ? latest : historicalQuote, symbol, five.bars.length ? five.bars : undefined);
   const yearAgo = Date.now() / 1000 - 365 * 24 * 60 * 60;
   const bars1y = five.bars.filter(b => b.t >= yearAgo);
   return { symbol, quote, bars: limitBars(period.bars, data.period), bars1y: bars1y.length ? bars1y : source.bars.slice(-260), bars5y: five.bars.length ? five.bars : source.bars, dividends: five.dividends, company: null, fundamentals: [], statements: [], valuation: quote.high5y != null && quote.price75 != null && quote.price != null ? { high5y: quote.high5y, price75: quote.price75, price85: Math.round(quote.high5y * 0.15 * 100) / 100, price95: Math.round(quote.high5y * 0.05 * 100) / 100, currentPrice: quote.price, signal: quote.signal75 === "BUY" ? "BUY" : "WAIT" } : null };
