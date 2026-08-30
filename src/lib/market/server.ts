@@ -863,8 +863,7 @@ export const searchSymbols =
           // Use fallback below.
         }
 
-        const normalized =
-          normalizeSymbol(query);
+                const normalized = normalizeSymbol(query);
 
         return [
           {
