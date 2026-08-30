@@ -1,14 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import {
-  CHART_PERIODS,
-  INDICES,
-  MOVERS_UNIVERSE,
-  PERIOD_MAP,
-  displaySymbol,
-  normalizeSymbol,
-  type ChartPeriod,
-} from "./config";
+import { CHART_PERIODS, INDICES, MOVERS_UNIVERSE, PERIOD_MAP, displaySymbol, normalizeSymbol, type ChartPeriod } from "./config";
 import type { Bar, Dividend, Quote, SearchHit } from "./types";
 
 const UA = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/122 Safari/537.36";
@@ -31,7 +23,7 @@ function number(v: unknown): number | null {
 function string(v: unknown): string | null { return typeof v === "string" && v.trim() ? v : null; }
 
 async function getJson(url: string, headers?: HeadersInit): Promise<unknown> {
-  const res = await fetch(url, { headers: { "User-Agent": UA, Accept: "application/json,text/plain,*/*", ...headers } });
+  const res = await fetch(url, { headers: { "User-Agent": UA, Accept: "application/json,text/plain,*/*", ...headers }, cache: "no-store" });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
@@ -64,7 +56,8 @@ function makeQuote(meta: YahooMeta, fallback: string): Quote {
 }
 
 function parseYahoo(raw: unknown): { bars: Bar[]; meta: YahooMeta; dividends: Dividend[] } {
-  const result = record((Array.isArray(record(record(raw)?.chart)?.result) ? record(record(raw)?.chart)?.result : [])[0]);
+  const chart = record(record(raw)?.chart);
+  const result = record((Array.isArray(chart?.result) ? chart.result : [])[0]);
   if (!result) return { bars: [], meta: {}, dividends: [] };
   const meta = (record(result.meta) ?? {}) as YahooMeta;
   const timestamps = Array.isArray(result.timestamp) ? result.timestamp : [];
@@ -93,26 +86,40 @@ function parseYahoo(raw: unknown): { bars: Bar[]; meta: YahooMeta; dividends: Di
 async function yahooChart(symbol: string, range: string, interval: string, events = false): Promise<unknown> {
   const params = new URLSearchParams({ range, interval, includePrePost: "false" });
   if (events) params.set("events", "div");
-  return cached(`chart:${symbol}:${range}:${interval}:${events}`, 60_000, () => getJson(`https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?${params}`));
+  return cached(`chart:${symbol}:${range}:${interval}:${events}`, 60_000, () => getJson(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?${params}`));
 }
 
-// Yahoo Spark can return incomplete metadata. Use the Chart endpoint for quotes instead.
+// Use Yahoo Chart rather than Spark. If Yahoo's metadata omits regularMarketPrice,
+// derive the displayed price from the latest valid chart close so the app still
+// shows the last traded/last available price when the market is closed.
 async function yahooQuotes(symbols: string[]): Promise<Quote[]> {
   const unique = [...new Set(symbols.filter(Boolean).map(normalizeSymbol))];
   return Promise.all(unique.map(async (symbol) => {
     try {
       const parsed = parseYahoo(await yahooChart(symbol, "1d", "1m"));
       if (parsed.meta.regularMarketPrice != null) return makeQuote(parsed.meta, symbol);
+      const last = parsed.bars.at(-1);
+      const previous = parsed.bars.length > 1 ? parsed.bars.at(-2) : undefined;
+      if (last) {
+        return makeQuote({ ...parsed.meta, regularMarketPrice: last.c, chartPreviousClose: previous?.c ?? parsed.meta.chartPreviousClose }, symbol);
+      }
       const fallback = parseYahoo(await yahooChart(symbol, "5d", "1d"));
-      return makeQuote(fallback.meta, symbol);
+      const fallbackLast = fallback.bars.at(-1);
+      return fallbackLast
+        ? makeQuote({ ...fallback.meta, regularMarketPrice: fallbackLast.c, chartPreviousClose: fallback.bars.at(-2)?.c ?? fallback.meta.chartPreviousClose }, symbol)
+        : makeQuote(fallback.meta, symbol);
     } catch {
       try {
         const parsed = parseYahoo(await yahooChart(symbol, "5d", "1d"));
-        return makeQuote(parsed.meta, symbol);
+        const last = parsed.bars.at(-1);
+        return last
+          ? makeQuote({ ...parsed.meta, regularMarketPrice: last.c, chartPreviousClose: parsed.bars.at(-2)?.c ?? parsed.meta.chartPreviousClose }, symbol)
+          : makeQuote(parsed.meta, symbol);
       } catch { return emptyQuote(symbol); }
     }
   }));
 }
+
 function limitBars(bars: Bar[], period: ChartPeriod): Bar[] {
   if (period !== "3Y") return bars;
   const cutoff = Date.now() / 1000 - 3 * 365 * 24 * 60 * 60;
@@ -132,7 +139,9 @@ export const fetchQuotes = createServerFn({ method: "POST" }).validator((data: u
 export const fetchHistory = createServerFn({ method: "POST" }).validator((data: unknown) => z.object({ symbol: z.string().min(1).max(24), period: z.enum(CHART_PERIODS).default("1Y") }).parse(data)).handler(async ({ data }) => {
   const symbol = normalizeSymbol(data.symbol), spec = PERIOD_MAP[data.period];
   const parsed = parseYahoo(await yahooChart(symbol, spec.range, spec.interval));
-  return { symbol, bars: limitBars(parsed.bars, data.period), quote: makeQuote(parsed.meta, symbol) };
+  const last = parsed.bars.at(-1);
+  const meta = last ? { ...parsed.meta, regularMarketPrice: parsed.meta.regularMarketPrice ?? last.c, chartPreviousClose: parsed.meta.chartPreviousClose ?? parsed.bars.at(-2)?.c } : parsed.meta;
+  return { symbol, bars: limitBars(parsed.bars, data.period), quote: makeQuote(meta, symbol) };
 });
 
 export const fetchAnalysis = createServerFn({ method: "POST" }).validator((data: unknown) => z.object({ symbol: z.string().min(1).max(24), period: z.enum(CHART_PERIODS).default("1Y") }).parse(data)).handler(async ({ data }) => {
@@ -142,19 +151,13 @@ export const fetchAnalysis = createServerFn({ method: "POST" }).validator((data:
   const [fiveRaw, periodRaw] = await Promise.all([fiveYPromise, periodPromise]);
   const five = parseYahoo(fiveRaw);
   const period = periodRaw ? parseYahoo(periodRaw) : five;
-  const quote = makeQuote(five.meta, symbol).ok ? makeQuote(five.meta, symbol) : makeQuote(period.meta, symbol);
+  const fiveLast = five.bars.at(-1);
+  const quote = makeQuote(fiveLast ? { ...five.meta, regularMarketPrice: five.meta.regularMarketPrice ?? fiveLast.c, chartPreviousClose: five.meta.chartPreviousClose ?? five.bars.at(-2)?.c } : five.meta, symbol).ok
+    ? makeQuote(fiveLast ? { ...five.meta, regularMarketPrice: five.meta.regularMarketPrice ?? fiveLast.c, chartPreviousClose: five.meta.chartPreviousClose ?? five.bars.at(-2)?.c } : five.meta, symbol)
+    : makeQuote(period.meta, symbol);
   const yearAgo = Date.now() / 1000 - 365 * 24 * 60 * 60;
   const bars1y = five.bars.filter(b => b.t >= yearAgo);
-  return {
-    symbol, quote,
-    bars: limitBars(period.bars, data.period),
-    bars1y: bars1y.length ? bars1y : five.bars.slice(-260),
-    bars5y: five.bars,
-    dividends: five.dividends,
-    company: null,
-    fundamentals: [],
-    statements: [],
-  };
+  return { symbol, quote, bars: limitBars(period.bars, data.period), bars1y: bars1y.length ? bars1y : five.bars.slice(-260), bars5y: five.bars, dividends: five.dividends, company: null, fundamentals: [], statements: [] };
 });
 
 export const fetchWatchPack = createServerFn({ method: "POST" }).validator((data: unknown) => z.object({ symbols: z.array(z.string()).max(20) }).parse(data)).handler(async ({ data }) => {
@@ -172,7 +175,7 @@ export const fetchWatchPack = createServerFn({ method: "POST" }).validator((data
 export const searchSymbols = createServerFn({ method: "POST" }).validator((data: unknown) => z.object({ q: z.string().min(1).max(40) }).parse(data)).handler(async ({ data }): Promise<SearchHit[]> => {
   const query = data.q.trim();
   try {
-    const raw = await getJson(`https://query2.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(query)}&quotesCount=10&newsCount=0`);
+    const raw = await getJson(`https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(query)}&quotesCount=10&newsCount=0`);
     const root = record(raw), quotes = Array.isArray(root?.quotes) ? root.quotes : [], hits: SearchHit[] = [];
     for (const item of quotes) {
       const row = record(item), symbol = string(row?.symbol);
