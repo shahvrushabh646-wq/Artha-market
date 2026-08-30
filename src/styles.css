@@ -33,7 +33,7 @@
     -moz-osx-font-smoothing: grayscale;
     background: var(--color-bg);
     color: var(--color-fg);
-    font-size: 38px;
+    font-size: 18px;
   }
 
   body {
@@ -42,7 +42,7 @@
     background: var(--color-bg);
     color: var(--color-fg);
     font-family: var(--font-sans);
-    font-size: 38px;
+    font-size: 18px;
     line-height: 1.45;
   }
 
