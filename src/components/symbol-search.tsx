@@ -12,13 +12,24 @@ export function SymbolSearch({ initial = "" }: { initial?: string }) {
   const navigate = useNavigate();
   const setLast = useDesk((s) => s.setLastSymbol);
   const [q, setQ] = useState(initial);
+  const [searchQ, setSearchQ] = useState(initial);
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
 
+  // Wait until the user pauses typing before calling the server.
+  // This prevents a request for every single keystroke.
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSearchQ(q.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [q]);
+
   const search = useQuery({
-    queryKey: ["search", q],
-    queryFn: () => searchSymbols({ data: { q } }),
-    enabled: q.trim().length >= 2,
+    queryKey: ["search", searchQ],
+    queryFn: () => searchSymbols({ data: { q: searchQ } }),
+    enabled: searchQ.length >= 2,
+    staleTime: 30_000,
+    gcTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
   });
 
   useEffect(() => {
@@ -69,7 +80,9 @@ export function SymbolSearch({ initial = "" }: { initial?: string }) {
       </form>
       {open && (
         <div className="absolute z-20 mt-2 w-full overflow-hidden rounded-xl bg-surface-2 shadow-[var(--shadow-border)]">
-          {search.data && search.data.length > 0 ? (
+          {search.isFetching ? (
+            <div className="px-3 py-3 text-sm text-muted">Searching…</div>
+          ) : search.data && search.data.length > 0 ? (
             <ul>
               {search.data.map((hit) => (
                 <li key={hit.symbol}>
