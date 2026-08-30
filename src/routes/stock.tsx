@@ -1,0 +1,445 @@
+import { useQuery } from "@tanstack/react-query";
+import { createFileRoute } from "@tanstack/react-router";
+import { BellPlus, BookmarkPlus, Eye } from "lucide-react";
+import { useMemo, useState } from "react";
+import { toast } from "sonner";
+import { CandleChart } from "@/components/candle-chart";
+import { SymbolSearch } from "@/components/symbol-search";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Panel, QuoteHeader, Section, SignalBadge, SkeletonBlock, Stat } from "@/components/widgets";
+import { CHART_PERIODS, DATA_NOTE, DISCLAIMER, displaySymbol, type ChartPeriod } from "@/lib/market/config";
+import {
+  customValuation,
+  fmtCurrency,
+  fmtDate,
+  fmtNumber,
+  fmtPercent,
+  lastValid,
+  optionalBelowHighLevels,
+  parseMetric,
+  pctAboveLow,
+  pctBelowHigh,
+  periodHighLow,
+  priceVsSma,
+  rsi,
+  rsiInterpretation,
+  sma,
+  stockScore,
+  supportResistance,
+  technicalSummary,
+} from "@/lib/market/math";
+import { fetchAnalysis } from "@/lib/market/server";
+import { useDesk } from "@/lib/store";
+import { cn } from "@/lib/utils";
+
+type Search = { symbol: string; period: ChartPeriod };
+
+export const Route = createFileRoute("/stock")({
+  validateSearch: (s: Record<string, unknown>): Search => ({
+    symbol: typeof s.symbol === "string" && s.symbol ? s.symbol : "RELIANCE.NS",
+    period: CHART_PERIODS.includes(s.period as ChartPeriod) ? (s.period as ChartPeriod) : "1Y",
+  }),
+  component: StockPage,
+});
+
+function StockPage() {
+  const { symbol, period } = Route.useSearch();
+  const navigate = Route.useNavigate();
+  const addWatch = useDesk((s) => s.addWatch);
+  const addHolding = useDesk((s) => s.addHolding);
+  const addAlert = useDesk((s) => s.addAlert);
+  const watched = useDesk((s) => s.watchlist.includes(symbol));
+  const [qty, setQty] = useState("10");
+  const [buy, setBuy] = useState("");
+  const [target, setTarget] = useState("");
+  const [cond, setCond] = useState<">=" | "<=">(">=");
+  const [finTab, setFinTab] = useState<"yearly" | "quarterly">("yearly");
+  const [showLevels, setShowLevels] = useState(false);
+  const [showRules, setShowRules] = useState(false);
+
+  const q = useQuery({
+    queryKey: ["analysis", symbol, period],
+    queryFn: () => fetchAnalysis({ data: { symbol, period } }),
+  });
+
+  const data = q.data;
+  const quote = data?.quote;
+
+  const derived = useMemo(() => {
+    if (!data) return null;
+    const closes = data.bars1y.map((b) => b.c);
+    const s20 = lastValid(sma(closes, 20));
+    const s50 = lastValid(sma(closes, 50));
+    const s200 = lastValid(sma(closes, 200));
+    const r = lastValid(rsi(closes, 14));
+    const hl1 = periodHighLow(data.bars1y);
+    const hl5 = periodHighLow(data.bars5y);
+    const price = data.quote.price;
+    const tech = technicalSummary(price, s20, s50, s200, r);
+    const val = customValuation(hl5.high, price);
+    const pe = parseMetric(data.fundamentals.find((f) => /P\/E/i.test(f.name))?.value ?? null);
+    const eps = parseMetric(data.fundamentals.find((f) => /^EPS/i.test(f.name))?.value ?? null);
+    const de = parseMetric(data.fundamentals.find((f) => /Debt/i.test(f.name))?.value ?? null);
+    const score = stockScore(tech, pe, eps, de, val);
+    const sr = supportResistance(data.bars1y);
+    return { s20, s50, s200, r, hl1, hl5, tech, val, score, sr };
+  }, [data]);
+
+  const setPeriod = (p: ChartPeriod) => {
+    void navigate({ search: (prev) => ({ ...prev, period: p }) });
+  };
+
+  if (q.isLoading) {
+    return (
+      <div className="space-y-4">
+        <SkeletonBlock className="h-12" />
+        <SkeletonBlock className="h-24" />
+        <SkeletonBlock className="h-64" />
+      </div>
+    );
+  }
+
+  if (q.isError || !quote?.ok) {
+    return (
+      <div>
+        <SymbolSearch initial={displaySymbol(symbol)} />
+        <Panel className="mt-5">
+          <h1 className="font-display text-xl">Stock not found</h1>
+          <p className="mt-2 text-sm text-muted">
+            No live data for {symbol}. Try RELIANCE, TCS, or INFY — NSE names are completed automatically.
+          </p>
+        </Panel>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <SymbolSearch initial={displaySymbol(symbol)} />
+      <div className="mt-5">
+        <QuoteHeader quote={quote} />
+        {data?.company?.industry ? (
+          <p className="mt-2 text-xs uppercase tracking-[0.16em] text-subtle">{data.company.industry}</p>
+        ) : null}
+      </div>
+
+      <div className="mt-4 grid grid-cols-3 gap-2">
+        <Button
+          variant="secondary"
+          size="sm"
+          className="h-11"
+          onClick={() => {
+            const added = addWatch(symbol);
+            toast(added ? `Watching ${displaySymbol(symbol)}` : "Already on your watchlist");
+          }}
+        >
+          <Eye className="size-4" />
+          {watched ? "Watching" : "Watch"}
+        </Button>
+        <Button
+          variant="secondary"
+          size="sm"
+          className="h-11"
+          onClick={() => {
+            const price = Number(buy || quote.price || 0);
+            const quantity = Number(qty);
+            try {
+              addHolding({
+                symbol,
+                company: quote.name,
+                quantity,
+                buyPrice: price,
+                buyDate: new Date().toISOString().slice(0, 10),
+                notes: "",
+              });
+              toast(`Added ${quantity} ${displaySymbol(symbol)}`);
+            } catch (err) {
+              toast(err instanceof Error ? err.message : "Could not add holding");
+            }
+          }}
+        >
+          <BookmarkPlus className="size-4" />
+          Book
+        </Button>
+        <Button
+          variant="secondary"
+          size="sm"
+          className="h-11"
+          onClick={() => {
+            const t = Number(target || quote.price || 0);
+            try {
+              addAlert({ symbol, targetPrice: t, condition: cond });
+              toast(`Alert on ${displaySymbol(symbol)}`);
+            } catch (err) {
+              toast(err instanceof Error ? err.message : "Could not create alert");
+            }
+          }}
+        >
+          <BellPlus className="size-4" />
+          Alert
+        </Button>
+      </div>
+      <div className="mt-2 grid grid-cols-3 gap-2">
+        <Input inputMode="decimal" value={qty} onChange={(e) => setQty(e.target.value)} aria-label="Quantity" />
+        <Input
+          inputMode="decimal"
+          value={buy}
+          onChange={(e) => setBuy(e.target.value)}
+          placeholder={quote.price ? String(quote.price) : "Buy"}
+          aria-label="Buy price"
+        />
+        <div className="flex gap-1">
+          <select
+            value={cond}
+            onChange={(e) => setCond(e.target.value as ">=" | "<=")}
+            className="h-11 rounded-lg bg-surface-2 px-1 text-xs text-fg shadow-[var(--shadow-border)]"
+            aria-label="Alert condition"
+          >
+            <option value=">=">≥</option>
+            <option value="<=">≤</option>
+          </select>
+          <Input
+            inputMode="decimal"
+            value={target}
+            onChange={(e) => setTarget(e.target.value)}
+            placeholder="Target"
+            aria-label="Alert target"
+            className="min-w-0"
+          />
+        </div>
+      </div>
+
+      <Section title="Price range">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <Stat label="52W high" value={fmtCurrency(derived?.hl1.high ?? quote.high52w)} />
+          <Stat label="52W low" value={fmtCurrency(derived?.hl1.low ?? quote.low52w)} />
+          <Stat label="5Y high" value={fmtCurrency(derived?.hl5.high ?? null)} hint={fmtDate(derived?.hl5.highT)} />
+          <Stat label="5Y low" value={fmtCurrency(derived?.hl5.low ?? null)} hint={fmtDate(derived?.hl5.lowT)} />
+        </div>
+        <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <Stat label="Below 52W high" value={fmtPercent(pctBelowHigh(quote.price, derived?.hl1.high ?? quote.high52w))} />
+          <Stat label="Above 52W low" value={fmtPercent(pctAboveLow(quote.price, derived?.hl1.low ?? quote.low52w))} />
+          <Stat label="Below 5Y high" value={fmtPercent(pctBelowHigh(quote.price, derived?.hl5.high ?? null))} />
+          <Stat label="Above 5Y low" value={fmtPercent(pctAboveLow(quote.price, derived?.hl5.low ?? null))} />
+        </div>
+      </Section>
+
+      <Section title="Chart">
+        <div className="mb-3 flex gap-1 overflow-x-auto pb-1">
+          {CHART_PERIODS.map((p) => (
+            <button
+              key={p}
+              type="button"
+              onClick={() => setPeriod(p)}
+              className={cn(
+                "h-9 shrink-0 rounded-full px-3 text-xs font-medium",
+                p === period ? "bg-accent text-accent-fg" : "bg-surface-2 text-muted",
+              )}
+            >
+              {p}
+            </button>
+          ))}
+        </div>
+        <CandleChart bars={data?.bars ?? []} />
+      </Section>
+
+      <Section title="Technicals" hint="RSI(14) and SMA 20 / 50 / 200 on 1-year daily closes">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <Stat label="RSI 14" value={fmtNumber(derived?.r ?? null)} hint={rsiInterpretation(derived?.r ?? null)} />
+          <Stat label="SMA 20" value={fmtCurrency(derived?.s20 ?? null)} hint={priceVsSma(quote.price, derived?.s20 ?? null)} />
+          <Stat label="SMA 50" value={fmtCurrency(derived?.s50 ?? null)} hint={priceVsSma(quote.price, derived?.s50 ?? null)} />
+          <Stat label="SMA 200" value={fmtCurrency(derived?.s200 ?? null)} hint={priceVsSma(quote.price, derived?.s200 ?? null)} />
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <BadgeTone verdict={derived?.tech.verdict ?? "Neutral"} />
+          <span className="text-xs text-muted">
+            {derived?.tech.bullishPoints ?? 0} bullish · {derived?.tech.bearishPoints ?? 0} bearish
+          </span>
+        </div>
+        <button
+          type="button"
+          className="mt-2 text-xs text-muted underline-offset-2 hover:text-fg hover:underline"
+          onClick={() => setShowRules((v) => !v)}
+        >
+          {showRules ? "Hide rules" : "Show rules applied"}
+        </button>
+        {showRules ? (
+          <ul className="mt-2 space-y-1 text-sm text-muted">
+            {derived?.tech.rules.map((r) => (
+              <li key={r}>{r}</li>
+            ))}
+          </ul>
+        ) : null}
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <Stat label="Support (approx.)" value={fmtCurrency(derived?.sr.support ?? null)} />
+          <Stat label="Resistance (approx.)" value={fmtCurrency(derived?.sr.resistance ?? null)} />
+        </div>
+      </Section>
+
+      <Section title="Valuation rule" hint="Personal rule: buy only at or below 25% of the 5-year high. Not advice.">
+        {derived?.val ? (
+          <>
+            <div className="mb-3">
+              <SignalBadge signal={derived.val.signal} />
+            </div>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              <Stat label="5Y high" value={fmtCurrency(derived.val.high5y)} />
+              <Stat label="25% level" value={fmtCurrency(derived.val.price75)} />
+              <Stat label="15% level" value={fmtCurrency(derived.val.price85)} />
+              <Stat label="5% level" value={fmtCurrency(derived.val.price95)} />
+              <Stat label="Last" value={fmtCurrency(derived.val.currentPrice)} />
+              <Stat
+                label="Gap to 25%"
+                value={fmtCurrency(derived.val.currentPrice - derived.val.price75)}
+              />
+            </div>
+            <button
+              type="button"
+              className="mt-3 text-xs text-muted underline-offset-2 hover:text-fg hover:underline"
+              onClick={() => setShowLevels((v) => !v)}
+            >
+              {showLevels ? "Hide optional % levels" : "Optional levels (% below 5Y high)"}
+            </button>
+            {showLevels ? (
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                {optionalBelowHighLevels(derived.val.high5y).map((row) => (
+                  <Stat key={row.label} label={row.label} value={fmtCurrency(row.price)} />
+                ))}
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <Panel>
+            <p className="text-sm text-muted">Need five-year history to run the rule.</p>
+          </Panel>
+        )}
+      </Section>
+
+      <Section title="Score" hint="Transparent 0–100 from technicals, fundamentals and the valuation rule">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <Stat label="Technical /40" value={derived?.score.technical ?? 0} />
+          <Stat label="Fundamental /30" value={derived?.score.fundamental ?? 0} />
+          <Stat label="Valuation /30" value={derived?.score.valuation ?? 0} />
+          <Stat label="Total /100" value={derived?.score.total ?? 0} />
+        </div>
+        <ScoreBar value={derived?.score.total ?? 0} />
+      </Section>
+
+      <Section title="Fundamentals">
+        {data?.fundamentals.length ? (
+          <div className="grid grid-cols-2 gap-2">
+            {data.fundamentals.map((row) => (
+              <Stat key={row.name} label={row.name} value={row.value} />
+            ))}
+          </div>
+        ) : (
+          <Panel>
+            <p className="text-sm text-muted">Fundamentals unavailable for this symbol.</p>
+          </Panel>
+        )}
+      </Section>
+
+      <Section title="Financials" hint="Consolidated figures as reported">
+        {data?.statements.length ? (
+          <>
+            <div className="mb-3 flex gap-1">
+              {(["yearly", "quarterly"] as const).map((tab) => (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => setFinTab(tab)}
+                  className={cn(
+                    "h-9 rounded-full px-3 text-xs font-medium capitalize",
+                    finTab === tab ? "bg-accent text-accent-fg" : "bg-surface-2 text-muted",
+                  )}
+                >
+                  {tab}
+                </button>
+              ))}
+            </div>
+            {data.statements.map((row) => {
+              const series = finTab === "yearly" ? row.yearly : row.quarterly;
+              const keys = Object.keys(series);
+              if (!keys.length) return null;
+              return (
+                <Panel key={row.title} className="mb-2 overflow-x-auto p-3">
+                  <div className="text-[11px] uppercase tracking-[0.14em] text-subtle">{row.title}</div>
+                  <div className="mt-2 flex min-w-max gap-4">
+                    {keys.map((k) => (
+                      <div key={k}>
+                        <div className="text-[11px] text-subtle">{k}</div>
+                        <div className="tabular text-sm text-fg">{fmtNumber(series[k], 0)}</div>
+                      </div>
+                    ))}
+                  </div>
+                </Panel>
+              );
+            })}
+          </>
+        ) : (
+          <Panel>
+            <p className="text-sm text-muted">Statements unavailable.</p>
+          </Panel>
+        )}
+      </Section>
+
+      {data?.company ? (
+        <Section title="Company">
+          <Panel>
+            <dl className="grid grid-cols-2 gap-3 text-sm">
+              <Info label="Industry" value={data.company.industry} />
+              <Info label="CEO" value={data.company.ceo} />
+              <Info label="Founded" value={data.company.founded} />
+              <Info label="NSE / BSE" value={[data.company.nse, data.company.bse].filter(Boolean).join(" · ")} />
+            </dl>
+            {data.company.summary ? (
+              <p className="mt-4 text-sm leading-relaxed text-muted">{data.company.summary}</p>
+            ) : null}
+          </Panel>
+        </Section>
+      ) : null}
+
+      <Section title="Dividends">
+        {data?.dividends.length ? (
+          <Panel className="p-2">
+            {data.dividends.slice(0, 8).map((d) => (
+              <div key={d.t} className="flex items-center justify-between px-2 py-2 text-sm">
+                <span className="text-muted">{fmtDate(d.t)}</span>
+                <span className="tabular text-fg">{fmtCurrency(d.amount)}</span>
+              </div>
+            ))}
+          </Panel>
+        ) : (
+          <p className="text-sm text-muted">No dividend history in the last five years.</p>
+        )}
+      </Section>
+
+      <p className="mt-8 text-xs text-subtle">{DATA_NOTE}</p>
+      <p className="mt-2 text-xs text-subtle">{DISCLAIMER}</p>
+    </div>
+  );
+}
+
+function BadgeTone({ verdict }: { verdict: "Bullish" | "Bearish" | "Neutral" }) {
+  const cls =
+    verdict === "Bullish" ? "bg-up/15 text-up" : verdict === "Bearish" ? "bg-down/15 text-down" : "bg-surface-2 text-muted";
+  return <span className={cn("rounded-full px-2.5 py-0.5 text-[11px] font-medium uppercase tracking-wide", cls)}>{verdict}</span>;
+}
+
+function ScoreBar({ value }: { value: number }) {
+  return (
+    <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-surface-2">
+      <div className="h-full rounded-full bg-accent" style={{ width: `${Math.min(100, Math.max(0, value))}%` }} />
+    </div>
+  );
+}
+
+function Info({ label, value }: { label: string; value: string | null }) {
+  return (
+    <div>
+      <dt className="text-[11px] uppercase tracking-[0.14em] text-subtle">{label}</dt>
+      <dd className="mt-1 text-fg">{value || "N/A"}</dd>
+    </div>
+  );
+}

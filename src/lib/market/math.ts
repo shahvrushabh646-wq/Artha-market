@@ -1,0 +1,310 @@
+import type { Bar, StockScore, TechnicalSummary, Valuation } from "./types";
+
+export function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+export function pctBelowHigh(current: number | null, high: number | null): number | null {
+  if (current == null || high == null || high === 0) return null;
+  return round2(((high - current) / high) * 100);
+}
+
+export function pctAboveLow(current: number | null, low: number | null): number | null {
+  if (current == null || low == null || low === 0) return null;
+  return round2(((current - low) / low) * 100);
+}
+
+export function periodHighLow(bars: Bar[]): {
+  high: number | null;
+  highT: number | null;
+  low: number | null;
+  lowT: number | null;
+} {
+  if (!bars.length) return { high: null, highT: null, low: null, lowT: null };
+  let high = bars[0].h;
+  let highT = bars[0].t;
+  let low = bars[0].l;
+  let lowT = bars[0].t;
+  for (const b of bars) {
+    if (b.h > high) {
+      high = b.h;
+      highT = b.t;
+    }
+    if (b.l < low) {
+      low = b.l;
+      lowT = b.t;
+    }
+  }
+  return { high: round2(high), highT, low: round2(low), lowT };
+}
+
+export function customValuation(high5y: number | null, current: number | null): Valuation | null {
+  if (high5y == null || current == null) return null;
+  const price75 = round2(high5y * 0.25);
+  const price85 = round2(high5y * 0.15);
+  const price95 = round2(high5y * 0.05);
+  return {
+    high5y,
+    price75,
+    price85,
+    price95,
+    currentPrice: current,
+    signal: current <= price75 ? "BUY" : "WAIT",
+  };
+}
+
+export function optionalBelowHighLevels(high: number | null): { label: string; price: number }[] {
+  if (!high) return [];
+  return [10, 20, 25, 30, 50].map((pct) => ({
+    label: `${pct}% below high`,
+    price: round2(high * (1 - pct / 100)),
+  }));
+}
+
+export function sma(values: number[], window: number): number[] {
+  const out = Array<number>(values.length).fill(Number.NaN);
+  if (window <= 0 || values.length < window) return out;
+  let sum = 0;
+  for (let i = 0; i < values.length; i++) {
+    sum += values[i];
+    if (i >= window) sum -= values[i - window];
+    if (i >= window - 1) out[i] = sum / window;
+  }
+  return out;
+}
+
+export function lastValid(series: number[]): number | null {
+  for (let i = series.length - 1; i >= 0; i--) {
+    const v = series[i];
+    if (Number.isFinite(v)) return round2(v);
+  }
+  return null;
+}
+
+export function rsi(closes: number[], period = 14): number[] {
+  const out = Array<number>(closes.length).fill(Number.NaN);
+  if (closes.length < period + 1) return out;
+  const gains: number[] = [];
+  const losses: number[] = [];
+  for (let i = 1; i < closes.length; i++) {
+    const d = closes[i] - closes[i - 1];
+    gains.push(Math.max(d, 0));
+    losses.push(Math.max(-d, 0));
+  }
+  let avgG = 0;
+  let avgL = 0;
+  for (let i = 0; i < period; i++) {
+    avgG += gains[i];
+    avgL += losses[i];
+  }
+  avgG /= period;
+  avgL /= period;
+  const write = (idx: number, g: number, l: number) => {
+    out[idx] = l === 0 ? 100 : 100 - 100 / (1 + g / l);
+  };
+  write(period, avgG, avgL);
+  for (let i = period; i < gains.length; i++) {
+    avgG = (avgG * (period - 1) + gains[i]) / period;
+    avgL = (avgL * (period - 1) + losses[i]) / period;
+    write(i + 1, avgG, avgL);
+  }
+  return out;
+}
+
+export function rsiInterpretation(value: number | null): string {
+  if (value == null || Number.isNaN(value)) return "N/A";
+  if (value < 30) return "Oversold";
+  if (value < 50) return "Weak";
+  if (value <= 70) return "Constructive";
+  return "Overbought";
+}
+
+export function priceVsSma(price: number | null, smaValue: number | null): "Above" | "Below" | "At" | "N/A" {
+  if (price == null || smaValue == null || Number.isNaN(smaValue)) return "N/A";
+  if (price > smaValue) return "Above";
+  if (price < smaValue) return "Below";
+  return "At";
+}
+
+export function technicalSummary(
+  price: number | null,
+  sma20: number | null,
+  sma50: number | null,
+  sma200: number | null,
+  rsiValue: number | null,
+): TechnicalSummary {
+  let bullishPoints = 0;
+  let bearishPoints = 0;
+  const rules: string[] = [];
+
+  for (const [label, smaVal] of [
+    ["SMA 20", sma20],
+    ["SMA 50", sma50],
+    ["SMA 200", sma200],
+  ] as const) {
+    const rel = priceVsSma(price, smaVal);
+    if (rel === "Above") {
+      bullishPoints += 1;
+      rules.push(`Price above ${label} (+1 bullish)`);
+    } else if (rel === "Below") {
+      bearishPoints += 1;
+      rules.push(`Price below ${label} (+1 bearish)`);
+    }
+  }
+
+  if (rsiValue != null && !Number.isNaN(rsiValue)) {
+    if (rsiValue >= 50 && rsiValue <= 70) {
+      bullishPoints += 1;
+      rules.push("RSI in 50–70 zone (+1 bullish)");
+    } else if (rsiValue < 30) {
+      bearishPoints += 1;
+      rules.push("RSI < 30 oversold (+1 bearish)");
+    } else if (rsiValue > 70) {
+      bearishPoints += 1;
+      rules.push("RSI > 70 overbought (+1 bearish)");
+    }
+  }
+
+  const verdict: TechnicalSummary["verdict"] =
+    bullishPoints > bearishPoints ? "Bullish" : bearishPoints > bullishPoints ? "Bearish" : "Neutral";
+
+  return { verdict, bullishPoints, bearishPoints, rules };
+}
+
+export function supportResistance(bars: Bar[], lookback = 60): { support: number | null; resistance: number | null } {
+  if (!bars.length) return { support: null, resistance: null };
+  const recent = bars.slice(-lookback);
+  let support = recent[0].l;
+  let resistance = recent[0].h;
+  for (const b of recent) {
+    if (b.l < support) support = b.l;
+    if (b.h > resistance) resistance = b.h;
+  }
+  return { support: round2(support), resistance: round2(resistance) };
+}
+
+export function parseMetric(value: string | number | null | undefined): number | null {
+  if (value == null || value === "N/A") return null;
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  const s = String(value).replace(/,/g, "").replace(/₹/g, "").trim();
+  const m = s.match(/^([+-]?\d*\.?\d+)\s*(cr|lakh|l|%)?$/i);
+  if (!m) return null;
+  let n = Number.parseFloat(m[1]);
+  if (!Number.isFinite(n)) return null;
+  const u = (m[2] || "").toLowerCase();
+  if (u === "cr") n *= 1e7;
+  else if (u === "lakh" || u === "l") n *= 1e5;
+  return n;
+}
+
+export function stockScore(
+  tech: TechnicalSummary,
+  pe: number | null,
+  eps: number | null,
+  de: number | null,
+  valuation: Valuation | null,
+): StockScore {
+  const totalPts = tech.bullishPoints + tech.bearishPoints;
+  const technical = totalPts === 0 ? 0 : Math.round((tech.bullishPoints / totalPts) * 40);
+
+  let fundScore = 0;
+  let fundMax = 0;
+  if (pe != null) {
+    fundMax += 10;
+    fundScore += pe > 0 && pe < 35 ? 10 : 4;
+  }
+  if (eps != null) {
+    fundMax += 10;
+    fundScore += eps > 0 ? 10 : 2;
+  }
+  if (de != null) {
+    fundMax += 10;
+    const dePct = de < 5 ? de * 100 : de;
+    fundScore += dePct < 100 ? 10 : 4;
+  }
+  const fundamental = fundMax ? Math.round((fundScore / fundMax) * 30) : 0;
+  const valuationScore = valuation ? (valuation.signal === "BUY" ? 30 : 12) : 0;
+
+  return {
+    technical,
+    fundamental,
+    valuation: valuationScore,
+    total: technical + fundamental + valuationScore,
+  };
+}
+
+export function fmtCurrency(value: number | null | undefined, symbol = "₹", decimals = 2): string {
+  if (value == null || Number.isNaN(value)) return "N/A";
+  const abs = Math.abs(value).toLocaleString("en-IN", {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+  return `${value < 0 ? "-" : ""}${symbol}${abs}`;
+}
+
+export function fmtLarge(value: number | null | undefined, symbol = "₹"): string {
+  if (value == null || Number.isNaN(value)) return "N/A";
+  const abs = Math.abs(value);
+  const sign = value < 0 ? "-" : "";
+  if (abs >= 1e7) return `${sign}${symbol}${(value / 1e7).toLocaleString("en-IN", { maximumFractionDigits: 2 })} Cr`;
+  if (abs >= 1e5) return `${sign}${symbol}${(value / 1e5).toLocaleString("en-IN", { maximumFractionDigits: 2 })} L`;
+  return fmtCurrency(value, symbol);
+}
+
+export function fmtPercent(value: number | null | undefined, alreadyFraction = false): string {
+  if (value == null || Number.isNaN(value)) return "N/A";
+  const v = alreadyFraction ? value * 100 : value;
+  return `${v.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
+}
+
+export function fmtChange(value: number | null | undefined, decimals = 2): string {
+  if (value == null || Number.isNaN(value)) return "N/A";
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${value.toLocaleString("en-IN", { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}`;
+}
+
+export function fmtNumber(value: number | null | undefined, decimals = 2): string {
+  if (value == null || Number.isNaN(value)) return "N/A";
+  return value.toLocaleString("en-IN", { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+}
+
+export function fmtDate(ts: number | null | undefined): string {
+  if (ts == null) return "N/A";
+  return new Intl.DateTimeFormat("en-IN", {
+    timeZone: "Asia/Kolkata",
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(new Date(ts * 1000));
+}
+
+export type MarketClock = {
+  open: boolean;
+  label: string;
+  weekday: string;
+};
+
+export function getMarketClock(now = new Date()): MarketClock {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Kolkata",
+    weekday: "long",
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(now);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  const weekday = get("weekday");
+  const hour = Number(get("hour"));
+  const minute = Number(get("minute"));
+  const mins = hour * 60 + minute;
+  const isWeekend = weekday === "Saturday" || weekday === "Sunday";
+  const open = !isWeekend && mins >= 9 * 60 + 15 && mins <= 15 * 60 + 30;
+  const h12 = ((hour + 11) % 12) + 1;
+  const ampm = hour >= 12 ? "PM" : "AM";
+  const mm = String(minute).padStart(2, "0");
+  const label = `${weekday}, ${get("day")} ${get("month")} ${get("year")} · ${h12}:${mm} ${ampm} IST`;
+  return { open, label, weekday };
+}
