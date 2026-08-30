@@ -104,7 +104,7 @@ export function QuoteHeader({ quote }: { quote: Quote }) {
 
 export function SignalBadge({ signal }: { signal: "BUY" | "WAIT" | string }) {
   const buy = signal.includes("BUY");
-  return <Badge tone={buy ? "buy" : "wait"}>{buy ? "Buy zone" : "Wait"}</Badge>;
+  return <Badge tone={buy ? "buy" : "wait"}>{signal.includes("RULE") ? signal : buy ? "Buy zone" : "Wait"}</Badge>;
 }
 
 export function Empty({ title, body, action }: { title: string; body: string; action?: ReactNode }) {
