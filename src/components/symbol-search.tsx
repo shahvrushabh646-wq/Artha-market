@@ -28,7 +28,7 @@ export function SymbolSearch({ initial = "" }: { initial?: string }) {
   const localHits = localSearch(q);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setSearchQ(q.trim()), 300);
+    const timer = window.setTimeout(() => setSearchQ(q.trim()), 100);
     return () => window.clearTimeout(timer);
   }, [q]);
 
@@ -36,9 +36,10 @@ export function SymbolSearch({ initial = "" }: { initial?: string }) {
     queryKey: ["search", searchQ.toUpperCase()],
     queryFn: () => searchSymbols({ data: { q: searchQ } }),
     enabled: searchQ.length >= 2 && localHits.length === 0,
-    staleTime: 30_000,
-    gcTime: 5 * 60_000,
+    staleTime: 5 * 60_000,
+    gcTime: 15 * 60_000,
     refetchOnWindowFocus: false,
+    retry: false,
   });
 
   useEffect(() => {
