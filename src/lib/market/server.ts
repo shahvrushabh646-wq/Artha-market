@@ -17,6 +17,7 @@ async function getJson(url: string, headers?: HeadersInit): Promise<unknown> {
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
+
 async function cached<T>(key: string, ttl: number, fn: () => Promise<T>): Promise<T> {
   const hit = cache.get(key);
   if (hit && hit.exp > Date.now()) return hit.val as T;
@@ -25,13 +26,16 @@ async function cached<T>(key: string, ttl: number, fn: () => Promise<T>): Promis
   return value;
 }
 
-function emptyQuote(symbol: string): Quote { return { symbol, name: displaySymbol(symbol), price: null, previousClose: null, change: null, changePct: null, currency: "INR", exchange: null, high52w: null, low52w: null, volume: null, dayHigh: null, dayLow: null, ok: false }; }
+function emptyQuote(symbol: string): Quote {
+  return { symbol, name: displaySymbol(symbol), price: null, previousClose: null, change: null, changePct: null, currency: "INR", exchange: null, high52w: null, low52w: null, high5y: null, low5y: null, price75: null, signal75: null, volume: null, dayHigh: null, dayLow: null, ok: false };
+}
+
 function makeQuote(meta: YahooMeta, fallback: string): Quote {
   const price = number(meta.regularMarketPrice);
   const previous = number(meta.chartPreviousClose) ?? number(meta.previousClose);
   const change = price != null && previous != null ? Math.round((price - previous) * 100) / 100 : null;
   const changePct = number(meta.regularMarketChangePercent) ?? (change != null && previous ? Math.round(change / previous * 10000) / 100 : null);
-  return { symbol: string(meta.symbol) ?? fallback, name: string(meta.longName) ?? string(meta.shortName) ?? fallback, price, previousClose: previous, change, changePct, currency: string(meta.currency) ?? "INR", exchange: string(meta.fullExchangeName) ?? string(meta.exchangeName), high52w: number(meta.fiftyTwoWeekHigh), low52w: number(meta.fiftyTwoWeekLow), volume: number(meta.regularMarketVolume), dayHigh: number(meta.regularMarketDayHigh), dayLow: number(meta.regularMarketDayLow), ok: price != null };
+  return { symbol: string(meta.symbol) ?? fallback, name: string(meta.longName) ?? string(meta.shortName) ?? fallback, price, previousClose: previous, change, changePct, currency: string(meta.currency) ?? "INR", exchange: string(meta.fullExchangeName) ?? string(meta.exchangeName), high52w: number(meta.fiftyTwoWeekHigh), low52w: number(meta.fiftyTwoWeekLow), high5y: null, low5y: null, price75: null, signal75: null, volume: number(meta.regularMarketVolume), dayHigh: number(meta.regularMarketDayHigh), dayLow: number(meta.regularMarketDayLow), ok: price != null };
 }
 
 function parseYahoo(raw: unknown): { bars: Bar[]; meta: YahooMeta; dividends: Dividend[] } {
@@ -71,7 +75,7 @@ async function yahooChart(symbol: string, range: string, interval: string, event
 
 function quoteFromParsed(parsed: { bars: Bar[]; meta: YahooMeta }, symbol: string): Quote {
   const last = parsed.bars.at(-1);
-  const prev = parsed.bars.length > 1 ? parsed.bars.at(-2) : undefined;
+  const prev = parsed.bars.at(-2);
   return makeQuote({ ...parsed.meta, regularMarketPrice: number(parsed.meta.regularMarketPrice) ?? last?.c, chartPreviousClose: number(parsed.meta.chartPreviousClose) ?? number(parsed.meta.previousClose) ?? prev?.c }, symbol);
 }
 
@@ -82,54 +86,37 @@ async function nseQuote(symbol: string): Promise<Quote | null> {
     const raw = await cached(`nse:${bare}`, 30_000, async () => {
       const home = `https://www.nseindia.com/get-quotes/equity?symbol=${encodeURIComponent(bare)}`;
       try { await getJson(home, { Referer: "https://www.nseindia.com/", Accept: "text/html,*/*" }); } catch {}
-      return getJson(`https://www.nseindia.com/api/quote-equity?symbol=${encodeURIComponent(bare)}`, {
-        Referer: home,
-        "X-Requested-With": "XMLHttpRequest",
-        Accept: "application/json,text/plain,*/*",
-      });
+      return getJson(`https://www.nseindia.com/api/quote-equity?symbol=${encodeURIComponent(bare)}`, { Referer: home, "X-Requested-With": "XMLHttpRequest" });
     });
-    const root = record(raw);
-    const priceInfo = record(root?.priceInfo);
-    const metadata = record(root?.metadata);
-    const info = record(root?.info);
-    const price = number(priceInfo?.lastPrice);
+    const root = record(raw), p = record(root?.priceInfo), meta = record(root?.metadata), info = record(root?.info);
+    const price = number(p?.lastPrice);
     if (price == null) return null;
-    const previous = number(priceInfo?.previousClose) ?? number(priceInfo?.close);
-    const change = number(priceInfo?.change) ?? (previous != null ? price - previous : null);
-    const changePct = number(priceInfo?.pChange) ?? (change != null && previous ? change / previous * 100 : null);
-    const week = record(priceInfo?.weekHighLow);
-    return {
-      symbol: `${bare}.NS`,
-      name: string(metadata?.companyName) ?? string(info?.companyName) ?? bare,
-      price,
-      previousClose: previous,
-      change: change != null ? Math.round(change * 100) / 100 : null,
-      changePct: changePct != null ? Math.round(changePct * 100) / 100 : null,
-      currency: "INR",
-      exchange: "NSE",
-      high52w: number(week?.max),
-      low52w: number(week?.min),
-      volume: number(priceInfo?.totalTradedVolume),
-      dayHigh: number(priceInfo?.intraDayHighLow && record(priceInfo?.intraDayHighLow)?.max),
-      dayLow: number(priceInfo?.intraDayHighLow && record(priceInfo?.intraDayHighLow)?.min),
-      ok: true,
-    };
-  } catch {
-    return null;
-  }
+    const previous = number(p?.previousClose) ?? number(p?.close);
+    const change = number(p?.change) ?? (previous != null ? price - previous : null);
+    const changePct = number(p?.pChange) ?? (change != null && previous ? change / previous * 100 : null);
+    const week = record(p?.weekHighLow), intra = record(p?.intraDayHighLow);
+    return { symbol: `${bare}.NS`, name: string(meta?.companyName) ?? string(info?.companyName) ?? bare, price, previousClose: previous, change: change != null ? Math.round(change * 100) / 100 : null, changePct: changePct != null ? Math.round(changePct * 100) / 100 : null, currency: "INR", exchange: "NSE", high52w: number(week?.max), low52w: number(week?.min), high5y: null, low5y: null, price75: null, signal75: null, volume: number(p?.totalTradedVolume), dayHigh: number(intra?.max), dayLow: number(intra?.min), ok: true };
+  } catch { return null; }
 }
 
-async function yahooQuotes(symbols: string[]): Promise<Quote[]> {
-  const unique = [...new Set(symbols.filter(Boolean).map(normalizeSymbol))];
-  return Promise.all(unique.map(async symbol => {
-    for (const [range, interval] of [["1d", "1m"], ["5d", "1d"], ["1mo", "1d"]] as const) {
-      try {
-        const parsed = parseYahoo(await yahooChart(symbol, range, interval));
-        if (parsed.bars.length) return quoteFromParsed(parsed, symbol);
-      } catch {}
-    }
-    return (await nseQuote(symbol)) ?? emptyQuote(symbol);
-  }));
+async function latestQuote(symbol: string): Promise<Quote> {
+  for (const [range, interval] of [["1d", "1m"], ["5d", "1d"], ["1mo", "1d"]] as const) {
+    try { const parsed = parseYahoo(await yahooChart(symbol, range, interval)); if (parsed.bars.length) return quoteFromParsed(parsed, symbol); } catch {}
+  }
+  return (await nseQuote(symbol)) ?? emptyQuote(symbol);
+}
+
+async function withFiveYear(quote: Quote, symbol: string, bars?: Bar[]): Promise<Quote> {
+  let five = bars ?? [];
+  if (!five.length) {
+    try { five = parseYahoo(await yahooChart(symbol, "5y", "1d")).bars; } catch {}
+  }
+  if (!five.length) return quote;
+  const high5y = Math.max(...five.map(b => b.h));
+  const low5y = Math.min(...five.map(b => b.l));
+  const current = quote.price ?? five.at(-1)?.c ?? null;
+  const price75 = Math.round(high5y * 0.25 * 100) / 100;
+  return { ...quote, high5y, low5y, price75, signal75: current != null && current <= price75 ? "BUY" : "WAIT" };
 }
 
 function limitBars(bars: Bar[], period: ChartPeriod): Bar[] {
@@ -139,37 +126,39 @@ function limitBars(bars: Bar[], period: ChartPeriod): Bar[] {
 }
 
 export const fetchDashboard = createServerFn({ method: "POST" }).handler(async () => {
-  const [indexQuotes, moverQuotes] = await Promise.all([yahooQuotes(INDICES.map(i => i.symbol)), yahooQuotes([...MOVERS_UNIVERSE])]);
+  const [indexQuotes, moverQuotes] = await Promise.all([Promise.all(INDICES.map(i => latestQuote(i.symbol))), Promise.all(MOVERS_UNIVERSE.map(s => latestQuote(s)))]);
   const bySym = new Map(indexQuotes.map(q => [q.symbol, q]));
   const indices = INDICES.map(i => ({ name: i.name, short: i.short, quote: bySym.get(i.symbol) ?? emptyQuote(i.symbol) }));
   const movers = moverQuotes.filter(q => q.ok && q.changePct != null).sort((a, b) => (b.changePct ?? 0) - (a.changePct ?? 0));
   return { indices, gainers: movers.slice(0, 5), losers: [...movers].reverse().slice(0, 5) };
 });
 
-export const fetchQuotes = createServerFn({ method: "POST" }).validator((data: unknown) => z.object({ symbols: z.array(z.string()).max(40) }).parse(data)).handler(async ({ data }) => yahooQuotes(data.symbols));
+export const fetchQuotes = createServerFn({ method: "POST" }).validator((data: unknown) => z.object({ symbols: z.array(z.string()).max(40) }).parse(data)).handler(async ({ data }) => Promise.all(data.symbols.map(async raw => { const symbol = normalizeSymbol(raw); return withFiveYear(await latestQuote(symbol), symbol); })));
 
 export const fetchHistory = createServerFn({ method: "POST" }).validator((data: unknown) => z.object({ symbol: z.string().min(1).max(80), period: z.enum(CHART_PERIODS).default("1Y") }).parse(data)).handler(async ({ data }) => {
   const symbol = normalizeSymbol(data.symbol), spec = PERIOD_MAP[data.period];
-  const parsed = parseYahoo(await yahooChart(symbol, spec.range, spec.interval));
-  const quote = parsed.bars.length ? quoteFromParsed(parsed, symbol) : ((await nseQuote(symbol)) ?? emptyQuote(symbol));
+  let parsed = { bars: [] as Bar[], meta: {} as YahooMeta, dividends: [] as Dividend[] };
+  try { parsed = parseYahoo(await yahooChart(symbol, spec.range, spec.interval)); } catch {}
+  const quote = await withFiveYear(parsed.bars.length ? quoteFromParsed(parsed, symbol) : await latestQuote(symbol), symbol, parsed.bars.length && data.period === "5Y" ? parsed.bars : undefined);
   return { symbol, bars: limitBars(parsed.bars, data.period), quote };
 });
 
 export const fetchAnalysis = createServerFn({ method: "POST" }).validator((data: unknown) => z.object({ symbol: z.string().min(1).max(80), period: z.enum(CHART_PERIODS).default("1Y") }).parse(data)).handler(async ({ data }) => {
   const symbol = normalizeSymbol(data.symbol), spec = PERIOD_MAP[data.period];
-  const [fiveRaw, periodRaw] = await Promise.all([yahooChart(symbol, "5y", "1d", true), data.period === "1D" || data.period === "1W" ? yahooChart(symbol, spec.range, spec.interval) : Promise.resolve(null)]);
-  const five = parseYahoo(fiveRaw);
-  const period = periodRaw ? parseYahoo(periodRaw) : five;
+  const [fiveResult, periodResult] = await Promise.allSettled([yahooChart(symbol, "5y", "1d", true), data.period === "1D" || data.period === "1W" ? yahooChart(symbol, spec.range, spec.interval) : Promise.resolve(null)]);
+  const five = fiveResult.status === "fulfilled" ? parseYahoo(fiveResult.value) : { bars: [], meta: {}, dividends: [] };
+  const period = periodResult.status === "fulfilled" && periodResult.value ? parseYahoo(periodResult.value) : five;
   const source = five.bars.length ? five : period;
-  const quote = source.bars.length ? quoteFromParsed(source, symbol) : ((await nseQuote(symbol)) ?? emptyQuote(symbol));
+  const base = source.bars.length ? quoteFromParsed(source, symbol) : await latestQuote(symbol);
+  const quote = await withFiveYear(base, symbol, five.bars.length ? five.bars : undefined);
   const yearAgo = Date.now() / 1000 - 365 * 24 * 60 * 60;
   const bars1y = five.bars.filter(b => b.t >= yearAgo);
-  return { symbol, quote, bars: limitBars(period.bars, data.period), bars1y: bars1y.length ? bars1y : source.bars.slice(-260), bars5y: five.bars.length ? five.bars : source.bars, dividends: five.dividends, company: null, fundamentals: [], statements: [] };
+  return { symbol, quote, bars: limitBars(period.bars, data.period), bars1y: bars1y.length ? bars1y : source.bars.slice(-260), bars5y: five.bars.length ? five.bars : source.bars, dividends: five.dividends, company: null, fundamentals: [], statements: [], valuation: quote.high5y != null && quote.price75 != null && quote.price != null ? { high5y: quote.high5y, price75: quote.price75, price85: Math.round(quote.high5y * 0.15 * 100) / 100, price95: Math.round(quote.high5y * 0.05 * 100) / 100, currentPrice: quote.price, signal: quote.signal75 === "BUY" ? "BUY" : "WAIT" } : null };
 });
 
 export const fetchWatchPack = createServerFn({ method: "POST" }).validator((data: unknown) => z.object({ symbols: z.array(z.string()).max(20) }).parse(data)).handler(async ({ data }) => {
   const symbols = data.symbols.map(normalizeSymbol);
-  const quotes = await yahooQuotes(symbols);
+  const quotes = await Promise.all(symbols.map(async symbol => withFiveYear(await latestQuote(symbol), symbol)));
   const packs = await Promise.all(symbols.map(async symbol => {
     try { const [one, five] = await Promise.all([yahooChart(symbol, "1y", "1d"), yahooChart(symbol, "5y", "1wk")]); return { symbol, bars1y: parseYahoo(one).bars, bars5y: parseYahoo(five).bars }; }
     catch { return { symbol, bars1y: [] as Bar[], bars5y: [] as Bar[] }; }
@@ -178,14 +167,12 @@ export const fetchWatchPack = createServerFn({ method: "POST" }).validator((data
 });
 
 export const searchSymbols = createServerFn({ method: "POST" }).validator((data: unknown) => z.object({ q: z.string().min(1).max(80) }).parse(data)).handler(async ({ data }): Promise<SearchHit[]> => {
-  const query = data.q.trim();
-  const candidates = [query, `${query} NSE`, `${query} India`];
-  for (const term of candidates) {
+  const query = data.q.trim(), terms = [query, `${query} NSE`, `${query} India`];
+  for (const term of terms) {
     try {
       const params = new URLSearchParams({ q: term, quotesCount: "20", newsCount: "0", enableFuzzyQuery: "true" });
       let raw: unknown;
-      try { raw = await getJson(`https://query1.finance.yahoo.com/v1/finance/search?${params}`); }
-      catch { raw = await getJson(`https://query2.finance.yahoo.com/v1/finance/search?${params}`); }
+      try { raw = await getJson(`https://query1.finance.yahoo.com/v1/finance/search?${params}`); } catch { raw = await getJson(`https://query2.finance.yahoo.com/v1/finance/search?${params}`); }
       const root = record(raw), quotes = Array.isArray(root?.quotes) ? root.quotes : [], hits: SearchHit[] = [];
       for (const item of quotes) {
         const row = record(item), symbol = string(row?.symbol);
@@ -199,7 +186,7 @@ export const searchSymbols = createServerFn({ method: "POST" }).validator((data:
       if (hits.length) return hits;
     } catch {}
   }
-  const known: Record<string, string> = { RELIANCE: "RELIANCE.NS", "RELIANCE INDUSTRIES": "RELIANCE.NS", TCS: "TCS.NS", INFY: "INFY.NS", INFOSYS: "INFY.NS", HDFCBANK: "HDFCBANK.NS", "HDFC BANK": "HDFCBANK.NS", ICICIBANK: "ICICIBANK.NS", "ICICI BANK": "ICICIBANK.NS", SBIN: "SBIN.NS", "STATE BANK OF INDIA": "SBIN.NS", ITC: "ITC.NS", TATAMOTORS: "TATAMOTORS.NS", "TATA MOTORS": "TATAMOTORS.NS" };
+  const known: Record<string, string> = { RELIANCE: "RELIANCE.NS", "RELIANCE INDUSTRIES": "RELIANCE.NS", TCS: "TCS.NS", INFY: "INFY.NS", INFOSYS: "INFY.NS", HDFCBANK: "HDFCBANK.NS", "HDFC BANK": "HDFCBANK.NS", ICICIBANK: "ICICIBANK.NS", "ICICI BANK": "ICICIBANK.NS", SBIN: "SBIN.NS", "STATE BANK OF INDIA": "SBIN.NS", ITC: "ITC.NS", TATAMOTORS: "TATAMOTORS.NS", "TATA MOTORS": "TATAMOTORS.NS", LT: "LT.NS", "LARSEN & TOUBRO": "LT.NS", MARUTI: "MARUTI.NS", AXISBANK: "AXISBANK.NS", KOTAKBANK: "KOTAKBANK.NS", SUNPHARMA: "SUNPHARMA.NS", WIPRO: "WIPRO.NS", HINDUNILVR: "HINDUNILVR.NS", BHARTIARTL: "BHARTIARTL.NS", ASIANPAINT: "ASIANPAINT.NS", TITAN: "TITAN.NS" };
   const key = query.toUpperCase().replace(/\s+/g, " ");
   const normalized = known[key] ?? normalizeSymbol(query);
   return [{ symbol: normalized, name: displaySymbol(normalized), exchange: normalized.endsWith(".BO") ? "BSE" : "NSE" }];
