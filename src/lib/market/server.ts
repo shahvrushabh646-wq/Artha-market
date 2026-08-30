@@ -1,5 +1,6 @@
-  import { createServerFn } from "@tanstack/react-start";
+import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+
 import {
   CHART_PERIODS,
   INDICES,
@@ -9,100 +10,16 @@ import {
   normalizeSymbol,
   type ChartPeriod,
 } from "./config";
+
 import type {
   Bar,
-  CompanyInfo,
   Dividend,
-  FundamentalRow,
   Quote,
   SearchHit,
-  StatementRow,
 } from "./types";
 
 const UA =
-  "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36";
-
-type CacheEntry = {
-  exp: number;
-  val: unknown;
-};
-
-const mem = new Map<string, CacheEntry>();
-
-async function cached<T>(
-  key: string,
-  ttlMs: number,
-  fn: () => Promise<T>,
-): Promise<T> {
-  const hit = mem.get(key);
-
-  if (hit && hit.exp > Date.now()) {
-    return hit.val as T;
-  }
-
-  const val = await fn();
-
-  mem.set(key, {
-    exp: Date.now() + ttlMs,
-    val,
-  });
-
-  return val;
-}
-
-async function fetchJson(
-  url: string,
-  extra?: HeadersInit,
-): Promise<unknown> {
-  const run = async () => {
-    const res = await fetch(url, {
-      headers: {
-        "User-Agent": UA,
-        Accept: "application/json,text/plain,*/*",
-        ...extra,
-      },
-    });
-
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
-    }
-
-    return res.json() as Promise<unknown>;
-  };
-
-  try {
-    return await run();
-  } catch {
-    await new Promise((resolve) => setTimeout(resolve, 250));
-    return run();
-  }
-}
-
-function asRecord(v: unknown): Record<string, unknown> | null {
-  return v && typeof v === "object"
-    ? (v as Record<string, unknown>)
-    : null;
-}
-
-function num(v: unknown): number | null {
-  if (typeof v === "number" && Number.isFinite(v)) {
-    return v;
-  }
-
-  if (typeof v === "string" && v.trim()) {
-    const n = Number(v);
-
-    return Number.isFinite(n) ? n : null;
-  }
-
-  return null;
-}
-
-function str(v: unknown): string | null {
-  return typeof v === "string" && v.trim()
-    ? v
-    : null;
-}
+  "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/122 Safari/537.36";
 
 type YahooMeta = {
   currency?: string;
@@ -121,63 +38,163 @@ type YahooMeta = {
   chartPreviousClose?: number;
 };
 
-function quoteFromMeta(
-  meta: YahooMeta,
-  fallbackSymbol: string,
-): Quote {
-  const price = num(meta.regularMarketPrice);
-  const prev = num(meta.chartPreviousClose);
-  const changePct = num(meta.regularMarketChangePercent);
+type CacheEntry = {
+  exp: number;
+  val: unknown;
+};
 
-  const change =
-    price != null && prev != null
-      ? Math.round((price - prev) * 100) / 100
-      : null;
+const cache = new Map<string, CacheEntry>();
 
+function record(value: unknown): Record<string, unknown> | null {
+  if (value && typeof value === "object") {
+    return value as Record<string, unknown>;
+  }
+
+  return null;
+}
+
+function number(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === "string" && value.trim()) {
+    const n = Number(value);
+
+    return Number.isFinite(n) ? n : null;
+  }
+
+  return null;
+}
+
+function string(value: unknown): string | null {
+  return typeof value === "string" && value.trim()
+    ? value
+    : null;
+}
+
+async function getJson(
+  url: string,
+  headers?: HeadersInit,
+): Promise<unknown> {
+  const response = await fetch(url, {
+    headers: {
+      "User-Agent": UA,
+      Accept: "application/json,text/plain,*/*",
+      ...headers,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+
+  return response.json();
+}
+
+async function cached<T>(
+  key: string,
+  ttl: number,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const old = cache.get(key);
+
+  if (old && old.exp > Date.now()) {
+    return old.val as T;
+  }
+
+  const value = await fn();
+
+  cache.set(key, {
+    exp: Date.now() + ttl,
+    val: value,
+  });
+
+  return value;
+}
+
+function emptyQuote(symbol: string): Quote {
   return {
-    symbol: str(meta.symbol) ?? fallbackSymbol,
-
-    name:
-      str(meta.longName) ??
-      str(meta.shortName) ??
-      fallbackSymbol,
-
-    price,
-    previousClose: prev,
-    change,
-    changePct,
-
-    currency: str(meta.currency) ?? "INR",
-
-    exchange:
-      str(meta.fullExchangeName) ??
-      str(meta.exchangeName),
-
-    high52w: num(meta.fiftyTwoWeekHigh),
-    low52w: num(meta.fiftyTwoWeekLow),
-
-    volume: num(meta.regularMarketVolume),
-
-    dayHigh: num(meta.regularMarketDayHigh),
-    dayLow: num(meta.regularMarketDayLow),
-
-    ok: price != null,
+    symbol,
+    name: displaySymbol(symbol),
+    price: null,
+    previousClose: null,
+    change: null,
+    changePct: null,
+    currency: "INR",
+    exchange: null,
+    high52w: null,
+    low52w: null,
+    volume: null,
+    dayHigh: null,
+    dayLow: null,
+    ok: false,
   };
 }
 
-function parseBars(
+function makeQuote(
+  meta: YahooMeta,
+  fallback: string,
+): Quote {
+  const price = number(meta.regularMarketPrice);
+  const previous = number(meta.chartPreviousClose);
+
+  const change =
+    price !== null && previous !== null
+      ? Math.round((price - previous) * 100) / 100
+      : null;
+
+  const changePct = number(
+    meta.regularMarketChangePercent,
+  );
+
+  return {
+    symbol: string(meta.symbol) ?? fallback,
+
+    name:
+      string(meta.longName) ??
+      string(meta.shortName) ??
+      fallback,
+
+    price,
+    previousClose: previous,
+    change,
+    changePct,
+
+    currency:
+      string(meta.currency) ?? "INR",
+
+    exchange:
+      string(meta.fullExchangeName) ??
+      string(meta.exchangeName),
+
+    high52w: number(meta.fiftyTwoWeekHigh),
+    low52w: number(meta.fiftyTwoWeekLow),
+
+    volume: number(meta.regularMarketVolume),
+
+    dayHigh: number(meta.regularMarketDayHigh),
+    dayLow: number(meta.regularMarketDayLow),
+
+    ok: price !== null,
+  };
+}
+
+function parseYahoo(
   raw: unknown,
 ): {
   bars: Bar[];
   meta: YahooMeta;
   dividends: Dividend[];
 } {
-  const root = asRecord(raw);
-  const chart = asRecord(root?.chart);
+  const root = record(raw);
+  const chart = record(root?.chart);
 
-  const result = Array.isArray(chart?.result)
-    ? asRecord(chart.result[0])
-    : null;
+  const results = Array.isArray(chart?.result)
+    ? chart.result
+    : [];
+
+  const result = record(results[0]);
 
   if (!result) {
     return {
@@ -187,54 +204,57 @@ function parseBars(
     };
   }
 
-  const meta = (asRecord(result.meta) ?? {}) as YahooMeta;
+  const meta =
+    (record(result.meta) ?? {}) as YahooMeta;
 
-  const ts = Array.isArray(result.timestamp)
-    ? (result.timestamp as unknown[])
+  const timestamps = Array.isArray(result.timestamp)
+    ? result.timestamp
     : [];
 
-  const indicators = asRecord(result.indicators);
+  const indicators = record(result.indicators);
 
-  const quoteArr = Array.isArray(indicators?.quote)
-    ? asRecord(indicators.quote[0])
-    : null;
-
-  const open = Array.isArray(quoteArr?.open)
-    ? (quoteArr.open as unknown[])
+  const quotes = Array.isArray(indicators?.quote)
+    ? indicators.quote
     : [];
 
-  const high = Array.isArray(quoteArr?.high)
-    ? (quoteArr.high as unknown[])
+  const quote = record(quotes[0]);
+
+  const opens = Array.isArray(quote?.open)
+    ? quote.open
     : [];
 
-  const low = Array.isArray(quoteArr?.low)
-    ? (quoteArr.low as unknown[])
+  const highs = Array.isArray(quote?.high)
+    ? quote.high
     : [];
 
-  const close = Array.isArray(quoteArr?.close)
-    ? (quoteArr.close as unknown[])
+  const lows = Array.isArray(quote?.low)
+    ? quote.low
     : [];
 
-  const volume = Array.isArray(quoteArr?.volume)
-    ? (quoteArr.volume as unknown[])
+  const closes = Array.isArray(quote?.close)
+    ? quote.close
+    : [];
+
+  const volumes = Array.isArray(quote?.volume)
+    ? quote.volume
     : [];
 
   const bars: Bar[] = [];
 
-  for (let i = 0; i < ts.length; i++) {
-    const t = num(ts[i]);
-    const o = num(open[i]);
-    const h = num(high[i]);
-    const l = num(low[i]);
-    const c = num(close[i]);
-    const v = num(volume[i]) ?? 0;
+  for (let i = 0; i < timestamps.length; i++) {
+    const t = number(timestamps[i]);
+    const o = number(opens[i]);
+    const h = number(highs[i]);
+    const l = number(lows[i]);
+    const c = number(closes[i]);
+    const v = number(volumes[i]) ?? 0;
 
     if (
-      t == null ||
-      o == null ||
-      h == null ||
-      l == null ||
-      c == null
+      t === null ||
+      o === null ||
+      h === null ||
+      l === null ||
+      c === null
     ) {
       continue;
     }
@@ -249,28 +269,28 @@ function parseBars(
     });
   }
 
-  const events = asRecord(result.events);
-  const divs = asRecord(events?.dividends);
-
   const dividends: Dividend[] = [];
 
-  if (divs) {
-    for (const row of Object.values(divs)) {
-      const rec = asRecord(row);
+  const events = record(result.events);
+  const dividendMap = record(events?.dividends);
 
-      const amount = num(rec?.amount);
-      const date = num(rec?.date);
+  if (dividendMap) {
+    for (const item of Object.values(dividendMap)) {
+      const row = record(item);
 
-      if (amount != null && date != null) {
+      const amount = number(row?.amount);
+      const date = number(row?.date);
+
+      if (amount !== null && date !== null) {
         dividends.push({
           t: date,
           amount,
         });
       }
     }
-
-    dividends.sort((a, b) => b.t - a.t);
   }
+
+  dividends.sort((a, b) => b.t - a.t);
 
   return {
     bars,
@@ -284,87 +304,88 @@ async function yahooChart(
   range: string,
   interval: string,
   events = false,
-) {
-  const q = new URLSearchParams({
+): Promise<unknown> {
+  const params = new URLSearchParams({
     range,
     interval,
     includePrePost: "false",
   });
 
   if (events) {
-    q.set("events", "div");
+    params.set("events", "div");
   }
 
   const url =
     `https://query2.finance.yahoo.com/v8/finance/chart/` +
-    `${encodeURIComponent(symbol)}?${q}`;
+    `${encodeURIComponent(symbol)}?${params}`;
 
   return cached(
     `chart:${symbol}:${range}:${interval}:${events}`,
-    15 * 60_000,
-    () => fetchJson(url),
+    15 * 60 * 1000,
+    () => getJson(url),
   );
 }
 
-async function yahooSpark(
+async function yahooQuotes(
   symbols: string[],
 ): Promise<Quote[]> {
   const unique = [
     ...new Set(symbols.filter(Boolean)),
   ];
 
-  const out: Quote[] = [];
+  const output: Quote[] = [];
 
   for (let i = 0; i < unique.length; i += 20) {
     const chunk = unique.slice(i, i + 20);
 
-    const key = `spark:${chunk.join(",")}`;
+    const params = new URLSearchParams({
+      symbols: chunk.join(","),
+      range: "1d",
+      interval: "1d",
+    });
 
     const raw = await cached(
-      key,
-      45_000,
-      () => {
-        const q = new URLSearchParams({
-          symbols: chunk.join(","),
-          range: "1d",
-          interval: "1d",
-        });
-
-        return fetchJson(
-          `https://query2.finance.yahoo.com/v7/finance/spark?${q}`,
-        );
-      },
+      `spark:${chunk.join(",")}`,
+      45 * 1000,
+      () =>
+        getJson(
+          `https://query2.finance.yahoo.com/v7/finance/spark?${params}`,
+        ),
     );
 
-    const spark = asRecord(
-      asRecord(raw)?.spark,
-    );
+    const root = record(raw);
+    const spark = record(root?.spark);
 
-    const result = Array.isArray(spark?.result)
+    const results = Array.isArray(spark?.result)
       ? spark.result
       : [];
 
-    const bySym = new Map<string, Quote>();
+    const found = new Map<string, Quote>();
 
-    for (const item of result) {
-      const rec = asRecord(item);
+    for (const item of results) {
+      const row = record(item);
 
-      const symbol = str(rec?.symbol) ?? "";
+      const symbol =
+        string(row?.symbol) ?? "";
 
-      const response = Array.isArray(rec?.response)
-        ? asRecord(rec.response[0])
-        : null;
+      const responses = Array.isArray(
+        row?.response,
+      )
+        ? row.response
+        : [];
 
-      const meta = (asRecord(response?.meta) ??
-        {}) as YahooMeta;
+      const response = record(responses[0]);
 
-      const quote = quoteFromMeta(
+      const meta =
+        (record(response?.meta) ?? {}) as YahooMeta;
+
+      const quote = makeQuote(
         meta,
         symbol,
       );
 
       if (quote.symbol) {
-        bySym.set(
+        found.set(
           quote.symbol,
           quote,
         );
@@ -372,259 +393,17 @@ async function yahooSpark(
     }
 
     for (const symbol of chunk) {
-      out.push(
-        bySym.get(symbol) ??
+      output.push(
+        found.get(symbol) ??
           emptyQuote(symbol),
       );
     }
   }
 
-  return out;
+  return output;
 }
 
-function emptyQuote(symbol: string): Quote {
-  return {
-    symbol,
-
-    name: displaySymbol(symbol),
-
-    price: null,
-    previousClose: null,
-    change: null,
-    changePct: null,
-
-    currency: "INR",
-    exchange: null,
-
-    high52w: null,
-    low52w: null,
-
-    volume: null,
-
-    dayHigh: null,
-    dayLow: null,
-
-    ok: false,
-  };
-}
-
-type GrowwCompany = {
-  info: CompanyInfo;
-  fundamentals: FundamentalRow[];
-  statements: StatementRow[];
-};
-
-async function growwSearchId(
-  symbol: string,
-): Promise<string | null> {
-  const bare = displaySymbol(symbol);
-
-  return cached(
-    `groww-id:${bare}`,
-    6 * 60 * 60_000,
-    async () => {
-      try {
-        const raw = await fetchJson(
-          `https://groww.in/v1/api/search/v1/entity?query=${encodeURIComponent(
-            bare,
-          )}&page=0&size=8`,
-          {
-            Referer: "https://groww.in/",
-          },
-        );
-
-        const rec = asRecord(raw);
-
-        const content = Array.isArray(rec?.content)
-          ? rec.content
-          : [];
-
-        const stocks = content
-          .map(asRecord)
-          .filter(
-            (
-              x,
-            ): x is Record<string, unknown> =>
-              !!x &&
-              str(x.entity_type) ===
-                "Stocks",
-          );
-
-        const match =
-          stocks.find(
-            (s) =>
-              str(
-                s.nse_scrip_code,
-              )?.toUpperCase() === bare,
-          ) ??
-          stocks.find(
-            (s) =>
-              str(s.bse_scrip_code) ===
-              bare,
-          ) ??
-          stocks[0];
-
-        return (
-          str(match?.search_id) ??
-          str(match?.id)
-        );
-      } catch {
-        return null;
-      }
-    },
-  );
-}
-
-async function growwCompany(
-  symbol: string,
-): Promise<GrowwCompany | null> {
-  const id = await growwSearchId(symbol);
-
-  if (!id) {
-    return null;
-  }
-
-  return cached(
-    `groww-co:${id}`,
-    60 * 60_000,
-    async () => {
-      try {
-        const raw = await fetchJson(
-          `https://groww.in/v1/api/stocks_data/v1/company/search_id/${id}`,
-          {
-            Referer: "https://groww.in/",
-          },
-        );
-
-        const rec = asRecord(raw);
-
-        if (!rec) {
-          return null;
-        }
-
-        const header = asRecord(rec.header);
-        const details = asRecord(rec.details);
-
-        const info: CompanyInfo = {
-          name:
-            str(details?.fullName) ??
-            str(header?.displayName) ??
-            displaySymbol(symbol),
-
-          industry:
-            str(header?.industryName),
-
-          website:
-            str(details?.websiteUrl),
-
-          ceo:
-            str(details?.ceo) ??
-            str(details?.managingDirector),
-
-          founded:
-            str(details?.foundedYear),
-
-          summary:
-            str(details?.businessSummary),
-
-          nse:
-            str(header?.nseScriptCode),
-
-          bse:
-            str(header?.bseScriptCode),
-
-          logo:
-            str(header?.logoUrl),
-        };
-
-        const fundamentals: FundamentalRow[] = [];
-
-        if (Array.isArray(rec.fundamentals)) {
-          for (const row of rec.fundamentals) {
-            const r = asRecord(row);
-
-            const name = str(r?.name);
-            const value = str(r?.value);
-
-            if (name && value) {
-              fundamentals.push({
-                name,
-                value,
-              });
-            }
-          }
-        }
-
-        const statements: StatementRow[] = [];
-
-        const fs2 = asRecord(
-          rec.financialStatementV2,
-        );
-
-        const list = Array.isArray(
-          fs2?.CONSOLIDATED,
-        )
-          ? fs2.CONSOLIDATED
-          : Array.isArray(
-                rec.financialStatement,
-              )
-            ? rec.financialStatement
-            : [];
-
-        for (const row of list) {
-          const r = asRecord(row);
-
-          const title = str(r?.title);
-
-          if (!title) {
-            continue;
-          }
-
-          const yearly: Record<
-            string,
-            number | null
-          > = {};
-
-          const quarterly: Record<
-            string,
-            number | null
-          > = {};
-
-          const y = asRecord(r?.yearly);
-          const q = asRecord(r?.quarterly);
-
-          if (y) {
-            for (const [k, v] of Object.entries(y)) {
-              yearly[k] = num(v);
-            }
-          }
-
-          if (q) {
-            for (const [k, v] of Object.entries(q)) {
-              quarterly[k] = num(v);
-            }
-          }
-
-          statements.push({
-            title,
-            yearly,
-            quarterly,
-          });
-        }
-
-        return {
-          info,
-          fundamentals,
-          statements,
-        };
-      } catch {
-        return null;
-      }
-    },
-  );
-}
-
-function sliceBars(
+function limitBars(
   bars: Bar[],
   period: ChartPeriod,
 ): Bar[] {
@@ -634,16 +413,16 @@ function sliceBars(
 
   const cutoff =
     Date.now() / 1000 -
-    3 * 365 * 24 * 3600;
+    3 * 365 * 24 * 60 * 60;
 
   return bars.filter(
     (bar) => bar.t >= cutoff,
   );
 }
 
-/* =========================================================
+/* =========================
    DASHBOARD
-   ========================================================= */
+========================= */
 
 export const fetchDashboard =
   createServerFn({
@@ -651,40 +430,47 @@ export const fetchDashboard =
   }).handler(async () => {
     const indexSymbols =
       INDICES.map(
-        (i) => i.symbol,
+        (item) => item.symbol,
       );
 
     const [
       indexQuotes,
       moverQuotes,
     ] = await Promise.all([
-      yahooSpark(indexSymbols),
-      yahooSpark([
+      yahooQuotes(indexSymbols),
+      yahooQuotes([
         ...MOVERS_UNIVERSE,
       ]),
     ]);
 
-    const bySym = new Map(
+    const indexMap = new Map(
       indexQuotes.map(
-        (q) => [q.symbol, q],
+        (quote) => [
+          quote.symbol,
+          quote,
+        ],
       ),
     );
 
     const indices =
-      INDICES.map((i) => ({
-        name: i.name,
-        short: i.short,
+      INDICES.map((item) => ({
+        name: item.name,
+        short: item.short,
 
         quote:
-          bySym.get(i.symbol) ??
-          emptyQuote(i.symbol),
+          indexMap.get(
+            item.symbol,
+          ) ??
+          emptyQuote(
+            item.symbol,
+          ),
       }));
 
     const movers =
       moverQuotes.filter(
-        (q) =>
-          q.ok &&
-          q.changePct != null,
+        (quote) =>
+          quote.ok &&
+          quote.changePct !== null,
       );
 
     const sorted = [
@@ -708,15 +494,15 @@ export const fetchDashboard =
     };
   });
 
-/* =========================================================
+/* =========================
    QUOTES
-   ========================================================= */
+========================= */
 
 export const fetchQuotes =
   createServerFn({
     method: "POST",
   })
-    .validator((d: unknown) =>
+    .validator((data: unknown) =>
       z
         .object({
           symbols:
@@ -724,7 +510,7 @@ export const fetchQuotes =
               .array(z.string())
               .max(40),
         })
-        .parse(d),
+        .parse(data),
     )
     .handler(async ({ data }) => {
       const symbols =
@@ -732,18 +518,18 @@ export const fetchQuotes =
           normalizeSymbol,
         );
 
-      return yahooSpark(symbols);
+      return yahooQuotes(symbols);
     });
 
-/* =========================================================
+/* =========================
    HISTORY
-   ========================================================= */
+========================= */
 
 export const fetchHistory =
   createServerFn({
     method: "POST",
   })
-    .validator((d: unknown) =>
+    .validator((data: unknown) =>
       z
         .object({
           symbol:
@@ -757,7 +543,7 @@ export const fetchHistory =
               .enum(CHART_PERIODS)
               .default("1Y"),
         })
-        .parse(d),
+        .parse(data),
     )
     .handler(async ({ data }) => {
       const symbol =
@@ -768,40 +554,42 @@ export const fetchHistory =
       const spec =
         PERIOD_MAP[data.period];
 
-      const parsed =
-        parseBars(
-          await yahooChart(
-            symbol,
-            spec.range,
-            spec.interval,
-          ),
+      const raw =
+        await yahooChart(
+          symbol,
+          spec.range,
+          spec.interval,
         );
+
+      const parsed =
+        parseYahoo(raw);
 
       return {
         symbol,
 
-        bars: sliceBars(
-          parsed.bars,
-          data.period,
-        ),
+        bars:
+          limitBars(
+            parsed.bars,
+            data.period,
+          ),
 
         quote:
-          quoteFromMeta(
+          makeQuote(
             parsed.meta,
             symbol,
           ),
       };
     });
 
-/* =========================================================
+/* =========================
    ANALYSIS
-   ========================================================= */
+========================= */
 
 export const fetchAnalysis =
   createServerFn({
     method: "POST",
   })
-    .validator((d: unknown) =>
+    .validator((data: unknown) =>
       z
         .object({
           symbol:
@@ -815,7 +603,7 @@ export const fetchAnalysis =
               .enum(CHART_PERIODS)
               .default("1Y"),
         })
-        .parse(d),
+        .parse(data),
     )
     .handler(async ({ data }) => {
       const symbol =
@@ -826,72 +614,31 @@ export const fetchAnalysis =
       const spec =
         PERIOD_MAP[data.period];
 
-      const needIntraday =
-        data.period === "1D" ||
-        data.period === "1W";
-
-      const needMax =
-        data.period === "MAX";
-
-      const [
-        fiveYRaw,
-        periodRaw,
-        groww,
-      ] = await Promise.all([
-        yahooChart(
+      const raw =
+        await yahooChart(
           symbol,
-          "5y",
-          "1d",
+          spec.range,
+          spec.interval,
           true,
-        ),
-
-        needIntraday || needMax
-          ? yahooChart(
-              symbol,
-              spec.range,
-              spec.interval,
-            )
-          : Promise.resolve(null),
-
-        growwCompany(symbol),
-      ]);
-
-      const fiveY =
-        parseBars(fiveYRaw);
-
-      const period =
-        periodRaw
-          ? parseBars(periodRaw)
-          : fiveY;
-
-      const chartBars =
-        sliceBars(
-          period.bars,
-          data.period,
         );
+
+      const parsed =
+        parseYahoo(raw);
 
       const quote =
-        quoteFromMeta(
-          fiveY.meta
-            .regularMarketPrice
-            ? fiveY.meta
-            : period.meta,
+        makeQuote(
+          parsed.meta,
           symbol,
         );
 
-      if (groww?.info.name) {
-        quote.name =
-          groww.info.name;
-      }
-
-      const yearAgo =
+      const oneYearAgo =
         Date.now() / 1000 -
-        365 * 24 * 3600;
+        365 * 24 * 60 * 60;
 
       const bars1y =
-        fiveY.bars.filter(
+        parsed.bars.filter(
           (bar) =>
-            bar.t >= yearAgo,
+            bar.t >= oneYearAgo,
         );
 
       return {
@@ -899,41 +646,42 @@ export const fetchAnalysis =
 
         quote,
 
-        bars: chartBars,
+        bars:
+          limitBars(
+            parsed.bars,
+            data.period,
+          ),
 
         bars1y:
-          bars1y.length
+          bars1y.length > 0
             ? bars1y
-            : fiveY.bars.slice(
+            : parsed.bars.slice(
                 -260,
               ),
 
         bars5y:
-          fiveY.bars,
+          parsed.bars,
 
         dividends:
-          fiveY.dividends,
+          parsed.dividends,
 
-        company:
-          groww?.info ?? null,
+        company: null,
 
-        fundamentals:
-          groww?.fundamentals ?? [],
+        fundamentals: [],
 
-        statements:
-          groww?.statements ?? [],
+        statements: [],
       };
     });
 
-/* =========================================================
+/* =========================
    WATCHLIST
-   ========================================================= */
+========================= */
 
 export const fetchWatchPack =
   createServerFn({
     method: "POST",
   })
-    .validator((d: unknown) =>
+    .validator((data: unknown) =>
       z
         .object({
           symbols:
@@ -941,7 +689,7 @@ export const fetchWatchPack =
               .array(z.string())
               .max(20),
         })
-        .parse(d),
+        .parse(data),
     )
     .handler(async ({ data }) => {
       const symbols =
@@ -950,15 +698,15 @@ export const fetchWatchPack =
         );
 
       const quotes =
-        await yahooSpark(symbols);
+        await yahooQuotes(symbols);
 
       const packs =
         await Promise.all(
           symbols.map(
             async (symbol) => {
               try {
-                const parsed =
-                  parseBars(
+                const oneYear =
+                  parseYahoo(
                     await yahooChart(
                       symbol,
                       "1y",
@@ -966,8 +714,8 @@ export const fetchWatchPack =
                     ),
                   );
 
-                const five =
-                  parseBars(
+                const fiveYear =
+                  parseYahoo(
                     await yahooChart(
                       symbol,
                       "5y",
@@ -979,10 +727,10 @@ export const fetchWatchPack =
                   symbol,
 
                   bars1y:
-                    parsed.bars,
+                    oneYear.bars,
 
                   bars5y:
-                    five.bars,
+                    fiveYear.bars,
                 };
               } catch {
                 return {
@@ -1005,15 +753,15 @@ export const fetchWatchPack =
       };
     });
 
-/* =========================================================
+/* =========================
    SEARCH
-   ========================================================= */
+========================= */
 
 export const searchSymbols =
   createServerFn({
     method: "POST",
   })
-    .validator((d: unknown) =>
+    .validator((data: unknown) =>
       z
         .object({
           q:
@@ -1022,19 +770,108 @@ export const searchSymbols =
               .min(1)
               .max(40),
         })
-        .parse(d),
+        .parse(data),
     )
     .handler(
       async ({
         data,
       }): Promise<SearchHit[]> => {
-        const q =
+        const query =
           data.q.trim();
 
         try {
           const raw =
-            await fetchJson(
+            await getJson(
               `https://query2.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(
-                q,
-              )}&quotesCount=8&newsCount=0`,
- 
+                query,
+              )}&quotesCount=10&newsCount=0`,
+            );
+
+          const root =
+            record(raw);
+
+          const quotes =
+            Array.isArray(
+              root?.quotes,
+            )
+              ? root.quotes
+              : [];
+
+          const hits: SearchHit[] =
+            [];
+
+          for (const item of quotes) {
+            const row =
+              record(item);
+
+            const symbol =
+              string(row?.symbol);
+
+            if (!symbol) {
+              continue;
+            }
+
+            const type =
+              string(row?.quoteType);
+
+            const exchange =
+              string(row?.exchDisp) ??
+              "";
+
+            const indian =
+              symbol.endsWith(".NS") ||
+              symbol.endsWith(".BO") ||
+              /NSE|BSE|Bombay/i.test(
+                exchange,
+              );
+
+            if (
+              type &&
+              type !== "EQUITY" &&
+              type !== "INDEX"
+            ) {
+              continue;
+            }
+
+            if (
+              !indian &&
+              !symbol.startsWith("^")
+            ) {
+              continue;
+            }
+
+            hits.push({
+              symbol,
+
+              name:
+                string(row?.longname) ??
+                string(row?.shortname) ??
+                symbol,
+
+              exchange:
+                exchange ||
+                (symbol.endsWith(".BO")
+                  ? "BSE"
+                  : "NSE"),
+            });
+          }
+
+          if (hits.length > 0) {
+            return hits;
+          }
+        } catch {
+          // Use fallback below.
+        }
+
+        const normalized =
+          normalizeSymbol(query);
+
+        return [
+          {
+            symbol: normalized,
+            name: normalized,
+            exchange: "NSE",
+          },
+        ];
+      },
+    );
