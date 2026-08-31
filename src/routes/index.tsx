@@ -35,41 +35,54 @@ function Home() {
 
 function PreciousMetals() {
   const metals = useQuery({
-    queryKey: ["mcx-precious-metals"],
+    queryKey: ["precious-metals-inr"],
     queryFn: async () => {
-      const symbols = ["GC=F", "SI=F"];
-      const out: Record<string, number> = {};
-      for (const symbol of symbols) {
-        const res = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1d&interval=5m`, { cache: "no-store" });
-        if (!res.ok) continue;
-        const data = await res.json() as { chart?: { result?: Array<{ meta?: { regularMarketPrice?: number }; indicators?: { quote?: Array<{ close?: Array<number | null> }> } }> } };
-        const row = data.chart?.result?.[0];
-        const price = row?.meta?.regularMarketPrice ?? [...(row?.indicators?.quote?.[0]?.close ?? [])].reverse().find((v): v is number => typeof v === "number" && Number.isFinite(v));
-        if (price != null) out[symbol] = price;
-      }
-      if (!out["GC=F"] && !out["SI=F"]) throw new Error("Metal prices unavailable");
-      return out;
+      const url = `https://xaus.com/api/v1/spot?currency=INR&unit=gram&compact=1&fresh=${Date.now()}`;
+      const res = await fetch(url, { cache: "no-store", headers: { Accept: "application/json" } });
+      if (!res.ok) throw new Error("Precious metal prices unavailable");
+      const data = await res.json() as {
+        xau?: { price?: number };
+        silver_usd_oz?: number;
+        fx_rate?: number;
+        data_state?: { as_of?: string };
+        updated_at?: string;
+      };
+      const goldPerGram = typeof data.xau?.price === "number" && Number.isFinite(data.xau.price) ? data.xau.price : null;
+      const silverPerKg = typeof data.silver_usd_oz === "number" && Number.isFinite(data.silver_usd_oz) && typeof data.fx_rate === "number" && Number.isFinite(data.fx_rate)
+        ? (data.silver_usd_oz * data.fx_rate / 31.1034768) * 1000
+        : null;
+      if (goldPerGram == null && silverPerKg == null) throw new Error("Precious metal prices unavailable");
+      return { goldPerGram, silverPerKg, asOf: data.data_state?.as_of ?? data.updated_at ?? null };
     },
     staleTime: 30_000,
     refetchInterval: 30_000,
+    retry: 2,
   });
 
-  const goldUsd = metals.data?.["GC=F"];
-  const silverUsd = metals.data?.["SI=F"];
+  const gold10g = metals.data?.goldPerGram != null ? metals.data.goldPerGram * 10 : null;
+  const silverKg = metals.data?.silverPerKg ?? null;
   const cards = [
-    { name: "Gold", price: goldUsd, unit: "USD / oz" },
-    { name: "Silver", price: silverUsd, unit: "USD / oz" },
+    { name: "Gold", price: gold10g, unit: "₹ / 10g", note: "24K spot reference" },
+    { name: "Silver", price: silverKg, unit: "₹ / kg", note: "999 silver spot reference" },
   ];
+  const formatINR = (value: number) => `₹${Math.round(value).toLocaleString("en-IN")}`;
 
-  return <Section title="Gold & Silver" hint="Exchange futures reference prices — live where market data is available">
+  return <Section title="Gold & Silver" hint="Indian Rupee market reference prices">
     <div className="grid gap-3 sm:grid-cols-2">
       {cards.map((m) => <Panel key={m.name} className="p-4">
-        <div className="text-sm font-medium text-fg">{m.name}</div>
-        <div className="mt-1 text-xs text-muted">{m.unit}</div>
-        <div className="mt-2 text-2xl font-semibold tabular text-fg">{m.price != null ? `$${m.price.toFixed(2)}` : "—"}</div>
-        {m.price != null && <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">{[10,20,30,40].map((d) => <div key={d} className="rounded-lg bg-surface-2 p-2"><div className="text-xs text-muted">{d}% discount</div><div className="mt-1 tabular text-sm text-fg">${(m.price * (1-d/100)).toFixed(2)}</div></div>)}</div>}
+        <div className="flex items-start justify-between gap-3">
+          <div><div className="text-sm font-medium text-fg">{m.name}</div><div className="mt-1 text-xs text-muted">{m.note} · {m.unit}</div></div>
+          <div className="text-xs text-muted">INR</div>
+        </div>
+        <div className="mt-2 text-2xl font-semibold tabular text-fg">{m.price != null ? formatINR(m.price) : "—"}</div>
+        <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {[10, 20, 30, 40].map((d) => <div key={d} className="rounded-lg bg-surface-2 p-2">
+            <div className="text-xs text-muted">{d}% discount</div>
+            <div className="mt-1 tabular text-sm text-fg">{m.price != null ? formatINR(m.price * (1 - d / 100)) : "—"}</div>
+          </div>)}
+        </div>
       </Panel>)}
     </div>
-    <p className="mt-2 text-[11px] text-subtle">MCX domestic contracts are quoted in ₹/10g for gold and ₹/kg for silver; the feed above uses the exchange-traded futures reference available through the market-data feed. citeturn0search3turn0search7</p>
+    <p className="mt-2 text-[11px] text-subtle">Prices are shown in Indian rupees. Gold is displayed per 10g and silver per kg. The feed is a live precious-metals market reference; MCX tradable futures can differ from spot/reference prices.</p>
   </Section>;
 }
