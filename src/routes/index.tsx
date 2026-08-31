@@ -11,31 +11,46 @@ import { fetchDashboard } from "@/lib/market/server";
 export const Route = createFileRoute("/")({ component: Home });
 
 const fetchPreciousMetals = createServerFn({ method: "GET" }).handler(async () => {
-  const urls = [
-    "https://economictimes.indiatimes.com/commoditysummary/symbol-GOLD.cms",
-    "https://economictimes.indiatimes.com/commoditysummary/symbol-SILVER.cms",
-  ];
-  const pages = await Promise.all(urls.map(async (url) => {
-    try {
-      const res = await fetch(url, { cache: "no-store", headers: { "User-Agent": "Mozilla/5.0", Accept: "text/html,application/xhtml+xml,*/*" } });
-      return res.ok ? await res.text() : "";
-    } catch { return ""; }
-  }));
+  try {
+    const res = await fetch("https://api.oropocket.com/public/prices", { cache: "no-store", headers: { "User-Agent": "Mozilla/5.0", Accept: "application/json" } });
+    if (res.ok) {
+      const raw = await res.json() as unknown;
+      const root = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
+      const read = (name: string) => {
+        const item = root[name];
+        if (!item || typeof item !== "object") return null;
+        const obj = item as Record<string, unknown>;
+        for (const key of ["sell", "sell_price", "price", "buy", "buy_price", "rate"]) {
+          const value = obj[key];
+          if (typeof value === "number" && Number.isFinite(value) && value > 0) return value;
+        }
+        return null;
+      };
+      const goldGram = read("gold");
+      const silverGram = read("silver");
+      if (goldGram !== null || silverGram !== null) return { gold10g: goldGram !== null ? goldGram * 10 : null, silverKg: silverGram !== null ? silverGram * 1000 : null, source: "Oropocket · India rates" };
+    }
+  } catch {}
 
-  const clean = (html: string) => html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&#x20;/gi, " ").replace(/\s+/g, " ");
-  const goldText = clean(pages[0]);
-  const silverText = clean(pages[1]);
+  try {
+    const urls = ["https://economictimes.indiatimes.com/commoditysummary/symbol-GOLD.cms", "https://economictimes.indiatimes.com/commoditysummary/symbol-SILVER.cms"];
+    const pages = await Promise.all(urls.map(async (url) => {
+      try {
+        const res = await fetch(url, { cache: "no-store", headers: { "User-Agent": "Mozilla/5.0", Accept: "text/html,application/xhtml+xml,*/*" } });
+        return res.ok ? await res.text() : "";
+      } catch { return ""; }
+    }));
+    const clean = (html: string) => html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/\s+/g, " ");
+    const goldText = clean(pages[0]);
+    const silverText = clean(pages[1]);
+    const goldMatch = goldText.match(/MCX\s+[0-9:.]+\s*(?:AM|PM)?\s*IST\s*\|[\s\S]{0,80}?(\d{5,7}(?:\.\d+)?)\s+Per\s+10\s*GRMS/i);
+    const silverMatch = silverText.match(/MCX\s+[0-9:.]+\s*(?:AM|PM)?\s*IST\s*\|[\s\S]{0,80}?(\d{5,8}(?:\.\d+)?)\s+Per\s+1\s*KGS/i);
+    const gold = goldMatch ? Number(goldMatch[1]) : null;
+    const silver = silverMatch ? Number(silverMatch[1]) : null;
+    if (Number.isFinite(gold) || Number.isFinite(silver)) return { gold10g: Number.isFinite(gold) ? gold : null, silverKg: Number.isFinite(silver) ? silver : null, source: "Economic Times · MCX" };
+  } catch {}
 
-  // Economic Times publishes the current MCX contract as plain text like:
-  // "MCX 04.43PM IST | 31 Aug, 2026 155228.0 Per 10 GRMS".
-  // Match the actual published format rather than assuming the time is adjacent to the price.
-  const goldMatch = goldText.match(/MCX\s+[0-9:.]+\s*(?:AM|PM)?\s*IST\s*\|[\s\S]{0,80}?(\d{5,7}(?:\.\d+)?)\s+Per\s+10\s*GRMS/i);
-  const silverMatch = silverText.match(/MCX\s+[0-9:.]+\s*(?:AM|PM)?\s*IST\s*\|[\s\S]{0,80}?(\d{5,7}(?:\.\d+)?)\s+Per\s+1\s*KGS/i);
-
-  const gold = goldMatch ? Number(goldMatch[1]) : null;
-  const silver = silverMatch ? Number(silverMatch[1]) : null;
-  if (!Number.isFinite(gold) && !Number.isFinite(silver)) throw new Error("Economic Times MCX prices unavailable");
-  return { gold10g: Number.isFinite(gold) ? gold : null, silverKg: Number.isFinite(silver) ? silver : null, source: "Economic Times · MCX" };
+  throw new Error("Precious metal prices unavailable");
 });
 
 function Home() {
@@ -45,8 +60,8 @@ function Home() {
 }
 
 function PreciousMetals() {
-  const metals = useQuery({ queryKey: ["mcx-precious-metals-et-v3"], queryFn: () => fetchPreciousMetals(), staleTime: 30_000, refetchInterval: 30_000, retry: 2 });
+  const metals = useQuery({ queryKey: ["india-precious-metals"], queryFn: () => fetchPreciousMetals(), staleTime: 30_000, refetchInterval: 30_000, retry: 2 });
   const cards = [{ name: "Gold", price: metals.data?.gold10g ?? null, unit: "₹ / 10g" }, { name: "Silver", price: metals.data?.silverKg ?? null, unit: "₹ / kg" }];
   const formatINR = (value: number) => `₹${Math.round(value).toLocaleString("en-IN")}`;
-  return <Section title="Gold & Silver" hint="Current Indian MCX prices"><div className="grid gap-3 sm:grid-cols-2">{cards.map((m) => <Panel key={m.name} className="p-4"><div className="flex items-start justify-between gap-3"><div><div className="text-sm font-medium text-fg">{m.name}</div><div className="mt-1 text-xs text-muted">MCX · {m.unit}</div></div><div className="text-xs text-muted">INR</div></div><div className="mt-2 text-2xl font-semibold tabular text-fg">{m.price != null ? formatINR(m.price) : "—"}</div><div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">{[10, 20, 30, 40].map((d) => <div key={d} className="rounded-lg bg-surface-2 p-2"><div className="text-xs text-muted">{d}% discount</div><div className="mt-1 tabular text-sm text-fg">{m.price != null ? formatINR(m.price * (1 - d / 100)) : "—"}</div></div>)}</div></Panel>)}</div><p className="mt-2 text-[11px] text-subtle">Source: Economic Times MCX contract feed. Gold ₹/10g and Silver ₹/kg. Rates are exchange reference prices and can differ from jewellery-shop rates.</p></Section>;
+  return <Section title="Gold & Silver" hint="Current Indian bullion rates"><div className="grid gap-3 sm:grid-cols-2">{cards.map((m) => <Panel key={m.name} className="p-4"><div className="flex items-start justify-between gap-3"><div><div className="text-sm font-medium text-fg">{m.name}</div><div className="mt-1 text-xs text-muted">India · {m.unit}</div></div><div className="text-xs text-muted">INR</div></div><div className="mt-2 text-2xl font-semibold tabular text-fg">{m.price != null ? formatINR(m.price) : metals.isLoading ? "Loading…" : "—"}</div><div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">{[10, 20, 30, 40].map((d) => <div key={d} className="rounded-lg bg-surface-2 p-2"><div className="text-xs text-muted">{d}% discount</div><div className="mt-1 tabular text-sm text-fg">{m.price != null ? formatINR(m.price * (1 - d / 100)) : "—"}</div></div>)}</div></Panel>)}</div><p className="mt-2 text-[11px] text-subtle">Source: Oropocket India rates, with Economic Times MCX fallback. Gold ₹/10g and Silver ₹/kg. Rates are reference bullion prices and can differ from jewellery-shop rates.</p></Section>;
 }
