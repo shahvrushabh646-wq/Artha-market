@@ -10,23 +10,7 @@ import { fetchDashboard } from "@/lib/market/server";
 
 export const Route = createFileRoute("/")({ component: Home });
 
-type YahooChart = { chart?: { result?: Array<{ meta?: Record<string, unknown> }> } };
-type McxPage = { gold10g: number | null; silverKg: number | null };
-
-const yahoo = async (symbol: string): Promise<number | null> => {
-  for (const host of ["query1.finance.yahoo.com", "query2.finance.yahoo.com"]) {
-    try {
-      const u = new URL(`https://${host}/v8/finance/chart/${encodeURIComponent(symbol)}`);
-      u.searchParams.set("range", "1d");
-      u.searchParams.set("interval", "1m");
-      const r = await fetch(u, { cache: "no-store", headers: { "User-Agent": "Mozilla/5.0", Accept: "application/json" } });
-      if (!r.ok) continue;
-      const p = (await r.json() as YahooChart).chart?.result?.[0]?.meta?.regularMarketPrice;
-      if (typeof p === "number" && Number.isFinite(p) && p > 0) return p;
-    } catch {}
-  }
-  return null;
-};
+type McxPage = { gold10g: number | null; silverKg: number | null; asOf?: string | null };
 
 const fetchPage = async (url: string): Promise<string> => {
   try {
@@ -48,47 +32,53 @@ const parseNumber = (value: string): number | null => {
   return Number.isFinite(n) && n > 0 ? n : null;
 };
 
-const parseMcxGold = (html: string): number | null => {
-  const match = html.match(new RegExp("UL\\s+Product\\s+LTP\\s+([0-9,]+(?:\\.[0-9]+)?)", "i"));
-  return match ? parseNumber(match[1]) : null;
-};
+const parseOfficialMcx = (html: string): McxPage => {
+  const text = html
+    .replace(new RegExp("<script[\\s\\S]*?<\\/script>", "gi"), " ")
+    .replace(new RegExp("<style[\\s\\S]*?<\\/style>", "gi"), " ")
+    .replace(new RegExp("<[^>]+>", "g"), " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/\s+/g, " ");
 
-const parseEt = (html: string): McxPage => {
-  const text = html.replace(new RegExp("<script[\\s\\S]*?<\\/script>", "gi"), " ").replace(new RegExp("<style[\\s\\S]*?<\\/style>", "gi"), " ").replace(new RegExp("<[^>]+>", "g"), " ").replace(new RegExp("\\s+", "g"), " ");
-  const gold = text.match(new RegExp("MCX\\s+[0-9:.]+\\s*(?:AM|PM)?\\s*IST\\s*\\|[\\s\\S]{0,160}?(\\d{5,7}(?:\\.\\d+)?)\\s+Per\\s+10\\s*GRMS", "i"));
-  const silver = text.match(new RegExp("MCX\\s+[0-9:.]+\\s*(?:AM|PM)?\\s*IST\\s*\\|[\\s\\S]{0,160}?(\\d{5,8}(?:\\.\\d+)?)\\s+Per\\s+1\\s*KGS", "i"));
-  return { gold10g: gold ? parseNumber(gold[1]) : null, silverKg: silver ? parseNumber(silver[1]) : null };
+  // MCX official Gold quote exposes: Price Quote Unit = 10 GRMS and UL Product LTP = current INR/10g.
+  const goldMatch = text.match(new RegExp("Price Quote Unit\\s*:?\\s*10\\s*GRMS[\\s\\S]{0,900}?UL\\s+Product\\s+LTP\\s+([0-9,]+(?:\\.[0-9]+)?)", "i"));
+  const gold = goldMatch ? parseNumber(goldMatch[1]) : null;
+
+  // MCX official Most Active Puts/Calls page contains SILVER rows with their underlying MCX LTP.
+  // Accept either SILVER or SILVERM and capture the last numeric value on the row as UL Product LTP.
+  let silver: number | null = null;
+  const silverRows = [...text.matchAll(new RegExp("SILVER(?:M|100|MIC)?[\\s\\S]{0,500}?UL\\s+Product\\s+LTP\\s+([0-9,]+(?:\\.[0-9]+)?)", "gi"))];
+  for (const m of silverRows) {
+    const n = parseNumber(m[1]);
+    if (n != null && n > 100000) { silver = n; break; }
+  }
+
+  const asOf = text.match(new RegExp("As\\s+on\\s+([^|]{0,80}?)(?:Refresh|$)", "i"))?.[1]?.trim() ?? null;
+  return { gold10g: gold, silverKg: silver, asOf };
 };
 
 const fetchPreciousMetals = createServerFn({ method: "GET" }).handler(async () => {
-  // Yahoo Finance futures are the reliable live fallback and are converted from USD/oz to Indian INR units.
-  const [goldUsd, silverUsd, usdInr] = await Promise.all([yahoo("GC=F"), yahoo("SI=F"), yahoo("INR=X")]);
-  let gold10g = goldUsd != null && usdInr != null ? goldUsd * usdInr * 10 / 31.1034768 : null;
-  let silverKg = silverUsd != null && usdInr != null ? silverUsd * usdInr * 1000 / 31.1034768 : null;
-  let source = gold10g != null || silverKg != null ? "Yahoo Finance · live futures converted to INR" : "";
+  const [goldHtml, silverHtml] = await Promise.all([
+    fetchPage("https://www.mcxindia.com/en/market-data/get-quote/OPTFUT/GOLD/24MAR2026/CE/160000.00"),
+    fetchPage("https://www.mcxindia.com/market-data/most-active-puts-calls"),
+  ]);
 
-  // MCX official gold page is preferred when its live underlying LTP is available.
-  const mcxGoldHtml = await fetchPage("https://www.mcxindia.com/en/market-data/get-quote/OPTFUT/GOLD/24MAR2026/CE/160000.00");
-  const mcxGold = parseMcxGold(mcxGoldHtml);
-  if (mcxGold != null) {
-    gold10g = mcxGold;
-    source = "MCX · official Gold LTP + Yahoo Finance Silver";
+  const gold = parseOfficialMcx(goldHtml);
+  const silver = parseOfficialMcx(silverHtml);
+  const gold10g = gold.gold10g ?? silver.gold10g;
+  const silverKg = silver.silverKg ?? gold.silverKg;
+
+  if (gold10g == null && silverKg == null) {
+    throw new Error("Official MCX gold/silver prices unavailable");
   }
 
-  // Final fallback for either missing metal.
-  if (gold10g == null || silverKg == null) {
-    const [goldHtml, silverHtml] = await Promise.all([
-      fetchPage("https://economictimes.indiatimes.com/commoditysummary/symbol-GOLD.cms"),
-      fetchPage("https://economictimes.indiatimes.com/commoditysummary/symbol-SILVER.cms"),
-    ]);
-    const et = parseEt(goldHtml + " " + silverHtml);
-    if (gold10g == null && et.gold10g != null) gold10g = et.gold10g;
-    if (silverKg == null && et.silverKg != null) silverKg = et.silverKg;
-    if (et.gold10g != null || et.silverKg != null) source = "Economic Times · MCX reference fallback";
-  }
-
-  if (gold10g == null && silverKg == null) throw new Error("Live gold/silver price unavailable");
-  return { gold10g, silverKg, source };
+  return {
+    gold10g,
+    silverKg,
+    source: "MCX · official INR market data",
+    asOf: gold.asOf ?? silver.asOf ?? null,
+  };
 });
 
 function Home() {
@@ -98,8 +88,8 @@ function Home() {
 }
 
 function PreciousMetals() {
-  const metals = useQuery({ queryKey: ["precious-metals-live-v7"], queryFn: () => fetchPreciousMetals(), staleTime: 10_000, refetchInterval: 15_000, retry: 2 });
+  const metals = useQuery({ queryKey: ["precious-metals-mcx-official-v8"], queryFn: () => fetchPreciousMetals(), staleTime: 5_000, refetchInterval: 15_000, retry: 2 });
   const cards = [{ name: "Gold", price: metals.data?.gold10g ?? null, unit: "₹ / 10g" }, { name: "Silver", price: metals.data?.silverKg ?? null, unit: "₹ / kg" }];
   const formatINR = (value: number) => `₹${Math.round(value).toLocaleString("en-IN")}`;
-  return <Section title="Gold & Silver" hint="Live Indian INR reference prices"><div className="grid gap-3 sm:grid-cols-2">{cards.map((m) => <Panel key={m.name} className="p-4"><div className="flex items-start justify-between gap-3"><div><div className="text-sm font-medium text-fg">{m.name}</div><div className="mt-1 text-xs text-muted">Live · {m.unit}</div></div><div className="text-xs text-muted">INR</div></div><div className="mt-2 text-2xl font-semibold tabular text-fg">{m.price != null ? formatINR(m.price) : metals.isLoading ? "Loading…" : "—"}</div><div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">{[10, 20, 30, 40].map((d) => <div key={d} className="rounded-lg bg-surface-2 p-2"><div className="text-xs text-muted">{d}% discount</div><div className="mt-1 tabular text-sm text-fg">{m.price != null ? formatINR(m.price * (1 - d / 100)) : "—"}</div></div>)}</div></Panel>)}</div><p className="mt-2 text-[11px] text-subtle">Source: {metals.data?.source ?? "Live market feed"}. Gold is ₹/10g and Silver is ₹/kg. Rates are exchange/reference prices, not jewellery retail prices.</p></Section>;
+  return <Section title="Gold & Silver" hint="Official MCX prices in Indian rupees"><div className="grid gap-3 sm:grid-cols-2">{cards.map((m) => <Panel key={m.name} className="p-4"><div className="flex items-start justify-between gap-3"><div><div className="text-sm font-medium text-fg">{m.name}</div><div className="mt-1 text-xs text-muted">MCX · {m.unit}</div></div><div className="text-xs text-muted">INR</div></div><div className="mt-2 text-2xl font-semibold tabular text-fg">{m.price != null ? formatINR(m.price) : metals.isLoading ? "Loading…" : "—"}</div><div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">{[10, 20, 30, 40].map((d) => <div key={d} className="rounded-lg bg-surface-2 p-2"><div className="text-xs text-muted">{d}% discount</div><div className="mt-1 tabular text-sm text-fg">{m.price != null ? formatINR(m.price * (1 - d / 100)) : "—"}</div></div>)}</div></Panel>)}</div><p className="mt-2 text-[11px] text-subtle">Source: MCX official market data. Gold is quoted per 10g and Silver per kg. These are exchange reference prices, not jewellery retail prices{metals.data?.asOf ? ` · ${metals.data.asOf}` : ""}.</p></Section>;
 }
