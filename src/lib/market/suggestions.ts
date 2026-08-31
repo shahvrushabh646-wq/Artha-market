@@ -2,42 +2,51 @@ import { createServerFn } from "@tanstack/react-start";
 import { MOVERS_UNIVERSE } from "./config";
 import type { Quote } from "./types";
 
-const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/138 Safari/537.36";
+const UA = "Mozilla/5.0";
 const cache = { exp: 0, data: [] as Quote[] };
 
-type SparkRow = { symbol?: string; response?: Array<{ meta?: { regularMarketPrice?: number; currency?: string; exchangeName?: string; shortName?: string; longName?: string }; indicators?: { quote?: Array<{ high?: Array<number | null>; close?: Array<number | null> }> } }> };
-function chunk<T>(a: T[], n: number) { const r: T[][] = []; for (let i = 0; i < a.length; i += n) r.push(a.slice(i, i + n)); return r; }
+type SparkResult = { symbol?: string; response?: Array<{ meta?: { regularMarketPrice?: number; currency?: string; exchangeName?: string; shortName?: string; longName?: string }; timestamp?: number[]; indicators?: { quote?: Array<{ high?: Array<number | null>; close?: Array<number | null> }> } }> };
+type SparkPayload = { spark?: { result?: SparkResult[] } };
 
-async function scan(batch: string[]): Promise<Quote[]> {
-  const url = new URL("https://query1.finance.yahoo.com/v7/finance/spark");
-  url.searchParams.set("symbols", batch.join(",")); url.searchParams.set("range", "5y"); url.searchParams.set("interval", "1d"); url.searchParams.set("indicators", "quote");
-  let res = await fetch(url, { headers: { "User-Agent": UA, Accept: "application/json" }, cache: "no-store" });
-  if (!res.ok) { const fallback = new URL("https://query2.finance.yahoo.com/v7/finance/spark"); fallback.search = url.search; res = await fetch(fallback, { headers: { "User-Agent": UA, Accept: "application/json" }, cache: "no-store" }); }
-  if (!res.ok) return [];
-  const raw = await res.json() as { spark?: { result?: SparkRow[] } };
-  const out: Quote[] = [];
-  for (const item of raw.spark?.result ?? []) {
-    const p = item.response?.[0], m = p?.meta ?? {}, cl = p?.indicators?.quote?.[0]?.close ?? [], hi = p?.indicators?.quote?.[0]?.high ?? [];
-    const closes = cl.filter((x): x is number => typeof x === "number" && Number.isFinite(x));
-    const highs = hi.filter((x): x is number => typeof x === "number" && Number.isFinite(x));
-    const price = Number(m.regularMarketPrice ?? closes.at(-1));
-    if (!Number.isFinite(price) || !highs.length) continue;
-    const high5y = Math.max(...highs);
-    const threshold = high5y * (price < 20 ? 0.10 : 0.25);
-    if (price > threshold) continue;
-    const symbol = item.symbol ?? "";
-    out.push({ symbol, name: m.longName ?? m.shortName ?? symbol, price, previousClose: null, change: null, changePct: null, currency: m.currency ?? "INR", exchange: m.exchangeName ?? (symbol.endsWith(".BO") ? "BSE" : "NSE"), high52w: null, low52w: null, high5y, low5y: null, price75: Math.round(high5y * 0.25 * 100) / 100, signal75: "BUY", volume: null, dayHigh: null, dayLow: null, ok: true });
+function chunks<T>(items: T[], size: number) { const out: T[][] = []; for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size)); return out; }
+
+async function fetchBatch(symbols: string[]): Promise<SparkResult[]> {
+  const makeUrl = (host: string) => { const u = new URL(`https://${host}/v7/finance/spark`); u.searchParams.set("symbols", symbols.join(",")); u.searchParams.set("range", "5y"); u.searchParams.set("interval", "1d"); u.searchParams.set("indicators", "quote"); return u; };
+  for (const host of ["query1.finance.yahoo.com", "query2.finance.yahoo.com"]) {
+    try {
+      const res = await fetch(makeUrl(host), { headers: { "User-Agent": UA, Accept: "application/json" }, cache: "no-store" });
+      if (!res.ok) continue;
+      const raw = await res.json() as SparkPayload;
+      if (Array.isArray(raw.spark?.result)) return raw.spark.result;
+    } catch {}
   }
-  return out;
+  return [];
 }
 
-async function getSuggestions() {
+async function getSuggestions(): Promise<Quote[]> {
   if (cache.exp > Date.now()) return cache.data;
   const symbols = [...new Set(MOVERS_UNIVERSE.map(String))];
   const result: Quote[] = [];
-  for (const batch of chunk(symbols, 50)) { try { result.push(...await scan(batch)); } catch {} }
+  for (const batch of chunks(symbols, 20)) {
+    const rows = await fetchBatch(batch);
+    for (const item of rows) {
+      const response = item.response?.[0];
+      const meta = response?.meta ?? {};
+      const closes = (response?.indicators?.quote?.[0]?.close ?? []).filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+      const highs = (response?.indicators?.quote?.[0]?.high ?? []).filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+      const price = Number(meta.regularMarketPrice ?? closes.at(-1));
+      if (!Number.isFinite(price) || highs.length === 0) continue;
+      const high5y = Math.max(...highs);
+      // ₹20+ stocks trigger at 25% of 5Y high. Stocks below ₹20 trigger at 10% of 5Y high.
+      const isBelow20 = price < 20;
+      const threshold = high5y * (isBelow20 ? 0.10 : 0.25);
+      if (price > threshold) continue;
+      const symbol = item.symbol ?? "";
+      result.push({ symbol, name: meta.longName ?? meta.shortName ?? symbol, price, previousClose: null, change: null, changePct: null, currency: meta.currency ?? "INR", exchange: meta.exchangeName ?? (symbol.endsWith(".BO") ? "BSE" : "NSE"), high52w: null, low52w: null, high5y, low5y: null, price75: Math.round(high5y * 0.25 * 100) / 100, signal75: "BUY", volume: null, dayHigh: null, dayLow: null, ok: true });
+    }
+  }
   const unique = new Map(result.map(q => [q.symbol, q]));
-  cache.data = [...unique.values()].sort((a, b) => (a.symbol ?? "").localeCompare(b.symbol ?? ""));
+  cache.data = [...unique.values()].sort((a, b) => a.symbol.localeCompare(b.symbol));
   cache.exp = Date.now() + 300_000;
   return cache.data;
 }
