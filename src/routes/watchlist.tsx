@@ -37,19 +37,22 @@ function WatchPage() {
   const rows = useMemo(() => {
     const quotes = new Map((pack.data?.quotes ?? []).map((q) => [q.symbol, q]));
     const hist = new Map((pack.data?.packs ?? []).map((p) => [p.symbol, p]));
-    return watchlist.map((symbol) => {
-      const q = quotes.get(symbol);
-      const h = hist.get(symbol);
-      const closes = (h?.bars1y ?? []).map((b) => b.c);
-      const s20 = lastValid(sma(closes, 20));
-      const s50 = lastValid(sma(closes, 50));
-      const s200 = lastValid(sma(closes, 200));
-      const r = lastValid(rsi(closes, 14));
-      const hl1 = periodHighLow(h?.bars1y ?? []);
-      const hl5 = periodHighLow(h?.bars5y ?? []);
-      const val = customValuation(hl5.high, q?.price ?? null);
-      return { symbol, q, s20, s50, s200, r, hl1, signal: val?.signal ?? null };
-    });
+
+    return [...watchlist]
+      .sort((a, b) => displaySymbol(a).localeCompare(displaySymbol(b), undefined, { sensitivity: "base" }))
+      .map((symbol) => {
+        const q = quotes.get(symbol);
+        const h = hist.get(symbol);
+        const closes = (h?.bars1y ?? []).map((b) => b.c);
+        const s20 = lastValid(sma(closes, 20));
+        const s50 = lastValid(sma(closes, 50));
+        const s200 = lastValid(sma(closes, 200));
+        const r = lastValid(rsi(closes, 14));
+        const hl1 = periodHighLow(h?.bars1y ?? []);
+        const hl5 = periodHighLow(h?.bars5y ?? []);
+        const val = customValuation(hl5.high, q?.price ?? null);
+        return { symbol, q, s20, s50, s200, r, hl1, signal: val?.signal ?? null };
+      });
   }, [pack.data, watchlist]);
 
   return (
