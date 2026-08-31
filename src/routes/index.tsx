@@ -9,32 +9,22 @@ import { getMarketClock } from "@/lib/market/math";
 import { fetchDashboard } from "@/lib/market/server";
 
 export const Route = createFileRoute("/")({ component: Home });
-
 function num(v: unknown) { const x = Number(String(v ?? "").replace(/,/g, "")); return Number.isFinite(x) && x > 0 ? x : null; }
-
 const fetchPreciousMetals = createServerFn({ method: "GET" }).handler(async () => {
-  const key = process.env.METALS_DEV_API_KEY;
-  if (!key) throw new Error("METALS_DEV_API_KEY is not configured");
-  const u = new URL("https://api.metals.dev/v1/latest");
-  u.searchParams.set("api_key", key); u.searchParams.set("currency", "INR"); u.searchParams.set("unit", "g");
-  const res = await fetch(u, { cache: "no-store", headers: { Accept: "application/json" } });
-  if (!res.ok) throw new Error(`Metals.Dev HTTP ${res.status}`);
-  const raw = await res.json() as { status?: string; error_message?: string; timestamp?: string; metals?: Record<string, unknown> };
-  if (raw.status !== "success") throw new Error(raw.error_message || "Metals.Dev returned failure");
-  const goldPerGram = num(raw.metals?.mcx_gold) ?? num(raw.metals?.gold);
-  const silverPerGram = num(raw.metals?.mcx_silver) ?? num(raw.metals?.silver);
+  const key = process.env.METALS_DEV_API_KEY; if (!key) throw new Error("METALS_DEV_API_KEY is not configured");
+  const u = new URL("https://api.metals.dev/v1/latest"); u.searchParams.set("api_key", key); u.searchParams.set("currency", "INR"); u.searchParams.set("unit", "g");
+  const res = await fetch(u, { cache: "no-store", headers: { Accept: "application/json" } }); if (!res.ok) throw new Error(`Metals.Dev HTTP ${res.status}`);
+  const raw = await res.json() as { status?: string; error_message?: string; timestamp?: string; metals?: Record<string, unknown> }; if (raw.status !== "success") throw new Error(raw.error_message || "Metals.Dev returned failure");
+  const goldPerGram = num(raw.metals?.mcx_gold) ?? num(raw.metals?.gold); const silverPerGram = num(raw.metals?.mcx_silver) ?? num(raw.metals?.silver);
   if (goldPerGram == null || silverPerGram == null) throw new Error("Gold/Silver data unavailable");
   return { gold10g: goldPerGram * 10, silverKg: silverPerGram * 1000, source: "Metals.Dev · MCX", asOf: raw.timestamp ?? new Date().toISOString() };
 });
-
 function Home() {
   const clock = getMarketClock(); const dash = useQuery({ queryKey: ["dashboard"], queryFn: () => fetchDashboard(), refetchInterval: 60000 });
   return <div><p className="text-xs uppercase tracking-[0.2em] text-subtle">Indian cash market</p><div className="flex items-start justify-between gap-3"><div><h1 className="mt-1 font-display text-3xl tracking-tight text-fg">The tape, on your phone.</h1><p className="mt-2 max-w-xl text-sm text-muted">{clock.label}</p></div><Link to="/suggestions" className="flex h-11 shrink-0 items-center gap-2 rounded-xl bg-accent px-3 text-sm font-medium text-accent-fg shadow-[var(--shadow-border)]"><Lightbulb className="size-4" /> Suggestions</Link></div><div className="mt-5"><SymbolSearch /></div><PreciousMetals /><Section title="Overview" hint="NIFTY, Sensex and sector indices">{dash.isLoading ? <div className="flex gap-2 overflow-x-auto pb-1">{Array.from({ length: 5 }).map((_, i) => <SkeletonBlock key={i} className="h-24 min-w-[9.5rem] flex-1" />)}</div> : dash.isError ? <Panel><p className="text-sm text-muted">Index data is unavailable right now. Pull to refresh in a minute.</p></Panel> : <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:grid sm:grid-cols-5 sm:overflow-visible sm:px-0">{dash.data?.indices.map(row => <IndexCard key={row.quote.symbol} name={row.short} quote={row.quote} />)}</div>}</Section><Section title="Market movers" hint="From a liquid large-cap NSE basket — not a full-exchange screener"><div className="grid gap-3 sm:grid-cols-2"><Panel className="p-2"><div className="px-2 pb-1 pt-2 text-[11px] uppercase tracking-[0.16em] text-up">Top gainers</div>{dash.data?.gainers.map(q => <MoverRow key={q.symbol} quote={q} />)}</Panel><Panel className="p-2"><div className="px-2 pb-1 pt-2 text-[11px] uppercase tracking-[0.16em] text-down">Top losers</div>{dash.data?.losers.map(q => <MoverRow key={q.symbol} quote={q} />)}</Panel></div></Section><p className="mt-8 text-xs text-subtle">{DATA_NOTE}</p></div>;
 }
-
 function PreciousMetals() {
-  const metals = useQuery({ queryKey: ["precious-metals-mcx-metalsdev-v2"], queryFn: () => fetchPreciousMetals(), staleTime: 5 * 60_000, refetchInterval: 5 * 60_000, refetchOnWindowFocus: false, retry: 1 });
-  const cards = [{ name: "Gold", price: metals.data?.gold10g ?? null, unit: "₹ / 10g" }, { name: "Silver", price: metals.data?.silverKg ?? null, unit: "₹ / kg" }];
-  const formatINR = (value: number) => `₹${Math.round(value).toLocaleString("en-IN")}`;
-  return <Section title="Gold & Silver" hint="Live MCX-linked price in INR"><div className="grid gap-3 sm:grid-cols-2">{cards.map(m => <Panel key={m.name} className="p-4"><div className="flex items-start justify-between gap-3"><div><div className="text-sm font-medium text-fg">{m.name}</div><div className="mt-1 text-xs text-muted">MCX · {m.unit}</div></div><div className="text-xs text-muted">INR</div></div><div className="mt-2 text-2xl font-semibold tabular text-fg">{m.price != null ? formatINR(m.price) : metals.isLoading ? "Loading…" : "Price unavailable"}</div><div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">{[10,20,30,40].map(d => <div key={d} className="rounded-lg bg-surface-2 p-2"><div className="text-xs text-muted">{d}% discount</div><div className="mt-1 tabular text-sm text-fg">{m.price != null ? formatINR(m.price * (1-d/100)) : "—"}</div></div>)}</div></Panel>)}</div><p className="mt-2 text-[11px] text-subtle">Source: Metals.Dev MCX-linked feed. Cached for 5 minutes to protect the free API quota. Gold ₹/10g and Silver ₹/kg.</p></Section>;
+  const metals = useQuery({ queryKey: ["precious-metals-mcx-metalsdev-v3"], queryFn: () => fetchPreciousMetals(), staleTime: 60 * 60_000, refetchInterval: 60 * 60_000, refetchOnWindowFocus: false, retry: 1, gcTime: 2 * 60 * 60_000 });
+  const cards = [{ name: "Gold", price: metals.data?.gold10g ?? null, unit: "₹ / 10g" }, { name: "Silver", price: metals.data?.silverKg ?? null, unit: "₹ / kg" }]; const formatINR = (value: number) => `₹${Math.round(value).toLocaleString("en-IN")}`;
+  return <Section title="Gold & Silver" hint="MCX-linked price in INR"><div className="grid gap-3 sm:grid-cols-2">{cards.map(m => <Panel key={m.name} className="p-4"><div className="flex items-start justify-between gap-3"><div><div className="text-sm font-medium text-fg">{m.name}</div><div className="mt-1 text-xs text-muted">MCX · {m.unit}</div></div><div className="text-xs text-muted">INR</div></div><div className="mt-2 text-2xl font-semibold tabular text-fg">{m.price != null ? formatINR(m.price) : metals.isLoading ? "Loading…" : "Price unavailable"}</div><div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">{[10,20,30,40].map(d => <div key={d} className="rounded-lg bg-surface-2 p-2"><div className="text-xs text-muted">{d}% discount</div><div className="mt-1 tabular text-sm text-fg">{m.price != null ? formatINR(m.price * (1-d/100)) : "—"}</div></div>)}</div></Panel>)}</div><p className="mt-2 text-[11px] text-subtle">Source: Metals.Dev MCX-linked feed. Cached for 1 hour to conserve API quota. Gold ₹/10g and Silver ₹/kg.</p></Section>;
 }
