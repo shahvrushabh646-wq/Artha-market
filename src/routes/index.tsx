@@ -11,43 +11,39 @@ import { fetchDashboard } from "@/lib/market/server";
 export const Route = createFileRoute("/")({ component: Home });
 
 type YahooChart = { chart?: { result?: Array<{ meta?: Record<string, unknown> }> } };
-
-const fetchYahooPrice = async (symbol: string): Promise<number | null> => {
-  for (const host of ["query1.finance.yahoo.com", "query2.finance.yahoo.com"]) {
-    try {
-      const u = new URL(`https://${host}/v8/finance/chart/${encodeURIComponent(symbol)}`);
-      u.searchParams.set("range", "1d");
-      u.searchParams.set("interval", "1m");
-      const res = await fetch(u, { cache: "no-store", headers: { "User-Agent": "Mozilla/5.0", Accept: "application/json" } });
-      if (!res.ok) continue;
-      const raw = await res.json() as YahooChart;
-      const meta = raw.chart?.result?.[0]?.meta;
-      const price = meta?.regularMarketPrice;
-      if (typeof price === "number" && Number.isFinite(price) && price > 0) return price;
-    } catch {}
-  }
-  return null;
-};
+const clean = (s: string) => s.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/\s+/g, " ");
+const findINR = (s: string, re: RegExp) => { const m = s.match(re); if (!m) return null; const n = Number(m[1].replace(/,/g, "")); return Number.isFinite(n) && n > 0 ? n : null; };
+const yahoo = async (symbol: string) => { for (const host of ["query1.finance.yahoo.com", "query2.finance.yahoo.com"]) { try { const u = new URL(`https://${host}/v8/finance/chart/${encodeURIComponent(symbol)}`); u.searchParams.set("range", "1d"); u.searchParams.set("interval", "1m"); const r = await fetch(u, { cache: "no-store", headers: { "User-Agent": "Mozilla/5.0", Accept: "application/json" } }); if (!r.ok) continue; const p = (await r.json() as YahooChart).chart?.result?.[0]?.meta?.regularMarketPrice; if (typeof p === "number" && Number.isFinite(p) && p > 0) return p; } catch {} } return null; };
 
 const fetchPreciousMetals = createServerFn({ method: "GET" }).handler(async () => {
-  // Use Yahoo Finance's actively traded gold/silver futures and USD/INR FX quote.
-  // Convert USD per troy ounce into Indian rupees per 10g / kg.
-  const [goldUsd, silverUsd, usdinr] = await Promise.all([
-    fetchYahooPrice("GC=F"),
-    fetchYahooPrice("SI=F"),
-    fetchYahooPrice("INR=X"),
-  ]);
-
-  const OZ_GRAMS = 31.1034768;
-  const gold10g = goldUsd != null && usdinr != null ? goldUsd * 10 / OZ_GRAMS * usdinr : null;
-  const silverKg = silverUsd != null && usdinr != null ? silverUsd * 1000 / OZ_GRAMS * usdinr : null;
-
-  if (gold10g == null && silverKg == null) throw new Error("Live precious metal market data unavailable");
-  return {
-    gold10g,
-    silverKg,
-    source: "Yahoo Finance · Gold/Silver futures + USD/INR",
-  };
+  let gold10g: number | null = null, silverKg: number | null = null, source = "Moneycontrol · India rates";
+  try {
+    const [gr, sr] = await Promise.all([
+      fetch("https://www.moneycontrol.com/news/gold-rates-today/", { cache: "no-store", headers: { "User-Agent": "Mozilla/5.0", Accept: "text/html,*/*" } }),
+      fetch("https://www.moneycontrol.com/news/silver-rates-today/", { cache: "no-store", headers: { "User-Agent": "Mozilla/5.0", Accept: "text/html,*/*" } }),
+    ]);
+    const [g, s] = await Promise.all([gr.ok ? gr.text() : "", sr.ok ? sr.text() : ""]);
+    const gt = clean(g), st = clean(s);
+    gold10g = findINR(gt, /Current Price\s*\(24 Carat \/ 10 Gram\)\s*₹?\s*([\d,]+(?:\.\d+)?)/i) ?? findINR(gt, /24 Carat[^\d]{0,120}10 Gram[^\d]{0,80}₹?\s*([\d,]+(?:\.\d+)?)/i);
+    silverKg = findINR(st, /Current Price\s*\(1 KG\)\s*₹?\s*([\d,]+(?:\.\d+)?)/i) ?? findINR(st, /1 KG[^\d]{0,100}₹?\s*([\d,]+(?:\.\d+)?)/i);
+  } catch {}
+  if (gold10g == null || silverKg == null) {
+    try {
+      const [gr, sr] = await Promise.all([fetch("https://groww.in/gold-rates", { cache: "no-store", headers: { "User-Agent": "Mozilla/5.0" } }), fetch("https://groww.in/silver-rates", { cache: "no-store", headers: { "User-Agent": "Mozilla/5.0" } })]);
+      const [g, s] = await Promise.all([gr.ok ? gr.text() : "", sr.ok ? sr.text() : ""]);
+      const gt = clean(g), st = clean(s);
+      if (gold10g == null) gold10g = findINR(gt, /24K Gold\s*\/\s*10gm[^₹\d]*₹?\s*([\d,]+(?:\.\d+)?)/i);
+      if (silverKg == null) { const x = findINR(st, /Silver\s*\/\s*10gm[^₹\d]*₹?\s*([\d,]+(?:\.\d+)?)/i); if (x != null) silverKg = x * 100; }
+      if (gold10g != null || silverKg != null) source = "Moneycontrol / Groww · India rates";
+    } catch {}
+  }
+  if (gold10g == null || silverKg == null) {
+    const [g, s, fx] = await Promise.all([gold10g == null ? yahoo("GC=F") : Promise.resolve(null), silverKg == null ? yahoo("SI=F") : Promise.resolve(null), yahoo("INR=X")]);
+    const oz = 31.1034768;
+    if (fx != null) { if (gold10g == null && g != null) gold10g = g * 10 / oz * fx; if (silverKg == null && s != null) silverKg = s * 1000 / oz * fx; if (g != null || s != null) source = "Yahoo Finance fallback · INR conversion"; }
+  }
+  if (gold10g == null && silverKg == null) throw new Error("Current precious-metal prices unavailable");
+  return { gold10g, silverKg, source };
 });
 
 function Home() {
@@ -57,8 +53,8 @@ function Home() {
 }
 
 function PreciousMetals() {
-  const metals = useQuery({ queryKey: ["live-precious-metals-yahoo"], queryFn: () => fetchPreciousMetals(), staleTime: 20_000, refetchInterval: 30_000, retry: 3 });
+  const metals = useQuery({ queryKey: ["precious-metals-india-live-v5"], queryFn: () => fetchPreciousMetals(), staleTime: 15_000, refetchInterval: 30_000, retry: 3 });
   const cards = [{ name: "Gold", price: metals.data?.gold10g ?? null, unit: "₹ / 10g" }, { name: "Silver", price: metals.data?.silverKg ?? null, unit: "₹ / kg" }];
   const formatINR = (value: number) => `₹${Math.round(value).toLocaleString("en-IN")}`;
-  return <Section title="Gold & Silver" hint="Live market reference converted to INR"><div className="grid gap-3 sm:grid-cols-2">{cards.map((m) => <Panel key={m.name} className="p-4"><div className="flex items-start justify-between gap-3"><div><div className="text-sm font-medium text-fg">{m.name}</div><div className="mt-1 text-xs text-muted">India · {m.unit}</div></div><div className="text-xs text-muted">INR</div></div><div className="mt-2 text-2xl font-semibold tabular text-fg">{m.price != null ? formatINR(m.price) : metals.isLoading ? "Loading…" : "—"}</div><div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">{[10, 20, 30, 40].map((d) => <div key={d} className="rounded-lg bg-surface-2 p-2"><div className="text-xs text-muted">{d}% discount</div><div className="mt-1 tabular text-sm text-fg">{m.price != null ? formatINR(m.price * (1 - d / 100)) : "—"}</div></div>)}</div></Panel>)}</div><p className="mt-2 text-[11px] text-subtle">Source: Yahoo Finance live Gold (GC=F), Silver (SI=F) and USD/INR (INR=X). Converted to Indian rupees using troy-ounce weights. Market reference prices can differ from MCX contracts and jewellery-shop rates.</p></Section>;
+  return <Section title="Gold & Silver" hint="Current Indian reference rates"><div className="grid gap-3 sm:grid-cols-2">{cards.map((m) => <Panel key={m.name} className="p-4"><div className="flex items-start justify-between gap-3"><div><div className="text-sm font-medium text-fg">{m.name}</div><div className="mt-1 text-xs text-muted">India · {m.unit}</div></div><div className="text-xs text-muted">INR</div></div><div className="mt-2 text-2xl font-semibold tabular text-fg">{m.price != null ? formatINR(m.price) : metals.isLoading ? "Loading…" : "—"}</div><div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">{[10, 20, 30, 40].map((d) => <div key={d} className="rounded-lg bg-surface-2 p-2"><div className="text-xs text-muted">{d}% discount</div><div className="mt-1 tabular text-sm text-fg">{m.price != null ? formatINR(m.price * (1 - d / 100)) : "—"}</div></div>)}</div></Panel>)}</div><p className="mt-2 text-[11px] text-subtle">Source: {metals.data?.source ?? "Moneycontrol / Groww / Yahoo Finance"}. Indian reference prices; MCX futures and jewellery-shop rates can differ.</p></Section>;
 }
