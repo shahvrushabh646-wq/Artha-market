@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { Lightbulb } from "lucide-react";
 import { SymbolSearch } from "@/components/symbol-search";
 import { IndexCard, MoverRow, Panel, Section, SkeletonBlock } from "@/components/widgets";
 import { DATA_NOTE } from "@/lib/market/config";
@@ -15,8 +16,15 @@ function Home() {
   return (
     <div>
       <p className="text-xs uppercase tracking-[0.2em] text-subtle">Indian cash market</p>
-      <h1 className="mt-1 font-display text-3xl tracking-tight text-fg">The tape, on your phone.</h1>
-      <p className="mt-2 max-w-xl text-sm text-muted">{clock.label}</p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="mt-1 font-display text-3xl tracking-tight text-fg">The tape, on your phone.</h1>
+          <p className="mt-2 max-w-xl text-sm text-muted">{clock.label}</p>
+        </div>
+        <Link to="/suggestions" className="flex h-11 shrink-0 items-center gap-2 rounded-xl bg-accent px-3 text-sm font-medium text-accent-fg shadow-[var(--shadow-border)]" aria-label="Open suggestions">
+          <Lightbulb className="size-4" /> Suggestions
+        </Link>
+      </div>
       <div className="mt-5"><SymbolSearch /></div>
 
       <Section title="Overview" hint="NIFTY, Sensex and sector indices">
