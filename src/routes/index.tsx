@@ -13,24 +13,73 @@ export const Route = createFileRoute("/")({ component: Home });
 type YahooChart = { chart?: { result?: Array<{ meta?: Record<string, unknown> }> } };
 const yahoo = async (symbol: string) => { for (const host of ["query1.finance.yahoo.com", "query2.finance.yahoo.com"]) { try { const u = new URL(`https://${host}/v8/finance/chart/${encodeURIComponent(symbol)}`); u.searchParams.set("range", "1d"); u.searchParams.set("interval", "1m"); const r = await fetch(u, { cache: "no-store", headers: { "User-Agent": "Mozilla/5.0", Accept: "application/json" } }); if (!r.ok) continue; const p = (await r.json() as YahooChart).chart?.result?.[0]?.meta?.regularMarketPrice; if (typeof p === "number" && Number.isFinite(p) && p > 0) return p; } catch {} } return null; };
 
-type GoldApiPrice = { symbol?: string; name?: string; price?: number; currency?: string; updatedAt?: string; timestamp?: number };
-const goldApi = async (symbol: "XAU" | "XAG") => {
+type McxPage = { gold10g: number | null; silverKg: number | null };
+
+const fetchMcxPage = async (url: string): Promise<string> => {
   try {
-    const res = await fetch(`https://api.gold-api.com/price/${symbol}`, { cache: "no-store", headers: { Accept: "application/json" } });
-    if (!res.ok) return null;
-    const data = await res.json() as GoldApiPrice;
-    return typeof data.price === "number" && Number.isFinite(data.price) && data.price > 0 ? data : null;
-  } catch { return null; }
+    const res = await fetch(url, {
+      cache: "no-store",
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/138 Safari/537.36",
+        Accept: "text/html,application/xhtml+xml,*/*",
+        Referer: "https://economictimes.indiatimes.com/",
+      },
+    });
+    return res.ok ? await res.text() : "";
+  } catch {
+    return "";
+  }
+};
+
+const cleanText = (html: string) => html
+  .replace(/<script[\\s\\S]*?<\\/script>/gi, " ")
+  .replace(/<style[\\s\\S]*?<\\/style>/gi, " ")
+  .replace(/<[^>]+>/g, " ")
+  .replace(/&nbsp;/gi, " ")
+  .replace(/&amp;/gi, "&")
+  .replace(/&#x20;/gi, " ")
+  .replace(/\\s+/g, " ");
+
+const parseMcx = (html: string): McxPage => {
+  const text = cleanText(html);
+  // Economic Times exposes the currently selected MCX contract near the top of
+  // the page, e.g. "MCX 05.35PM IST | 31 Aug, 2026 154880.0 Per 10 GRMS".
+  const gold = text.match(/MCX\\s+[0-9:.]+\\s*(?:AM|PM)?\\s*IST\\s*\\|[\\s\\S]{0,120}?(\\d{5,7}(?:\\.\\d+)?)\\s+Per\\s+10\\s*GRMS/i);
+  const silver = text.match(/MCX\\s+[0-9:.]+\\s*(?:AM|PM)?\\s*IST\\s*\\|[\\s\\S]{0,120}?(\\d{5,7}(?:\\.\\d+)?)\\s+Per\\s+1\\s*KGS/i);
+  return {
+    gold10g: gold ? Number(gold[1]) : null,
+    silverKg: silver ? Number(silver[1]) : null,
+  };
 };
 
 const fetchPreciousMetals = createServerFn({ method: "GET" }).handler(async () => {
-  const [gold, silver, fx] = await Promise.all([goldApi("XAU"), goldApi("XAG"), yahoo("INR=X")]);
-  if (fx == null || fx <= 0) throw new Error("Live USD/INR rate unavailable");
-  const troyOunceGrams = 31.1034768;
-  const gold10g = gold?.price != null ? (gold.price / troyOunceGrams) * 10 * fx : null;
-  const silverKg = silver?.price != null ? (silver.price / troyOunceGrams) * 1000 * fx : null;
-  if (gold10g == null && silverKg == null) throw new Error("Live gold/silver prices unavailable");
-  return { gold10g, silverKg, source: "Gold-API · live spot + Yahoo Finance USD/INR" };
+  const [goldHtml, silverHtml] = await Promise.all([
+    fetchMcxPage("https://economictimes.indiatimes.com/commoditysummary/symbol-GOLD.cms"),
+    fetchMcxPage("https://economictimes.indiatimes.com/commoditysummary/symbol-SILVER.cms"),
+  ]);
+
+  const goldPage = parseMcx(goldHtml);
+  const silverPage = parseMcx(silverHtml);
+
+  // Keep a second exchange-reference fallback. This is still MCX data, not
+  // USD spot converted into INR, so the card stays aligned with Indian exchange prices.
+  let gold10g = goldPage.gold10g;
+  let silverKg = silverPage.silverKg;
+
+  if (gold10g == null || silverKg == null) {
+    const fallback = cleanText(await fetchMcxPage("https://mcxlive.org/"));
+    if (gold10g == null) {
+      const m = fallback.match(/MCX\\s+Gold\\s+(\\d{5,7}(?:\\.\\d+)?)/i);
+      if (m) gold10g = Number(m[1]);
+    }
+    if (silverKg == null) {
+      const m = fallback.match(/MCX\\s+Silver\\s+(\\d{5,7}(?:\\.\\d+)?)/i);
+      if (m) silverKg = Number(m[1]);
+    }
+  }
+
+  if (gold10g == null && silverKg == null) throw new Error("Current MCX gold/silver prices unavailable");
+  return { gold10g, silverKg, source: "MCX · Economic Times exchange feed" };
 });
 
 function Home() {
@@ -40,8 +89,8 @@ function Home() {
 }
 
 function PreciousMetals() {
-  const metals = useQuery({ queryKey: ["precious-metals-live-gold-api-v2"], queryFn: () => fetchPreciousMetals(), staleTime: 15_000, refetchInterval: 20_000, retry: 3 });
+  const metals = useQuery({ queryKey: ["precious-metals-mcx-live-v4"], queryFn: () => fetchPreciousMetals(), staleTime: 10_000, refetchInterval: 15_000, retry: 3 });
   const cards = [{ name: "Gold", price: metals.data?.gold10g ?? null, unit: "₹ / 10g" }, { name: "Silver", price: metals.data?.silverKg ?? null, unit: "₹ / kg" }];
   const formatINR = (value: number) => `₹${Math.round(value).toLocaleString("en-IN")}`;
-  return <Section title="Gold & Silver" hint="Current Indian INR market reference prices"><div className="grid gap-3 sm:grid-cols-2">{cards.map((m) => <Panel key={m.name} className="p-4"><div className="flex items-start justify-between gap-3"><div><div className="text-sm font-medium text-fg">{m.name}</div><div className="mt-1 text-xs text-muted">Live spot · {m.unit}</div></div><div className="text-xs text-muted">INR</div></div><div className="mt-2 text-2xl font-semibold tabular text-fg">{m.price != null ? formatINR(m.price) : metals.isLoading ? "Loading…" : "—"}</div><div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">{[10, 20, 30, 40].map((d) => <div key={d} className="rounded-lg bg-surface-2 p-2"><div className="text-xs text-muted">{d}% discount</div><div className="mt-1 tabular text-sm text-fg">{m.price != null ? formatINR(m.price * (1 - d / 100)) : "—"}</div></div>)}</div></Panel>)}</div><p className="mt-2 text-[11px] text-subtle">Source: {metals.data?.source ?? "Gold-API · live spot + Yahoo Finance USD/INR"}. Gold is shown per 10g and Silver per kg in INR. Spot rates can differ from MCX futures and jewellery-shop rates.</p></Section>;
+  return <Section title="Gold & Silver" hint="Current MCX exchange prices"><div className="grid gap-3 sm:grid-cols-2">{cards.map((m) => <Panel key={m.name} className="p-4"><div className="flex items-start justify-between gap-3"><div><div className="text-sm font-medium text-fg">{m.name}</div><div className="mt-1 text-xs text-muted">Live MCX · {m.unit}</div></div><div className="text-xs text-muted">INR</div></div><div className="mt-2 text-2xl font-semibold tabular text-fg">{m.price != null ? formatINR(m.price) : metals.isLoading ? "Loading…" : "—"}</div><div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">{[10, 20, 30, 40].map((d) => <div key={d} className="rounded-lg bg-surface-2 p-2"><div className="text-xs text-muted">{d}% discount</div><div className="mt-1 tabular text-sm text-fg">{m.price != null ? formatINR(m.price * (1 - d / 100)) : "—"}</div></div>)}</div></Panel>)}</div><p className="mt-2 text-[11px] text-subtle">Source: {metals.data?.source ?? "MCX · Economic Times exchange feed"}. Gold is shown per 10g and Silver per kg in INR. These are MCX exchange reference prices and can differ from retail/jewellery rates.</p></Section>;
 }
