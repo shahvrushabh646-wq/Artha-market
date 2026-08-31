@@ -27,6 +27,8 @@ function Home() {
       </div>
       <div className="mt-5"><SymbolSearch /></div>
 
+      <GoldPrice />
+
       <Section title="Overview" hint="NIFTY, Sensex and sector indices">
         {dash.isLoading ? (
           <div className="flex gap-2 overflow-x-auto pb-1">{Array.from({ length: 5 }).map((_, i) => <SkeletonBlock key={i} className="h-24 min-w-[9.5rem] flex-1" />)}</div>
@@ -51,5 +53,39 @@ function Home() {
       </Section>
       <p className="mt-8 text-xs text-subtle">{DATA_NOTE}</p>
     </div>
+  );
+}
+
+function GoldPrice() {
+  const gold = useQuery({
+    queryKey: ["gold-price"],
+    queryFn: async () => {
+      const res = await fetch("https://query1.finance.yahoo.com/v8/finance/chart/GC=F?range=5d&interval=1d", { cache: "no-store" });
+      if (!res.ok) throw new Error("Gold price unavailable");
+      const data = await res.json() as { chart?: { result?: Array<{ meta?: { regularMarketPrice?: number }; indicators?: { quote?: Array<{ close?: Array<number | null> }> } }> } };
+      const row = data.chart?.result?.[0];
+      const price = row?.meta?.regularMarketPrice ?? [...(row?.indicators?.quote?.[0]?.close ?? [])].reverse().find((v): v is number => typeof v === "number" && Number.isFinite(v));
+      if (price == null) throw new Error("Gold price unavailable");
+      return price;
+    },
+    staleTime: 60_000,
+    refetchInterval: 60_000,
+  });
+
+  if (gold.isLoading) return <Section title="Gold Price" hint="Current price and discount levels"><SkeletonBlock className="h-32" /></Section>;
+  if (gold.isError || gold.data == null) return <Section title="Gold Price" hint="Current price and discount levels"><Panel><p className="text-sm text-muted">Gold price is temporarily unavailable.</p></Panel></Section>;
+
+  const price = gold.data;
+  const discounts = [10, 20, 30, 40].map((percent) => ({ percent, value: price * (1 - percent / 100) }));
+  return (
+    <Section title="Gold Price" hint="Current price and discount levels">
+      <Panel className="p-4">
+        <div className="text-xs text-muted">Gold futures reference (USD/oz)</div>
+        <div className="mt-1 text-2xl font-semibold tabular text-fg">${price.toFixed(2)}</div>
+        <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {discounts.map((d) => <div key={d.percent} className="rounded-lg bg-surface-2 p-3"><div className="text-xs text-muted">{d.percent}% discount</div><div className="mt-1 tabular font-medium text-fg">${d.value.toFixed(2)}</div></div>)}
+        </div>
+      </Panel>
+    </Section>
   );
 }
