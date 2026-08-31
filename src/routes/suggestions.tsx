@@ -30,8 +30,9 @@ function Suggestions() {
     queryKey: ["suggestions-scanner"],
     queryFn: () => fetchSuggestions(),
     initialData: saved.length ? saved : undefined,
-    staleTime: 15 * 60_000,
+    staleTime: 0,
     gcTime: 24 * 60 * 60_000,
+    refetchOnMount: "always",
     refetchOnWindowFocus: false,
   });
   const suggestions = q.data ?? saved;
