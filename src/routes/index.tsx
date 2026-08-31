@@ -35,39 +35,38 @@ function Home() {
 
 function PreciousMetals() {
   const metals = useQuery({
-    queryKey: ["precious-metals-inr"],
+    queryKey: ["mcx-precious-metals-inr"],
     queryFn: async () => {
-      const url = `https://xaus.com/api/v1/spot?currency=INR&unit=gram&compact=1&fresh=${Date.now()}`;
-      const res = await fetch(url, { cache: "no-store", headers: { Accept: "application/json" } });
-      if (!res.ok) throw new Error("Precious metal prices unavailable");
-      const data = await res.json() as {
-        xau?: { price?: number };
-        silver_usd_oz?: number;
-        fx_rate?: number;
-        data_state?: { as_of?: string };
-        updated_at?: string;
-      };
-      const goldPerGram = typeof data.xau?.price === "number" && Number.isFinite(data.xau.price) ? data.xau.price : null;
-      const silverPerKg = typeof data.silver_usd_oz === "number" && Number.isFinite(data.silver_usd_oz) && typeof data.fx_rate === "number" && Number.isFinite(data.fx_rate)
-        ? (data.silver_usd_oz * data.fx_rate / 31.1034768) * 1000
-        : null;
-      if (goldPerGram == null && silverPerKg == null) throw new Error("Precious metal prices unavailable");
-      return { goldPerGram, silverPerKg, asOf: data.data_state?.as_of ?? data.updated_at ?? null };
+      // Economic Times exposes the current MCX near-month Gold M and Silver
+      // contract prices in INR. This keeps the dashboard aligned with Indian
+      // exchange pricing instead of converting international spot prices.
+      const res = await fetch("https://economictimes.indiatimes.com/commoditysummary/symbol-GOLD.cms", {
+        cache: "no-store",
+        headers: { "User-Agent": "Mozilla/5.0", Accept: "text/html,*/*" },
+      });
+      if (!res.ok) throw new Error("MCX precious metal prices unavailable");
+      const html = await res.text();
+
+      const clean = html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ");
+      const goldMatch = clean.match(/Gold M\s+\d{2}-[A-Za-z]{3}-\d{4}\s+([\d,]+(?:\.\d+)?)\s*\/\s*10\s*GRMS/i);
+      const silverMatch = clean.match(/Silver\s+\d{2}-[A-Za-z]{3}-\d{4}\s+([\d,]+(?:\.\d+)?)\s*\/\s*1\s*KGS/i);
+      const gold = goldMatch ? Number(goldMatch[1].replace(/,/g, "")) : null;
+      const silver = silverMatch ? Number(silverMatch[1].replace(/,/g, "")) : null;
+      if (!Number.isFinite(gold) && !Number.isFinite(silver)) throw new Error("MCX precious metal prices unavailable");
+      return { gold10g: Number.isFinite(gold) ? gold : null, silverKg: Number.isFinite(silver) ? silver : null };
     },
     staleTime: 30_000,
     refetchInterval: 30_000,
     retry: 2,
   });
 
-  const gold10g = metals.data?.goldPerGram != null ? metals.data.goldPerGram * 10 : null;
-  const silverKg = metals.data?.silverPerKg ?? null;
   const cards = [
-    { name: "Gold", price: gold10g, unit: "₹ / 10g", note: "24K spot reference" },
-    { name: "Silver", price: silverKg, unit: "₹ / kg", note: "999 silver spot reference" },
+    { name: "Gold", price: metals.data?.gold10g ?? null, unit: "₹ / 10g", note: "MCX Gold M · INR" },
+    { name: "Silver", price: metals.data?.silverKg ?? null, unit: "₹ / kg", note: "MCX Silver · INR" },
   ];
   const formatINR = (value: number) => `₹${Math.round(value).toLocaleString("en-IN")}`;
 
-  return <Section title="Gold & Silver" hint="Indian Rupee market reference prices">
+  return <Section title="Gold & Silver" hint="Current Indian MCX near-month reference prices">
     <div className="grid gap-3 sm:grid-cols-2">
       {cards.map((m) => <Panel key={m.name} className="p-4">
         <div className="flex items-start justify-between gap-3">
@@ -83,6 +82,6 @@ function PreciousMetals() {
         </div>
       </Panel>)}
     </div>
-    <p className="mt-2 text-[11px] text-subtle">Prices are shown in Indian rupees. Gold is displayed per 10g and silver per kg. The feed is a live precious-metals market reference; MCX tradable futures can differ from spot/reference prices.</p>
+    <p className="mt-2 text-[11px] text-subtle">Gold is shown per 10g and silver per kg using Indian MCX contract pricing. Prices can differ from local jewellery-shop rates because of purity, premiums, GST and making charges.</p>
   </Section>;
 }
