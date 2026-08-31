@@ -16,32 +16,47 @@ const findINR = (s: string, re: RegExp) => { const m = s.match(re); if (!m) retu
 const yahoo = async (symbol: string) => { for (const host of ["query1.finance.yahoo.com", "query2.finance.yahoo.com"]) { try { const u = new URL(`https://${host}/v8/finance/chart/${encodeURIComponent(symbol)}`); u.searchParams.set("range", "1d"); u.searchParams.set("interval", "1m"); const r = await fetch(u, { cache: "no-store", headers: { "User-Agent": "Mozilla/5.0", Accept: "application/json" } }); if (!r.ok) continue; const p = (await r.json() as YahooChart).chart?.result?.[0]?.meta?.regularMarketPrice; if (typeof p === "number" && Number.isFinite(p) && p > 0) return p; } catch {} } return null; };
 
 const fetchPreciousMetals = createServerFn({ method: "GET" }).handler(async () => {
-  let gold10g: number | null = null, silverKg: number | null = null, source = "Moneycontrol · India rates";
+  let gold10g: number | null = null;
+  let silverKg: number | null = null;
+  let source = "GoldPrice.dev · INR spot";
+
+  // Primary: public market-data API. No API key is required for these endpoints.
+  // Gold: 24K INR per gram -> per 10g.
+  // Silver: XAG/INR converted to INR per kg.
   try {
-    const [gr, sr] = await Promise.all([
-      fetch("https://www.moneycontrol.com/news/gold-rates-today/", { cache: "no-store", headers: { "User-Agent": "Mozilla/5.0", Accept: "text/html,*/*" } }),
-      fetch("https://www.moneycontrol.com/news/silver-rates-today/", { cache: "no-store", headers: { "User-Agent": "Mozilla/5.0", Accept: "text/html,*/*" } }),
+    const [goldRes, silverRes] = await Promise.all([
+      fetch("https://api.goldprice.dev/v1/carat?currency=INR", { cache: "no-store", headers: { Accept: "application/json" } }),
+      fetch("https://api.goldprice.dev/v1/convert?from=XAG&to=INR&amount=1&unit=kg", { cache: "no-store", headers: { Accept: "application/json" } }),
     ]);
-    const [g, s] = await Promise.all([gr.ok ? gr.text() : "", sr.ok ? sr.text() : ""]);
-    const gt = clean(g), st = clean(s);
-    gold10g = findINR(gt, /Current Price\s*\(24 Carat \/ 10 Gram\)\s*₹?\s*([\d,]+(?:\.\d+)?)/i) ?? findINR(gt, /24 Carat[^\d]{0,120}10 Gram[^\d]{0,80}₹?\s*([\d,]+(?:\.\d+)?)/i);
-    silverKg = findINR(st, /Current Price\s*\(1 KG\)\s*₹?\s*([\d,]+(?:\.\d+)?)/i) ?? findINR(st, /1 KG[^\d]{0,100}₹?\s*([\d,]+(?:\.\d+)?)/i);
+    if (goldRes.ok) {
+      const g = await goldRes.json() as { price_gram_24k?: string };
+      const v = Number(g.price_gram_24k);
+      if (Number.isFinite(v) && v > 0) gold10g = v * 10;
+    }
+    if (silverRes.ok) {
+      const s = await silverRes.json() as { result?: string };
+      const v = Number(s.result);
+      if (Number.isFinite(v) && v > 0) silverKg = v;
+    }
   } catch {}
+
+  // Fallback: Yahoo Finance commodity futures converted using INR/USD.
   if (gold10g == null || silverKg == null) {
     try {
-      const [gr, sr] = await Promise.all([fetch("https://groww.in/gold-rates", { cache: "no-store", headers: { "User-Agent": "Mozilla/5.0" } }), fetch("https://groww.in/silver-rates", { cache: "no-store", headers: { "User-Agent": "Mozilla/5.0" } })]);
-      const [g, s] = await Promise.all([gr.ok ? gr.text() : "", sr.ok ? sr.text() : ""]);
-      const gt = clean(g), st = clean(s);
-      if (gold10g == null) gold10g = findINR(gt, /24K Gold\s*\/\s*10gm[^₹\d]*₹?\s*([\d,]+(?:\.\d+)?)/i);
-      if (silverKg == null) { const x = findINR(st, /Silver\s*\/\s*10gm[^₹\d]*₹?\s*([\d,]+(?:\.\d+)?)/i); if (x != null) silverKg = x * 100; }
-      if (gold10g != null || silverKg != null) source = "Moneycontrol / Groww · India rates";
+      const [g, s, fx] = await Promise.all([
+        gold10g == null ? yahoo("GC=F") : Promise.resolve(null),
+        silverKg == null ? yahoo("SI=F") : Promise.resolve(null),
+        yahoo("INR=X"),
+      ]);
+      const oz = 31.1034768;
+      if (fx != null && fx > 0) {
+        if (gold10g == null && g != null) gold10g = g * 10 / oz * fx;
+        if (silverKg == null && s != null) silverKg = s * 1000 / oz * fx;
+        if (g != null || s != null) source = "GoldPrice.dev / Yahoo Finance fallback";
+      }
     } catch {}
   }
-  if (gold10g == null || silverKg == null) {
-    const [g, s, fx] = await Promise.all([gold10g == null ? yahoo("GC=F") : Promise.resolve(null), silverKg == null ? yahoo("SI=F") : Promise.resolve(null), yahoo("INR=X")]);
-    const oz = 31.1034768;
-    if (fx != null) { if (gold10g == null && g != null) gold10g = g * 10 / oz * fx; if (silverKg == null && s != null) silverKg = s * 1000 / oz * fx; if (g != null || s != null) source = "Yahoo Finance fallback · INR conversion"; }
-  }
+
   if (gold10g == null && silverKg == null) throw new Error("Current precious-metal prices unavailable");
   return { gold10g, silverKg, source };
 });
@@ -53,8 +68,8 @@ function Home() {
 }
 
 function PreciousMetals() {
-  const metals = useQuery({ queryKey: ["precious-metals-india-live-v5"], queryFn: () => fetchPreciousMetals(), staleTime: 15_000, refetchInterval: 30_000, retry: 3 });
+  const metals = useQuery({ queryKey: ["precious-metals-market-api-v6"], queryFn: () => fetchPreciousMetals(), staleTime: 30_000, refetchInterval: 60_000, retry: 3 });
   const cards = [{ name: "Gold", price: metals.data?.gold10g ?? null, unit: "₹ / 10g" }, { name: "Silver", price: metals.data?.silverKg ?? null, unit: "₹ / kg" }];
   const formatINR = (value: number) => `₹${Math.round(value).toLocaleString("en-IN")}`;
-  return <Section title="Gold & Silver" hint="Current Indian reference rates"><div className="grid gap-3 sm:grid-cols-2">{cards.map((m) => <Panel key={m.name} className="p-4"><div className="flex items-start justify-between gap-3"><div><div className="text-sm font-medium text-fg">{m.name}</div><div className="mt-1 text-xs text-muted">India · {m.unit}</div></div><div className="text-xs text-muted">INR</div></div><div className="mt-2 text-2xl font-semibold tabular text-fg">{m.price != null ? formatINR(m.price) : metals.isLoading ? "Loading…" : "—"}</div><div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">{[10, 20, 30, 40].map((d) => <div key={d} className="rounded-lg bg-surface-2 p-2"><div className="text-xs text-muted">{d}% discount</div><div className="mt-1 tabular text-sm text-fg">{m.price != null ? formatINR(m.price * (1 - d / 100)) : "—"}</div></div>)}</div></Panel>)}</div><p className="mt-2 text-[11px] text-subtle">Source: {metals.data?.source ?? "Moneycontrol / Groww / Yahoo Finance"}. Indian reference prices; MCX futures and jewellery-shop rates can differ.</p></Section>;
+  return <Section title="Gold & Silver" hint="Current Indian market reference prices"><div className="grid gap-3 sm:grid-cols-2">{cards.map((m) => <Panel key={m.name} className="p-4"><div className="flex items-start justify-between gap-3"><div><div className="text-sm font-medium text-fg">{m.name}</div><div className="mt-1 text-xs text-muted">India · {m.unit}</div></div><div className="text-xs text-muted">INR</div></div><div className="mt-2 text-2xl font-semibold tabular text-fg">{m.price != null ? formatINR(m.price) : metals.isLoading ? "Loading…" : "—"}</div><div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">{[10, 20, 30, 40].map((d) => <div key={d} className="rounded-lg bg-surface-2 p-2"><div className="text-xs text-muted">{d}% discount</div><div className="mt-1 tabular text-sm text-fg">{m.price != null ? formatINR(m.price * (1 - d / 100)) : "—"}</div></div>)}</div></Panel>)}</div><p className="mt-2 text-[11px] text-subtle">Source: {metals.data?.source ?? "GoldPrice.dev / Yahoo Finance"}. Gold is 24K spot-derived INR/10g and silver is INR/kg. These are market reference prices, not jewellery-shop quotes or MCX contract prices.</p></Section>;
 }
