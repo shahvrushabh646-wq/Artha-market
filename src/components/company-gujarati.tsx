@@ -41,7 +41,7 @@ async function buildDescription(companyName: string, industry?: string | null): 
     searchUrl.search = new URLSearchParams({
       action: "query",
       list: "search",
-      srsearch: `${name} India company",
+      srsearch: `${name} India company`,
       srlimit: "5",
       format: "json",
       origin: "*",
