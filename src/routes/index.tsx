@@ -11,7 +11,6 @@ import { fetchDashboard } from "@/lib/market/server";
 export const Route = createFileRoute("/")({ component: Home });
 
 type YahooChart = { chart?: { result?: Array<{ meta?: Record<string, unknown> }> } };
-const clean = (s: string) => s.replace(/<script[\\s\\S]*?<\\/script>/gi, " ").replace(/<style[\\s\\S]*?<\\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&#x20;/gi, " ").replace(/\\s+/g, " ");
 const yahoo = async (symbol: string) => { for (const host of ["query1.finance.yahoo.com", "query2.finance.yahoo.com"]) { try { const u = new URL(`https://${host}/v8/finance/chart/${encodeURIComponent(symbol)}`); u.searchParams.set("range", "1d"); u.searchParams.set("interval", "1m"); const r = await fetch(u, { cache: "no-store", headers: { "User-Agent": "Mozilla/5.0", Accept: "application/json" } }); if (!r.ok) continue; const p = (await r.json() as YahooChart).chart?.result?.[0]?.meta?.regularMarketPrice; if (typeof p === "number" && Number.isFinite(p) && p > 0) return p; } catch {} } return null; };
 
 type GoldApiPrice = { symbol?: string; name?: string; price?: number; currency?: string; updatedAt?: string; timestamp?: number };
@@ -25,9 +24,6 @@ const goldApi = async (symbol: "XAU" | "XAG") => {
 };
 
 const fetchPreciousMetals = createServerFn({ method: "GET" }).handler(async () => {
-  // Gold-API is a public no-key live spot feed. It returns XAU/XAG per troy ounce.
-  // Convert the live USD quote to INR using Yahoo Finance's live USD/INR FX quote.
-  // This avoids scraping Moneycontrol/Economic Times pages and keeps the source stable.
   const [gold, silver, fx] = await Promise.all([goldApi("XAU"), goldApi("XAG"), yahoo("INR=X")]);
   if (fx == null || fx <= 0) throw new Error("Live USD/INR rate unavailable");
   const troyOunceGrams = 31.1034768;
@@ -44,7 +40,7 @@ function Home() {
 }
 
 function PreciousMetals() {
-  const metals = useQuery({ queryKey: ["precious-metals-live-gold-api-v1"], queryFn: () => fetchPreciousMetals(), staleTime: 15_000, refetchInterval: 20_000, retry: 3 });
+  const metals = useQuery({ queryKey: ["precious-metals-live-gold-api-v2"], queryFn: () => fetchPreciousMetals(), staleTime: 15_000, refetchInterval: 20_000, retry: 3 });
   const cards = [{ name: "Gold", price: metals.data?.gold10g ?? null, unit: "₹ / 10g" }, { name: "Silver", price: metals.data?.silverKg ?? null, unit: "₹ / kg" }];
   const formatINR = (value: number) => `₹${Math.round(value).toLocaleString("en-IN")}`;
   return <Section title="Gold & Silver" hint="Current Indian INR market reference prices"><div className="grid gap-3 sm:grid-cols-2">{cards.map((m) => <Panel key={m.name} className="p-4"><div className="flex items-start justify-between gap-3"><div><div className="text-sm font-medium text-fg">{m.name}</div><div className="mt-1 text-xs text-muted">Live spot · {m.unit}</div></div><div className="text-xs text-muted">INR</div></div><div className="mt-2 text-2xl font-semibold tabular text-fg">{m.price != null ? formatINR(m.price) : metals.isLoading ? "Loading…" : "—"}</div><div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">{[10, 20, 30, 40].map((d) => <div key={d} className="rounded-lg bg-surface-2 p-2"><div className="text-xs text-muted">{d}% discount</div><div className="mt-1 tabular text-sm text-fg">{m.price != null ? formatINR(m.price * (1 - d / 100)) : "—"}</div></div>)}</div></Panel>)}</div><p className="mt-2 text-[11px] text-subtle">Source: {metals.data?.source ?? "Gold-API · live spot + Yahoo Finance USD/INR"}. Gold is shown per 10g and Silver per kg in INR. Spot rates can differ from MCX futures and jewellery-shop rates.</p></Section>;
