@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { createServerFn } from "@tanstack/react-start";
 import { Lightbulb } from "lucide-react";
 import { SymbolSearch } from "@/components/symbol-search";
 import { IndexCard, MoverRow, Panel, Section, SkeletonBlock } from "@/components/widgets";
@@ -8,6 +9,55 @@ import { getMarketClock } from "@/lib/market/math";
 import { fetchDashboard } from "@/lib/market/server";
 
 export const Route = createFileRoute("/")({ component: Home });
+
+const fetchPreciousMetals = createServerFn({ method: "GET" }).handler(async () => {
+  const urls = [
+    "https://economictimes.indiatimes.com/commoditysummary/symbol-GOLD.cms",
+    "https://economictimes.indiatimes.com/commoditysummary/symbol-SILVER.cms?expiry=2026-09-04",
+  ];
+  const pages = await Promise.all(urls.map(async (url) => {
+    try {
+      const res = await fetch(url, {
+        cache: "no-store",
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/138 Safari/537.36",
+          Accept: "text/html,application/xhtml+xml,*/*",
+        },
+      });
+      return res.ok ? await res.text() : "";
+    } catch {
+      return "";
+    }
+  }));
+
+  const clean = (html: string) => html
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&#x20;/gi, " ")
+    .replace(/\s+/g, " ");
+
+  const goldText = clean(pages[0]);
+  const silverText = clean(pages[1]);
+
+  // Economic Times publishes the MCX contract price directly in INR:
+  // Gold M = ₹/10 GRMS, Silver = ₹/1 KGS. This avoids browser CORS and
+  // avoids the unreliable international XAU/XAG conversion used previously.
+  const goldCandidates = [...goldText.matchAll(/MCX\s+\d{1,2}:\d{2}\s*(?:AM|PM)?[^₹\d]{0,100}(\d{5,7}(?:\.\d+)?)\s*Per\s*10\s*GRMS/gi)]
+    .map((m) => Number(m[1]));
+  const silverCandidates = [...silverText.matchAll(/MCX\s+\d{1,2}:\d{2}\s*(?:AM|PM)?[^₹\d]{0,100}(\d{5,7}(?:\.\d+)?)\s*Per\s*1\s*KGS/gi)]
+    .map((m) => Number(m[1]));
+
+  const goldMatch = goldCandidates.find(Number.isFinite) ?? null;
+  const silverMatch = silverCandidates.find(Number.isFinite) ?? null;
+
+  if (goldMatch == null && silverMatch == null) {
+    throw new Error("Unable to read current MCX prices from Economic Times");
+  }
+  return { gold10g: goldMatch, silverKg: silverMatch, source: "Economic Times · MCX" };
+});
 
 function Home() {
   const clock = getMarketClock();
@@ -35,40 +85,16 @@ function Home() {
 
 function PreciousMetals() {
   const metals = useQuery({
-    queryKey: ["mcx-precious-metals-inr"],
-    queryFn: async () => {
-      // Server-side scrape of the current MCX Gold/Silver table. Unlike the
-      // old XAU conversion, these values are already Indian INR contract prices.
-      const res = await fetch("https://mcxlive.org/", {
-        cache: "no-store",
-        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/138 Safari/537.36", Accept: "text/html,*/*" },
-      });
-      if (!res.ok) throw new Error("MCX precious metal prices unavailable");
-      const html = await res.text();
-      const text = html
-        .replace(/<script[\s\S]*?<\/script>/gi, " ")
-        .replace(/<style[\s\S]*?<\/style>/gi, " ")
-        .replace(/<[^>]+>/g, " ")
-        .replace(/&nbsp;/gi, " ")
-        .replace(/&amp;/gi, "&")
-        .replace(/\s+/g, " ");
-
-      const number = "([\\d,]+(?:\\.\\d+)?)";
-      const goldMatch = text.match(new RegExp(`MCX Gold\\s+${number}\\s+[+-]?[\\d,]+(?:\\.\\d+)?\\s+[+-]?[\\d.]+%`, "i"));
-      const silverMatch = text.match(new RegExp(`MCX Silver\\s+${number}\\s+[+-]?[\\d,]+(?:\\.\\d+)?\\s+[+-]?[\\d.]+%`, "i"));
-      const gold = goldMatch ? Number(goldMatch[1].replace(/,/g, "")) : null;
-      const silver = silverMatch ? Number(silverMatch[1].replace(/,/g, "")) : null;
-      if (gold == null && silver == null) throw new Error("MCX precious metal prices unavailable");
-      return { gold10g: Number.isFinite(gold) ? gold : null, silverKg: Number.isFinite(silver) ? silver : null };
-    },
+    queryKey: ["mcx-precious-metals-inr-v2"],
+    queryFn: () => fetchPreciousMetals(),
     staleTime: 30_000,
     refetchInterval: 30_000,
     retry: 2,
   });
 
   const cards = [
-    { name: "Gold", price: metals.data?.gold10g ?? null, unit: "₹ / 10g", note: "MCX Gold · INR" },
-    { name: "Silver", price: metals.data?.silverKg ?? null, unit: "₹ / kg", note: "MCX Silver · INR" },
+    { name: "Gold", price: metals.data?.gold10g ?? null, unit: "₹ / 10g" },
+    { name: "Silver", price: metals.data?.silverKg ?? null, unit: "₹ / kg" },
   ];
   const formatINR = (value: number) => `₹${Math.round(value).toLocaleString("en-IN")}`;
 
@@ -76,18 +102,15 @@ function PreciousMetals() {
     <div className="grid gap-3 sm:grid-cols-2">
       {cards.map((m) => <Panel key={m.name} className="p-4">
         <div className="flex items-start justify-between gap-3">
-          <div><div className="text-sm font-medium text-fg">{m.name}</div><div className="mt-1 text-xs text-muted">{m.note} · {m.unit}</div></div>
+          <div><div className="text-sm font-medium text-fg">{m.name}</div><div className="mt-1 text-xs text-muted">MCX · {m.unit}</div></div>
           <div className="text-xs text-muted">INR</div>
         </div>
         <div className="mt-2 text-2xl font-semibold tabular text-fg">{m.price != null ? formatINR(m.price) : "—"}</div>
         <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-          {[10, 20, 30, 40].map((d) => <div key={d} className="rounded-lg bg-surface-2 p-2">
-            <div className="text-xs text-muted">{d}% discount</div>
-            <div className="mt-1 tabular text-sm text-fg">{m.price != null ? formatINR(m.price * (1 - d / 100)) : "—"}</div>
-          </div>)}
+          {[10, 20, 30, 40].map((d) => <div key={d} className="rounded-lg bg-surface-2 p-2"><div className="text-xs text-muted">{d}% discount</div><div className="mt-1 tabular text-sm text-fg">{m.price != null ? formatINR(m.price * (1 - d / 100)) : "—"}</div></div>)}
         </div>
       </Panel>)}
     </div>
-    <p className="mt-2 text-[11px] text-subtle">Gold is shown per 10g and silver per kg. Prices are MCX futures reference values in INR and can differ from local jewellery-shop rates because of purity, GST, premiums and making charges.</p>
+    <p className="mt-2 text-[11px] text-subtle">Source: Economic Times MCX contract feed. Gold is ₹/10g and Silver is ₹/kg; rates can differ from jewellery-shop rates because of purity, GST and premiums.</p>
   </Section>;
 }
