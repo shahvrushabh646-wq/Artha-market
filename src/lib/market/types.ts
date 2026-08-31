@@ -13,6 +13,7 @@ export type Quote = {
   low5y?: number | null;
   price75?: number | null;
   signal75?: "BUY" | "WAIT" | null;
+  triggerDate?: string | null;
   volume: number | null;
   dayHigh: number | null;
   dayLow: number | null;
