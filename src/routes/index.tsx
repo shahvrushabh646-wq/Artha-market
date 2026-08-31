@@ -10,32 +10,24 @@ import { fetchDashboard } from "@/lib/market/server";
 
 export const Route = createFileRoute("/")({ component: Home });
 
-const TROY_OUNCE_GRAMS = 31.1034768;
 function n(v: unknown) { const x = Number(String(v ?? "").replace(/,/g, "")); return Number.isFinite(x) && x > 0 ? x : null; }
 
-async function alpha(functionName: string, extra: Record<string,string> = {}) {
-  const key = process.env.ALPHA_VANTAGE_API_KEY;
-  if (!key) throw new Error("ALPHA_VANTAGE_API_KEY missing");
-  const u = new URL("https://www.alphavantage.co/query"); u.searchParams.set("function", functionName); u.searchParams.set("apikey", key);
-  for (const [k,v] of Object.entries(extra)) u.searchParams.set(k,v);
-  const r = await fetch(u,{cache:"no-store",headers:{Accept:"application/json","User-Agent":"Artha-market/1.0"}});
-  if (!r.ok) throw new Error(`Alpha Vantage HTTP ${r.status}`);
-  const j = await r.json() as Record<string,unknown>;
-  if (j.Note || j.Information) throw new Error(String(j.Note ?? j.Information));
-  return j;
+async function etMetal(symbol: "GOLD" | "SILVER") {
+  const url = `https://economictimes.indiatimes.com/commoditysummary/symbol-${symbol}.cms`;
+  const r = await fetch(url, { cache: "no-store", headers: { Accept: "text/html,application/xhtml+xml,*/*", "User-Agent": "Mozilla/5.0" } });
+  if (!r.ok) throw new Error(`Economic Times HTTP ${r.status}`);
+  const html = await r.text();
+  const text = html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/\s+/g, " ");
+  const unit = symbol === "GOLD" ? "Per 10 GRMS" : "Per 1 KGS";
+  const match = text.match(new RegExp(`MCX\\s+[0-9:.]+\\s*(?:AM|PM)?\\s*IST\\s*\\|[\\s\\S]{0,160}?(\\d{5,7}(?:\\.\\d+)?)\\s+${unit}`, "i"));
+  const price = n(match?.[1]);
+  if (price == null) throw new Error(`${symbol} MCX price unavailable`);
+  return price;
 }
 
 const fetchPreciousMetals = createServerFn({ method: "GET" }).handler(async () => {
-  const [gold, silver, fx] = await Promise.all([
-    alpha("GOLD_SILVER_SPOT", { symbol: "GOLD" }),
-    alpha("GOLD_SILVER_SPOT", { symbol: "SILVER" }),
-    alpha("CURRENCY_EXCHANGE_RATE", { from_currency: "USD", to_currency: "INR" }),
-  ]);
-  const gp = n((gold.data as Record<string,unknown> | undefined)?.price ?? gold.price);
-  const sp = n((silver.data as Record<string,unknown> | undefined)?.price ?? silver.price);
-  const rate = n((fx["Realtime Currency Exchange Rate"] as Record<string,unknown> | undefined)?.["5. Exchange Rate"]);
-  if (gp == null || sp == null || rate == null) throw new Error("Alpha Vantage metal/FX data unavailable");
-  return { gold10g: gp * rate * 10 / TROY_OUNCE_GRAMS, silverKg: sp * rate * 1000 / TROY_OUNCE_GRAMS, source: "Alpha Vantage Gold/Silver Spot + USD/INR", asOf: new Date().toISOString() };
+  const [gold, silver] = await Promise.all([etMetal("GOLD"), etMetal("SILVER")]);
+  return { gold10g: gold, silverKg: silver, source: "Economic Times · MCX", asOf: new Date().toISOString() };
 });
 
 function Home() {
@@ -44,7 +36,7 @@ function Home() {
 }
 
 function PreciousMetals() {
-  const metals=useQuery({queryKey:["precious-metals-alpha-v2"],queryFn:()=>fetchPreciousMetals(),staleTime:15000,refetchInterval:30000,retry:2});
+  const metals=useQuery({queryKey:["precious-metals-mcx-v1"],queryFn:()=>fetchPreciousMetals(),staleTime:15000,refetchInterval:30000,retry:2});
   const cards=[{name:"Gold",price:metals.data?.gold10g??null,unit:"₹ / 10g"},{name:"Silver",price:metals.data?.silverKg??null,unit:"₹ / kg"}]; const fmt=(v:number)=>`₹${Math.round(v).toLocaleString("en-IN")}`;
-  return <Section title="Gold & Silver" hint="Alpha Vantage spot price converted to INR"><div className="grid gap-3 sm:grid-cols-2">{cards.map(m=><Panel key={m.name} className="p-4"><div className="flex items-start justify-between gap-3"><div><div className="text-sm font-medium text-fg">{m.name}</div><div className="mt-1 text-xs text-muted">Spot · {m.unit}</div></div><div className="text-xs text-muted">INR</div></div><div className="mt-2 text-2xl font-semibold tabular text-fg">{m.price!=null?fmt(m.price):metals.isLoading?"Loading…":"—"}</div><div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">{[10,20,30,40].map(d=><div key={d} className="rounded-lg bg-surface-2 p-2"><div className="text-xs text-muted">{d}% discount</div><div className="mt-1 tabular text-sm text-fg">{m.price!=null?fmt(m.price*(1-d/100)):"—"}</div></div>)}</div></Panel>)}</div><p className="mt-2 text-[11px] text-subtle">Source: Alpha Vantage Gold/Silver Spot API + USD/INR. Gold ₹/10g and Silver ₹/kg. Spot prices can differ from MCX futures.</p></Section>;
+  return <Section title="Gold & Silver" hint="Current MCX price"><div className="grid gap-3 sm:grid-cols-2">{cards.map(m=><Panel key={m.name} className="p-4"><div className="flex items-start justify-between gap-3"><div><div className="text-sm font-medium text-fg">{m.name}</div><div className="mt-1 text-xs text-muted">MCX · {m.unit}</div></div><div className="text-xs text-muted">INR</div></div><div className="mt-2 text-2xl font-semibold tabular text-fg">{m.price!=null?fmt(m.price):metals.isLoading?"Loading…":"—"}</div><div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">{[10,20,30,40].map(d=><div key={d} className="rounded-lg bg-surface-2 p-2"><div className="text-xs text-muted">{d}% discount</div><div className="mt-1 tabular text-sm text-fg">{m.price!=null?fmt(m.price*(1-d/100)):"—"}</div></div>)}</div></Panel>)}</div><p className="mt-2 text-[11px] text-subtle">Source: Economic Times MCX feed. Gold ₹/10g and Silver ₹/kg. Rates can differ from jewellery retail prices.</p></Section>;
 }
