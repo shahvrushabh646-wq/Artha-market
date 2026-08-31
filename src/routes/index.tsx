@@ -15,38 +15,35 @@ const yahoo = async (symbol: string) => { for (const host of ["query1.finance.ya
 
 type McxPage = { gold10g: number | null; silverKg: number | null };
 const fetchPage = async (url: string): Promise<string> => { try { const res = await fetch(url, { cache: "no-store", headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/138 Safari/537.36", Accept: "text/html,application/xhtml+xml,application/json,*/*" } }); return res.ok ? await res.text() : ""; } catch { return ""; } };
-const cleanText = (html: string) => html.replace(/<script[\\s\\S]*?<\\/script>/gi, " ").replace(/<style[\\s\\S]*?<\\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&#x20;/gi, " ").replace(/&#39;/gi, "'").replace(/&quot;/gi, '"').replace(/\\s+/g, " ");
+const cleanText = (html: string) => html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&#x20;/gi, " ").replace(/&#39;/gi, "'").replace(/&quot;/gi, '"').replace(/\s+/g, " ");
 
 const parseIifl = (html: string): McxPage => {
   const text = cleanText(html);
-  const gold = text.match(/Gold\\s+\\d{1,2}\\s+[A-Za-z]{3}\\s+\\d{4}\\s*\\|\\s*GRMS\\s*\\|\\s*[\\d,]+(?:\\.\\d+)?\\s*\\|\\s*([\\d,]+(?:\\.\\d+)?)/i);
-  const silver = text.match(/Silver\\s+\\d{1,2}\\s+[A-Za-z]{3}\\s+\\d{4}\\s*\\|\\s*KGS\\s*\\|\\s*[\\d,]+(?:\\.\\d+)?\\s*\\|\\s*([\\d,]+(?:\\.\\d+)?)/i);
+  const gold = text.match(/Gold\s+\d{1,2}\s+[A-Za-z]{3}\s+\d{4}\s*\|\s*GRMS\s*\|\s*[\d,]+(?:\.\d+)?\s*\|\s*([\d,]+(?:\.\d+)?)/i);
+  const silver = text.match(/Silver\s+\d{1,2}\s+[A-Za-z]{3}\s+\d{4}\s*\|\s*KGS\s*\|\s*[\d,]+(?:\.\d+)?\s*\|\s*([\d,]+(?:\.\d+)?)/i);
   return { gold10g: gold ? Number(gold[1].replace(/,/g, "")) : null, silverKg: silver ? Number(silver[1].replace(/,/g, "")) : null };
 };
 
 const parseMcxLive = (html: string): McxPage => {
   const text = cleanText(html);
-  const gold = text.match(/MCX\\s+Gold\\s+(\\d{5,7}(?:\\.\\d+)?)/i);
-  const silver = text.match(/MCX\\s+Silver\\s+(\\d{5,7}(?:\\.\\d+)?)/i);
+  const gold = text.match(/MCX\s+Gold\s+(\d{5,7}(?:\.\d+)?)/i);
+  const silver = text.match(/MCX\s+Silver\s+(\d{5,7}(?:\.\d+)?)/i);
   return { gold10g: gold ? Number(gold[1].replace(/,/g, "")) : null, silverKg: silver ? Number(silver[1].replace(/,/g, "")) : null };
 };
 
 const parseEt = (html: string): McxPage => {
   const text = cleanText(html);
-  const gold = text.match(/MCX\\s+[0-9:.]+\\s*(?:AM|PM)?\\s*IST\\s*\\|[\\s\\S]{0,160}?(\\d{5,7}(?:\\.\\d+)?)\\s+Per\\s+10\\s*GRMS/i);
-  const silver = text.match(/MCX\\s+[0-9:.]+\\s*(?:AM|PM)?\\s*IST\\s*\\|[\\s\\S]{0,160}?(\\d{5,7}(?:\\.\\d+)?)\\s+Per\\s+1\\s*KGS/i);
+  const gold = text.match(/MCX\s+[0-9:.]+\s*(?:AM|PM)?\s*IST\s*\|[\s\S]{0,160}?(\d{5,7}(?:\.\d+)?)\s+Per\s+10\s*GRMS/i);
+  const silver = text.match(/MCX\s+[0-9:.]+\s*(?:AM|PM)?\s*IST\s*\|[\s\S]{0,160}?(\d{5,7}(?:\.\d+)?)\s+Per\s+1\s*KGS/i);
   return { gold10g: gold ? Number(gold[1]) : null, silverKg: silver ? Number(silver[1]) : null };
 };
 
 const fetchPreciousMetals = createServerFn({ method: "GET" }).handler(async () => {
-  // Primary source: IIFL Capital's MCX commodity table, which exposes the
-  // actual exchange LTP in INR for the active Gold/Silver contracts.
   const iifl = parseIifl(await fetchPage("https://www.indiainfoline.com/commodity"));
   let gold10g = iifl.gold10g;
   let silverKg = iifl.silverKg;
   let source = "IIFL Capital · MCX LTP";
 
-  // Secondary source: MCXLive's current MCX table.
   if (gold10g == null || silverKg == null) {
     const live = parseMcxLive(await fetchPage("https://mcxlive.org/"));
     if (gold10g == null && live.gold10g != null) gold10g = live.gold10g;
@@ -54,7 +51,6 @@ const fetchPreciousMetals = createServerFn({ method: "GET" }).handler(async () =
     if (live.gold10g != null || live.silverKg != null) source = "MCXLive · MCX LTP";
   }
 
-  // Third source: Economic Times MCX contract pages.
   if (gold10g == null || silverKg == null) {
     const [goldHtml, silverHtml] = await Promise.all([
       fetchPage("https://economictimes.indiatimes.com/commoditysummary/symbol-GOLD.cms"),
@@ -67,8 +63,6 @@ const fetchPreciousMetals = createServerFn({ method: "GET" }).handler(async () =
     if (goldEt.gold10g != null || silverEt.silverKg != null) source = "Economic Times · MCX LTP";
   }
 
-  // Final fallback: Yahoo global futures converted to INR. This prevents a
-  // blank card when an Indian page temporarily blocks Vercel's request.
   if (gold10g == null || silverKg == null) {
     const [goldUsd, silverUsd, usdInr] = await Promise.all([yahoo("GC=F"), yahoo("SI=F"), yahoo("INR=X")]);
     if (usdInr != null && usdInr > 0) {
