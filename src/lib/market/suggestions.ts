@@ -5,44 +5,40 @@ import type { Quote } from "./types";
 const UA = "Mozilla/5.0";
 const cache = { exp: 0, data: [] as Quote[] };
 
-type SparkResult = { symbol?: string; response?: Array<{ meta?: { regularMarketPrice?: number; currency?: string; exchangeName?: string; shortName?: string; longName?: string }; timestamp?: number[]; indicators?: { quote?: Array<{ high?: Array<number | null>; close?: Array<number | null> }> } }> };
-type SparkPayload = { spark?: { result?: SparkResult[] } };
+type Chart = { chart?: { result?: Array<{ meta?: Record<string, unknown>; timestamp?: number[]; indicators?: { quote?: Array<{ high?: Array<number | null>; close?: Array<number | null> }> } }> } };
+function number(v: unknown) { return typeof v === "number" && Number.isFinite(v) ? v : null; }
+function chunk<T>(a: T[], n: number) { const r: T[][] = []; for (let i = 0; i < a.length; i += n) r.push(a.slice(i, i + n)); return r; }
 
-function chunks<T>(items: T[], size: number) { const out: T[][] = []; for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size)); return out; }
-
-async function fetchBatch(symbols: string[]): Promise<SparkResult[]> {
-  const makeUrl = (host: string) => { const u = new URL(`https://${host}/v7/finance/spark`); u.searchParams.set("symbols", symbols.join(",")); u.searchParams.set("range", "5y"); u.searchParams.set("interval", "1d"); u.searchParams.set("indicators", "quote"); return u; };
+async function history(symbol: string) {
   for (const host of ["query1.finance.yahoo.com", "query2.finance.yahoo.com"]) {
     try {
-      const res = await fetch(makeUrl(host), { headers: { "User-Agent": UA, Accept: "application/json" }, cache: "no-store" });
+      const u = new URL(`https://${host}/v8/finance/chart/${encodeURIComponent(symbol)}`);
+      u.searchParams.set("range", "5y"); u.searchParams.set("interval", "1d"); u.searchParams.set("events", "div");
+      const res = await fetch(u, { headers: { "User-Agent": UA, Accept: "application/json" }, cache: "no-store" });
       if (!res.ok) continue;
-      const raw = await res.json() as SparkPayload;
-      if (Array.isArray(raw.spark?.result)) return raw.spark.result;
+      const raw = await res.json() as Chart;
+      const row = raw.chart?.result?.[0];
+      const highs = (row?.indicators?.quote?.[0]?.high ?? []).map(number).filter((x): x is number => x !== null);
+      const closes = (row?.indicators?.quote?.[0]?.close ?? []).map(number).filter((x): x is number => x !== null);
+      const price = number(row?.meta?.regularMarketPrice) ?? closes.at(-1) ?? null;
+      if (price !== null && highs.length) return { row, price, high5y: Math.max(...highs) };
     } catch {}
   }
-  return [];
+  return null;
 }
 
 async function getSuggestions(): Promise<Quote[]> {
   if (cache.exp > Date.now()) return cache.data;
-  const symbols = [...new Set(MOVERS_UNIVERSE.map(String))];
   const result: Quote[] = [];
-  for (const batch of chunks(symbols, 20)) {
-    const rows = await fetchBatch(batch);
-    for (const item of rows) {
-      const response = item.response?.[0];
-      const meta = response?.meta ?? {};
-      const closes = (response?.indicators?.quote?.[0]?.close ?? []).filter((v): v is number => typeof v === "number" && Number.isFinite(v));
-      const highs = (response?.indicators?.quote?.[0]?.high ?? []).filter((v): v is number => typeof v === "number" && Number.isFinite(v));
-      const price = Number(meta.regularMarketPrice ?? closes.at(-1));
-      if (!Number.isFinite(price) || highs.length === 0) continue;
-      const high5y = Math.max(...highs);
-      // ₹20+ stocks trigger at 25% of 5Y high. Stocks below ₹20 trigger at 10% of 5Y high.
+  for (const batch of chunk([...new Set(MOVERS_UNIVERSE.map(String))], 8)) {
+    const rows = await Promise.all(batch.map(async symbol => ({ symbol, data: await history(symbol) })));
+    for (const { symbol, data } of rows) {
+      if (!data) continue;
+      const { price, high5y } = data;
       const isBelow20 = price < 20;
       const threshold = high5y * (isBelow20 ? 0.10 : 0.25);
       if (price > threshold) continue;
-      const symbol = item.symbol ?? "";
-      result.push({ symbol, name: meta.longName ?? meta.shortName ?? symbol, price, previousClose: null, change: null, changePct: null, currency: meta.currency ?? "INR", exchange: meta.exchangeName ?? (symbol.endsWith(".BO") ? "BSE" : "NSE"), high52w: null, low52w: null, high5y, low5y: null, price75: Math.round(high5y * 0.25 * 100) / 100, signal75: "BUY", volume: null, dayHigh: null, dayLow: null, ok: true });
+      result.push({ symbol, name: symbol.replace(/\.NS$|\.BO$/i, ""), price, previousClose: null, change: null, changePct: null, currency: "INR", exchange: symbol.endsWith(".BO") ? "BSE" : "NSE", high52w: null, low52w: null, high5y, low5y: null, price75: Math.round(high5y * 0.25 * 100) / 100, signal75: "BUY", volume: null, dayHigh: null, dayLow: null, ok: true });
     }
   }
   const unique = new Map(result.map(q => [q.symbol, q]));
