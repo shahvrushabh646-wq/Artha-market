@@ -2,7 +2,6 @@ import { createServerFn } from "@tanstack/react-start";
 import { useQuery } from "@tanstack/react-query";
 import { z } from "zod";
 import { Panel } from "./widgets";
-import { OwnershipHistory } from "./ownership-history";
 
 type Props = { companyName: string; industry?: string | null };
 type WikiSearch = { query?: { search?: Array<{ title?: string }> } };
@@ -20,6 +19,5 @@ async function buildDescription(companyName: string, industry?: string | null): 
 export const fetchCompanyGujarati = createServerFn({ method: "POST" }).validator((data: unknown) => z.object({ companyName: z.string().min(1).max(200), industry: z.string().nullable().optional() }).parse(data)).handler(async ({ data }) => buildDescription(data.companyName, data.industry));
 export function CompanyGujarati({ companyName, industry }: Props) {
   const q = useQuery({ queryKey: ["company-gujarati", companyName, industry], queryFn: () => fetchCompanyGujarati({ data: { companyName, industry } }), staleTime: 24 * 60 * 60_000, gcTime: 7 * 24 * 60 * 60_000, retry: 1, refetchOnWindowFocus: false });
-  const symbol = companyName;
-  return <><OwnershipHistory symbol={symbol}/><Panel className="mt-3 p-3"><div className="text-[11px] uppercase tracking-[0.14em] text-subtle">કંપની શું કરે છે?</div><p className="mt-2 text-sm leading-relaxed text-muted">{q.isFetching ? "ગુજરાતીમાં કંપનીની માહિતી લાવી રહ્યા છીએ…" : q.data ?? "કંપનીનું ગુજરાતી વર્ણન હાલમાં ઉપલબ્ધ નથી."}</p><p className="mt-2 text-[10px] text-subtle">વર્ણન જાહેર કંપની માહિતી પરથી આપમેળે તૈયાર થાય છે.</p></Panel></>;
+  return <Panel className="mt-3 p-3"><div className="text-[11px] uppercase tracking-[0.14em] text-subtle">કંપની શું કરે છે?</div><p className="mt-2 text-sm leading-relaxed text-muted">{q.isFetching ? "ગુજરાતીમાં કંપનીની માહિતી લાવી રહ્યા છીએ…" : q.data ?? "કંપનીનું ગુજરાતી વર્ણન હાલમાં ઉપલબ્ધ નથી."}</p><p className="mt-2 text-[10px] text-subtle">વર્ણન જાહેર કંપની માહિતી પરથી આપમેળે તૈયાર થાય છે.</p></Panel>;
 }
