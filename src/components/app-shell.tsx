@@ -6,6 +6,7 @@ import { getMarketClock } from "@/lib/market/math";
 import { cn } from "@/lib/utils";
 import { WatchlistRuleNotifications } from "@/components/watchlist-rule-notifications";
 import { OneSignalPush } from "@/components/onesignal-push";
+import { ShareholdingPledge } from "@/components/shareholding-pledge";
 
 const NAV = [
   { to: "/", label: "Home", icon: LayoutGrid },
@@ -17,7 +18,9 @@ const NAV = [
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const searchStr = useRouterState({ select: (s) => s.location.searchStr });
   const clock = getMarketClock();
+  const stockSymbol = pathname === "/stock" ? new URLSearchParams(searchStr).get("symbol") ?? "RELIANCE.NS" : null;
 
   return (
     <div className="min-h-dvh bg-bg text-fg">
@@ -43,6 +46,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       <main className="mx-auto w-full max-w-5xl px-4 pb-[calc(5.5rem+env(safe-area-inset-bottom))] pt-5">
         {children}
+        {stockSymbol ? <ShareholdingPledge symbol={stockSymbol} /> : null}
       </main>
 
       <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-bg/94 pb-[env(safe-area-inset-bottom)] backdrop-blur-md">
