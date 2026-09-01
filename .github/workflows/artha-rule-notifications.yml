@@ -1,0 +1,27 @@
+name: Artha Rule Notifications
+
+on:
+  schedule:
+    - cron: "30 5 * * 1-5" # 11:00 IST
+    - cron: "30 9 * * 1-5" # 15:00 IST
+  workflow_dispatch:
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Artha notification endpoint
+        env:
+          NOTIFICATION_URL: ${{ secrets.ARTHA_NOTIFICATION_URL }}
+          CRON_SECRET: ${{ secrets.ARTHA_CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${NOTIFICATION_URL:-}" ] || [ -z "${CRON_SECRET:-}" ]; then
+            echo "ARTHA_NOTIFICATION_URL / ARTHA_CRON_SECRET are not configured; skipping safely."
+            exit 0
+          fi
+          curl --fail --silent --show-error --max-time 30 \
+            -X POST "$NOTIFICATION_URL" \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            -H "Content-Type: application/json" \
+            --data '{"source":"github-actions","timezone":"Asia/Kolkata"}'
