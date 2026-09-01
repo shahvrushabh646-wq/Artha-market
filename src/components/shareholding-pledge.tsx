@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, XAxis, YAxis } from "recharts";
 import { fetchAnalysis } from "@/lib/market/server";
 import { fetchOwnership } from "@/lib/market/ownership";
 import { cn } from "@/lib/utils";
@@ -51,7 +51,6 @@ export function ShareholdingPledge({ symbol }: { symbol: string }) {
           <CartesianGrid vertical={false} stroke="#2a2b30" strokeDasharray="2 4" />
           <XAxis dataKey="period" tick={{ fill: "#a7a9b0", fontSize: 10 }} tickLine={false} axisLine={{ stroke: "#a7a9b0" }} />
           <YAxis domain={[0, 100]} tickFormatter={v => `${v}%`} tick={{ fill: "#a7a9b0", fontSize: 10 }} tickLine={false} axisLine={false} width={38} />
-          <Tooltip formatter={(v: number) => pct(v)} contentStyle={{ background: "#17181d", border: "1px solid #303138", borderRadius: 10, color: "#fff" }} />
           {(["Promoter", "FII / FPI", "DII", "Public", "Others"] as const).map(k => <Bar key={k} dataKey={k} fill="#ffffff" radius={[3, 3, 0, 0]} maxBarSize={50} label={{ position: "top", fill: "#fff", fontSize: 10, formatter: (v: any) => pct(Number(v)) }} />)}
         </BarChart></ResponsiveContainer></div>
       </div> : <Empty />}
@@ -62,7 +61,7 @@ export function ShareholdingPledge({ symbol }: { symbol: string }) {
       <Tabs value={effectivePledgeTab} onChange={setPledgeTab} />
       {pie.length ? <div className="mt-3 rounded-xl bg-black px-2 py-5">
         <div className="text-center text-xs text-subtle">{effectivePledgeTab === "5 YEARS" ? "Latest annual pledge comparison" : (pledgeRow?.period ?? latestPledge?.period)}</div>
-        <div className="mx-auto h-72 max-w-sm"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={pie} dataKey="value" nameKey="name" cx="50%" cy="48%" innerRadius={70} outerRadius={112} label={({ value }) => pct(Number(value))} labelLine={false}><Cell fill="#2563eb" /><Cell fill="#f97316" /></Pie><Tooltip formatter={(v: number) => pct(v)} contentStyle={{ background: "#17181d", border: "1px solid #303138", borderRadius: 10, color: "#fff" }} /></PieChart></ResponsiveContainer></div>
+        <div className="mx-auto h-72 max-w-sm"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={pie} dataKey="value" nameKey="name" cx="50%" cy="48%" innerRadius={70} outerRadius={112} label={({ value }) => pct(Number(value))} labelLine={false}><Cell fill="#2563eb" /><Cell fill="#f97316" /></Pie></PieChart></ResponsiveContainer></div>
         <div className="flex flex-wrap justify-center gap-5 text-xs text-fg"><span><i className="mr-1.5 inline-block size-2.5 rounded-full bg-blue-600" />Pledged ({pct(pledge ?? 0)})</span><span><i className="mr-1.5 inline-block size-2.5 rounded-full bg-orange-500" />Unpledged ({pct(100 - (pledge ?? 0))})</span></div>
         <div className="mt-3 text-center text-xs text-subtle">360° promoter-share split</div>
       </div> : <Empty label="Pledge data is not available from the source right now." />}
