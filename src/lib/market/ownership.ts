@@ -6,16 +6,13 @@ type Result = { quarters: Row[]; years: Row[]; latest: string | null; source: st
 const cache = new Map<string, { exp: number; value: Result }>();
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/138 Safari/537.36";
 
-function clean(v: string) { return v.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/\s+/g, " ").trim(); }
-function num(v: string) { const n = Number(v.replace(/,/g, "").replace(/%/g, "").trim()); return Number.isFinite(n) ? n : null; }
-async function html(url: string) { const r = await fetch(url, { headers: { "User-Agent": UA, Accept: "text/html,application/xhtml+xml" }, cache: "no-store" }); if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.text(); }
+function clean(v: string) { return v.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&#39;/gi, "'").replace(/\s+/g, " ").trim(); }
+function num(v: string) { const n = Number(v.replace(/,/g, "").replace(/%/g, "").replace(/[₹-]/g, "").trim()); return Number.isFinite(n) ? n : null; }
+async function html(url: string) { const r = await fetch(url, { headers: { "User-Agent": UA, Accept: "text/html,application/xhtml+xml,text/plain" }, cache: "no-store" }); if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.text(); }
 
-function tablesAfterShareholding(source: string): string[][][] {
-  const start = source.search(/Shareholding Pattern/i);
-  if (start < 0) return [];
-  const section = source.slice(start, start + 250000);
+function extractTables(source: string): string[][][] {
   const out: string[][][] = [];
-  for (const tm of section.matchAll(/<table[\s\S]*?<\/table>/gi)) {
+  for (const tm of source.matchAll(/<table[\s\S]*?<\/table>/gi)) {
     const rows: string[][] = [];
     for (const rm of tm[0].matchAll(/<tr[\s\S]*?<\/tr>/gi)) {
       const cells = [...rm[0].matchAll(/<(?:th|td)[^>]*>([\s\S]*?)<\/(?:th|td)>/gi)].map(m => clean(m[1]));
@@ -26,40 +23,62 @@ function tablesAfterShareholding(source: string): string[][][] {
   return out;
 }
 
-function parseShareholding(rows: string[][]): Row[] {
-  const header = rows.findIndex(r => r.length >= 5 && r.some(c => /Sep|Dec|Mar|Jun/i.test(c)));
+function isPeriod(v: string) { return /^(?:Sep|Sept|Dec|Mar|Jun|Jul|Aug|Oct|Nov|Jan|Feb|Apr|May)\s+\d{4}$/i.test(v.trim()); }
+function parseOwnershipTable(rows: string[][]): Row[] {
+  const header = rows.findIndex(r => r.length >= 3 && r.filter(isPeriod).length >= 2);
   if (header < 0) return [];
-  const labels = rows[header].slice(1);
-  const get = (re: RegExp) => rows.find(r => re.test(r[0] ?? ""))?.slice(1).map(v => num(v) ?? 0) ?? labels.map(() => 0);
-  const promoter = get(/Promoters/i), fii = get(/FIIs|FII/i), dii = get(/DIIs|DII/i), pub = get(/^Public/i), gov = get(/Government/i);
+  const labels = rows[header].filter(isPeriod);
+  if (labels.length < 2) return [];
+  const indexOfPeriod = (p: string) => rows[header].findIndex(x => x === p);
+  const get = (re: RegExp) => {
+    const row = rows.find(r => re.test(r[0] ?? ""));
+    if (!row) return labels.map(() => null);
+    return labels.map(p => num(row[indexOfPeriod(p)] ?? ""));
+  };
+  const promoter = get(/Promoters|Promoter/i), fii = get(/FIIs|FII/i), dii = get(/DIIs|DII/i), pub = get(/^Public/i), gov = get(/Government|Govt/i);
   return labels.map((period, i) => {
-    const p = promoter[i] ?? 0, f = fii[i] ?? 0, d = dii[i] ?? 0, pu = pub[i] ?? 0, g = gov[i] ?? 0;
-    return { period, promoter: p, fii: f, dii: d, public: pu, others: Math.max(0, Math.round((100 - p - f - d - pu - g) * 100) / 100), pledged: null, unpledged: null };
-  }).filter(r => /\b(?:Jun|Sep|Dec|Mar)\b/i.test(r.period));
+    const p = promoter[i], f = fii[i], d = dii[i], pu = pub[i], g = gov[i];
+    const known = [p, f, d, pu, g].filter(v => v != null).reduce((a, b) => a + (b ?? 0), 0);
+    return { period, promoter: p, fii: f, dii: d, public: pu, others: Math.max(0, Math.round((100 - known) * 100) / 100), pledged: null, unpledged: null };
+  });
 }
 
-function parseSmartPledge(source: string): Row[] {
-  const rows: Row[] = [];
-  for (const re of [/(?:Mar|Jun|Sep|Dec)[^\d]{0,4}\d{4}\D{0,35}(\d+(?:\.\d+)?)\s*%/gi, /(?:Mar|Jun|Sep|Dec)\s*\d{4}[\s|:,-]+(\d+(?:\.\d+)?)\s*%/gi]) {
-    for (const m of source.matchAll(re)) {
-      const period = m[0].match(/(?:Mar|Jun|Sep|Dec)\s*\d{4}/i)?.[0]?.replace(/\s+/g, " ");
-      const pledged = num(m[1] ?? "");
-      if (period && pledged != null && pledged >= 0 && pledged <= 100) rows.push({ period, promoter: null, fii: null, dii: null, public: null, others: null, pledged, unpledged: 100 - pledged });
-    }
-  }
-  const unique = new Map<string, Row>();
-  for (const r of rows) unique.set(r.period.toLowerCase(), r);
-  return [...unique.values()].sort((a, b) => a.period.localeCompare(b.period));
+function parseScreener(source: string): { quarters: Row[]; years: Row[] } {
+  const tables = extractTables(source);
+  const parsed = tables.map(parseOwnershipTable).filter(r => r.length >= 2);
+  if (!parsed.length) return { quarters: [], years: [] };
+  const quarter = parsed.find(r => r.length >= 4) ?? parsed[0];
+  const annual = parsed.slice().sort((a, b) => b.length - a.length).find(r => r.filter(x => /Mar\s+\d{4}/i.test(x.period)).length >= 4) ?? [];
+  return { quarters: quarter, years: annual.filter(r => /Mar\s+\d{4}/i.test(r.period)).slice(-5) };
+}
+
+function parseDebut(source: string): Row[] {
+  const tables = extractTables(source);
+  const rows = tables.map(t => {
+    const parsed = parseOwnershipTable(t);
+    if (!parsed.length) return [];
+    const pledgeRow = t.find(r => /Promoter Pledge/i.test(r[0] ?? ""));
+    if (!pledgeRow) return parsed;
+    const header = t.findIndex(r => r.length >= 3 && r.filter(isPeriod).length >= 2);
+    if (header < 0) return parsed;
+    return parsed.map(r => {
+      const idx = t[header].findIndex(x => x === r.period);
+      const pledged = idx >= 0 ? num(pledgeRow[idx] ?? "") : null;
+      return { ...r, pledged, unpledged: pledged == null ? null : Math.max(0, 100 - pledged) };
+    });
+  }).filter(r => r.length);
+  return rows.sort((a, b) => b.length - a.length)[0] ?? [];
 }
 
 function merge(a: Row[], b: Row[]) {
   const map = new Map<string, Row>();
   for (const r of [...a, ...b]) {
-    const old = map.get(r.period);
-    if (!old) map.set(r.period, r);
-    else map.set(r.period, { ...old, ...Object.fromEntries(Object.entries(r).filter(([, v]) => v != null)) } as Row);
+    const key = r.period.toLowerCase();
+    const old = map.get(key);
+    if (!old) map.set(key, r);
+    else map.set(key, { ...old, ...Object.fromEntries(Object.entries(r).filter(([, v]) => v != null)) } as Row);
   }
-  return [...map.values()].sort((x, y) => x.period.localeCompare(y.period));
+  return [...map.values()].sort((x, y) => new Date(`1 ${x.period}`).getTime() - new Date(`1 ${y.period}`).getTime());
 }
 
 export const fetchOwnership = createServerFn({ method: "POST" })
@@ -68,25 +87,33 @@ export const fetchOwnership = createServerFn({ method: "POST" })
     const symbol = data.symbol.toUpperCase().replace(/\.NS$|\.BO$/i, "").trim();
     const hit = cache.get(symbol);
     if (hit && hit.exp > Date.now()) return hit.value;
-    try {
-      const screener = await html(`https://www.screener.in/company/${encodeURIComponent(symbol)}/consolidated/`);
-      const tables = tablesAfterShareholding(screener);
-      const parsed = tables.map(parseShareholding).filter(r => r.length);
-      const quarters = parsed.find(r => r.length >= 4) ?? [];
-      const annual = parsed.at(-1) ?? [];
-      let pledge: Row[] = [];
+
+    let quarters: Row[] = [];
+    let years: Row[] = [];
+    let source = "Unavailable";
+
+    // Screener is the primary source for exchange-reported shareholding history.
+    for (const url of [`https://www.screener.in/company/${encodeURIComponent(symbol)}/`, `https://www.screener.in/company/${encodeURIComponent(symbol)}/consolidated/`]) {
       try {
-        const company = data.companyName?.trim() || symbol;
-        const smart = await html(`https://www.smart-investing.in/shareholding.php?Company=${encodeURIComponent(company)}&p=Pledged+Promoter+Holdings`);
-        pledge = parseSmartPledge(smart);
+        const parsed = parseScreener(await html(url));
+        if (parsed.quarters.length) { quarters = parsed.quarters; years = parsed.years; source = "Screener"; break; }
       } catch {}
-      const merged = merge(quarters, pledge);
-      const rows = merged.length ? merged : quarters;
-      const years = (annual.length ? annual : rows.filter(r => /Mar/i.test(r.period))).filter(r => /Mar/i.test(r.period)).slice(-5);
-      const value: Result = { quarters: rows.slice(-12), years, latest: quarters.at(-1)?.period ?? null, source: quarters.length ? "Screener + Smart-Investing" : "Unavailable" };
-      cache.set(symbol, { exp: Date.now() + 30 * 60_000, value });
-      return value;
-    } catch {
-      return { quarters: [], years: [], latest: null, source: "Unavailable" };
     }
+
+    // Debut Plus provides the same quarterly table with promoter pledge history, including the latest quarter.
+    try {
+      const debut = parseDebut(await html(`https://debut.plus/stocks/${encodeURIComponent(symbol)}`));
+      if (debut.length) {
+        quarters = merge(quarters, debut);
+        source = quarters.some(r => r.pledged != null) ? "Screener + Debut Plus" : source;
+        if (!years.length) years = debut.filter(r => /Mar\s+\d{4}/i.test(r.period)).slice(-5);
+      }
+    } catch {}
+
+    // Keep only the latest 12 quarters for the quarter tabs.
+    quarters = quarters.slice(-12);
+    const latest = quarters.at(-1)?.period ?? null;
+    const value: Result = { quarters, years: years.slice(-5), latest, source };
+    cache.set(symbol, { exp: Date.now() + 15 * 60_000, value });
+    return value;
   });
