@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { APP_NAME } from "@/lib/market/config";
 import { getMarketClock } from "@/lib/market/math";
 import { cn } from "@/lib/utils";
+import { WatchlistRuleNotifications } from "@/components/watchlist-rule-notifications";
 
 const NAV = [
   { to: "/", label: "Home", icon: LayoutGrid },
@@ -19,6 +20,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-dvh bg-bg text-fg">
+      <WatchlistRuleNotifications />
       <header className="sticky top-0 z-30 border-b border-border bg-bg/92 pt-[env(safe-area-inset-top)] backdrop-blur-md">
         <div className="mx-auto flex h-14 max-w-5xl items-center justify-between gap-3 px-4">
           <Link to="/" className="flex min-w-0 items-baseline gap-2">
