@@ -1,19 +1,92 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
-type Row = { period:string; promoter:number|null; fii:number|null; dii:number|null; public:number|null; others:number|null; pledged:number|null; unpledged:number|null };
-type Result = { quarters:Row[]; years:Row[]; latest:string|null; source:string };
-const cache=new Map<string,{exp:number;value:Result}>();
-const UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/138 Safari/537.36";
-const wait=(ms:number)=>new Promise(r=>setTimeout(r,ms));
-function rec(v:unknown):Record<string,unknown>|null{return v&&typeof v==="object"?v as Record<string,unknown>:null;}
-function num(v:unknown):number|null{if(typeof v==="number"&&Number.isFinite(v))return v;if(typeof v==="string"&&v.trim()){const n=Number(v.replace(/,/g,"").replace(/%/g,""));return Number.isFinite(n)?n:null;}return null;}
-function key(v:string){return v.toLowerCase().replace(/[^a-z0-9]/g,"");}
-function findNum(row:Record<string,unknown>,names:string[]){for(const[k,v]of Object.entries(row)){if(names.some(n=>key(k).includes(n))){const n=num(v);if(n!=null)return n;}}return null;}
-function findDate(row:Record<string,unknown>){for(const k of ["asOnDate","as_on_date","asOn","date","quarterEndDate","quarterEnd","period"]){const v=row[k];if(typeof v==="string"&&/20\d{2}/.test(v))return v;}for(const[k,v]of Object.entries(row))if(/date|period|quarter|asof/i.test(k)&&typeof v==="string"&&/20\d{2}/.test(v))return v;return null;}
-function allObjects(v:unknown,out:Record<string,unknown>[]=[]):Record<string,unknown>[] {if(Array.isArray(v)){for(const x of v)allObjects(x,out);}else{const r=rec(v);if(r){out.push(r);for(const x of Object.values(r))if(x&&typeof x==="object")allObjects(x,out);}}return out;}
-async function nseJsonOnce(endpoint:string,referer:string,cookie=""){const res=await fetch(`https://www.nseindia.com/api/${endpoint}`,{headers:{"User-Agent":UA,Accept:"application/json,text/plain,*/*","Accept-Language":"en-US,en;q=0.9","Referer":referer,"Origin":"https://www.nseindia.com","X-Requested-With":"XMLHttpRequest",...(cookie?{Cookie:cookie}:{})},cache:"no-store"});if(!res.ok)throw new Error(`NSE ${res.status}`);return res.json();}
-async function nseJson(symbol:string,endpoints:string[]):Promise<unknown>{const bare=symbol.toUpperCase().replace(/\.NS$|\.BO$/i,"").trim();let cookie="";try{const home=await fetch("https://www.nseindia.com/",{headers:{"User-Agent":UA,"Accept":"text/html,application/xhtml+xml","Accept-Language":"en-US,en;q=0.9"},cache:"no-store"});cookie=(home.headers.get("set-cookie")??"").split(/,(?=[^;]+=)/).map(v=>v.split(";",1)[0]).filter(Boolean).join("; ");}catch{}const ref=`https://www.nseindia.com/companies-listing/corporate-filings-shareholding-pattern?symbol=${encodeURIComponent(bare)}&tabIndex=equity`;let last:unknown=null;for(let i=0;i<endpoints.length;i++){try{return await nseJsonOnce(endpoints[i],ref,cookie);}catch(e){last=e;if(i<endpoints.length-1)await wait(250);}}throw last??new Error("NSE request failed");}
-function extractRows(raw:unknown):Row[]{const rows:Row[]=[];for(const r of allObjects(raw)){const period=findDate(r);if(!period)continue;const promoter=findNum(r,["promoterandpromotergroup","promoterpromotergroup","promoterholding","promoter"]);const fii=findNum(r,["fii","fpi","foreigninstitution","foreignportfolio"]);const dii=findNum(r,["dii","domesticinstitution"]);const pub=findNum(r,["publicshareholder","publicholding","publicval","public"]);const pledged=findNum(r,["promotersharesencumbered","promotersharespledged","sharespledged","pledged","pledge"]);if([promoter,fii,dii,pub,pledged].every(v=>v==null))continue;const known=(promoter??0)+(fii??0)+(dii??0)+(pub??0);const others=(promoter!=null||fii!=null||dii!=null||pub!=null)?Math.max(0,100-known):null;let pledgePct=pledged;if(pledged!=null&&promoter!=null&&promoter>1&&pledged>1)pledgePct=Math.min(100,pledged/promoter*100);rows.push({period,promoter,fii,dii,public:pub,others,pledged:pledgePct,unpledged:pledgePct==null?null:Math.max(0,100-pledgePct)});}const map=new Map<string,Row>();for(const r of rows){const old=map.get(r.period);map.set(r.period,old?{...old,...Object.fromEntries(Object.entries(r).filter(([,v])=>v!=null))} as Row:r);}return [...map.values()].sort((a,b)=>a.period.localeCompare(b.period));}
-function merge(a:Row[],b:Row[]){const m=new Map<string,Row>();for(const r of [...a,...b]){const old=m.get(r.period);m.set(r.period,old?{...old,...Object.fromEntries(Object.entries(r).filter(([,v])=>v!=null))} as Row:r);}return [...m.values()].sort((x,y)=>x.period.localeCompare(y.period));}
-export const fetchOwnership=createServerFn({method:"POST"}).validator((data:unknown)=>z.object({symbol:z.string().min(1).max(120)}).parse(data)).handler(async({data}):Promise<Result>=>{const clean=data.symbol.toUpperCase().replace(/\.NS$|\.BO$/i,"").trim();const hit=cache.get(clean);if(hit&&hit.exp>Date.now())return hit.value;let holding:Row[]=[];let pledge:Row[]=[];try{const raw=await nseJson(clean,[`corporate-share-holdings-master?index=equities&symbol=${encodeURIComponent(clean)}`,`corporate-share-holdings-master?symbol=${encodeURIComponent(clean)}`]);holding=extractRows(raw);}catch{}try{const raw=await nseJson(clean,[`corporate-pledged-data?index=equities&symbol=${encodeURIComponent(clean)}`,`corporate-pledged-data?symbol=${encodeURIComponent(clean)}`,`corporate-pledged-data?index=equities`]);pledge=extractRows(raw);}catch{}const rows=merge(holding,pledge);if(!rows.length){const value={quarters:[],years:[],latest:null,source:"NSE"};cache.set(clean,{exp:Date.now()+5*60_000,value});return value;}const yearsMap=new Map<string,Row>();for(const r of rows){const m=r.period.match(/20\d{2}/);if(m)yearsMap.set(m[1],r);}const years=[...yearsMap.entries()].sort((a,b)=>a[0].localeCompare(b[0])).slice(-5).map(([,r])=>r);const value={quarters:rows.slice(-8),years,latest:rows.at(-1)?.period??null,source:"NSE"};cache.set(clean,{exp:Date.now()+15*60_000,value});return value;});
+type Row = { period: string; promoter: number | null; fii: number | null; dii: number | null; public: number | null; others: number | null; pledged: number | null; unpledged: number | null };
+type Result = { quarters: Row[]; years: Row[]; latest: string | null; source: string };
+const cache = new Map<string, { exp: number; value: Result }>();
+const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/138 Safari/537.36";
+
+function clean(v: string) { return v.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/\s+/g, " ").trim(); }
+function num(v: string) { const n = Number(v.replace(/,/g, "").replace(/%/g, "").trim()); return Number.isFinite(n) ? n : null; }
+async function html(url: string) { const r = await fetch(url, { headers: { "User-Agent": UA, Accept: "text/html,application/xhtml+xml" }, cache: "no-store" }); if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.text(); }
+
+function tablesAfterShareholding(source: string): string[][][] {
+  const start = source.search(/Shareholding Pattern/i);
+  if (start < 0) return [];
+  const section = source.slice(start, start + 250000);
+  const out: string[][][] = [];
+  for (const tm of section.matchAll(/<table[\s\S]*?<\/table>/gi)) {
+    const rows: string[][] = [];
+    for (const rm of tm[0].matchAll(/<tr[\s\S]*?<\/tr>/gi)) {
+      const cells = [...rm[0].matchAll(/<(?:th|td)[^>]*>([\s\S]*?)<\/(?:th|td)>/gi)].map(m => clean(m[1]));
+      if (cells.length) rows.push(cells);
+    }
+    if (rows.length) out.push(rows);
+  }
+  return out;
+}
+
+function parseShareholding(rows: string[][]): Row[] {
+  const header = rows.findIndex(r => r.length >= 5 && r.some(c => /Sep|Dec|Mar|Jun/i.test(c)));
+  if (header < 0) return [];
+  const labels = rows[header].slice(1);
+  const get = (re: RegExp) => rows.find(r => re.test(r[0] ?? ""))?.slice(1).map(v => num(v) ?? 0) ?? labels.map(() => 0);
+  const promoter = get(/Promoters/i), fii = get(/FIIs|FII/i), dii = get(/DIIs|DII/i), pub = get(/^Public/i), gov = get(/Government/i);
+  return labels.map((period, i) => {
+    const p = promoter[i] ?? 0, f = fii[i] ?? 0, d = dii[i] ?? 0, pu = pub[i] ?? 0, g = gov[i] ?? 0;
+    return { period, promoter: p, fii: f, dii: d, public: pu, others: Math.max(0, Math.round((100 - p - f - d - pu - g) * 100) / 100), pledged: null, unpledged: null };
+  }).filter(r => /\b(?:Jun|Sep|Dec|Mar)\b/i.test(r.period));
+}
+
+function parseSmartPledge(source: string): Row[] {
+  const rows: Row[] = [];
+  for (const re of [/(?:Mar|Jun|Sep|Dec)[^\d]{0,4}\d{4}\D{0,35}(\d+(?:\.\d+)?)\s*%/gi, /(?:Mar|Jun|Sep|Dec)\s*\d{4}[\s|:,-]+(\d+(?:\.\d+)?)\s*%/gi]) {
+    for (const m of source.matchAll(re)) {
+      const period = m[0].match(/(?:Mar|Jun|Sep|Dec)\s*\d{4}/i)?.[0]?.replace(/\s+/g, " ");
+      const pledged = num(m[1] ?? "");
+      if (period && pledged != null && pledged >= 0 && pledged <= 100) rows.push({ period, promoter: null, fii: null, dii: null, public: null, others: null, pledged, unpledged: 100 - pledged });
+    }
+  }
+  const unique = new Map<string, Row>();
+  for (const r of rows) unique.set(r.period.toLowerCase(), r);
+  return [...unique.values()].sort((a, b) => a.period.localeCompare(b.period));
+}
+
+function merge(a: Row[], b: Row[]) {
+  const map = new Map<string, Row>();
+  for (const r of [...a, ...b]) {
+    const old = map.get(r.period);
+    if (!old) map.set(r.period, r);
+    else map.set(r.period, { ...old, ...Object.fromEntries(Object.entries(r).filter(([, v]) => v != null)) } as Row);
+  }
+  return [...map.values()].sort((x, y) => x.period.localeCompare(y.period));
+}
+
+export const fetchOwnership = createServerFn({ method: "POST" })
+  .validator((data: unknown) => z.object({ symbol: z.string().min(1).max(120), companyName: z.string().max(200).optional() }).parse(data))
+  .handler(async ({ data }): Promise<Result> => {
+    const symbol = data.symbol.toUpperCase().replace(/\.NS$|\.BO$/i, "").trim();
+    const hit = cache.get(symbol);
+    if (hit && hit.exp > Date.now()) return hit.value;
+    try {
+      const screener = await html(`https://www.screener.in/company/${encodeURIComponent(symbol)}/consolidated/`);
+      const tables = tablesAfterShareholding(screener);
+      const parsed = tables.map(parseShareholding).filter(r => r.length);
+      const quarters = parsed.find(r => r.length >= 4) ?? [];
+      const annual = parsed.at(-1) ?? [];
+      let pledge: Row[] = [];
+      try {
+        const company = data.companyName?.trim() || symbol;
+        const smart = await html(`https://www.smart-investing.in/shareholding.php?Company=${encodeURIComponent(company)}&p=Pledged+Promoter+Holdings`);
+        pledge = parseSmartPledge(smart);
+      } catch {}
+      const merged = merge(quarters, pledge);
+      const rows = merged.length ? merged : quarters;
+      const years = (annual.length ? annual : rows.filter(r => /Mar/i.test(r.period))).filter(r => /Mar/i.test(r.period)).slice(-5);
+      const value: Result = { quarters: rows.slice(-12), years, latest: quarters.at(-1)?.period ?? null, source: quarters.length ? "Screener + Smart-Investing" : "Unavailable" };
+      cache.set(symbol, { exp: Date.now() + 30 * 60_000, value });
+      return value;
+    } catch {
+      return { quarters: [], years: [], latest: null, source: "Unavailable" };
+    }
+  });
