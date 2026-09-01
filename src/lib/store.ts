@@ -22,14 +22,31 @@ export type AlertItem = {
   triggeredAt: string | null;
 };
 
+export type RuleAlert = {
+  symbol: string;
+  rule: "75" | "90";
+  firstActiveDay: string;
+  lastActiveDay: string;
+  dayNumber: number;
+  sentSlots: string[];
+};
+
 function uid() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function previousTradingDay(date: string) {
+  const d = new Date(`${date}T12:00:00+05:30`);
+  d.setDate(d.getDate() - 1);
+  while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() - 1);
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(d);
 }
 
 type DeskState = {
   watchlist: string[];
   holdings: Holding[];
   alerts: AlertItem[];
+  ruleAlerts: RuleAlert[];
   lastSymbol: string;
   addWatch: (symbol: string) => boolean;
   removeWatch: (symbol: string) => void;
@@ -42,6 +59,8 @@ type DeskState = {
   deleteAlert: (id: string) => void;
   clearAlerts: () => void;
   markTriggered: (ids: string[]) => void;
+  touchRuleAlert: (symbol: string, rule: RuleAlert["rule"], day: string) => RuleAlert;
+  markRuleAlertSlot: (symbol: string, rule: RuleAlert["rule"], slot: string) => void;
   setLastSymbol: (symbol: string) => void;
 };
 
@@ -51,6 +70,7 @@ export const useDesk = create<DeskState>()(
       watchlist: DEFAULT_WATCHLIST,
       holdings: [],
       alerts: [],
+      ruleAlerts: [],
       lastSymbol: "RELIANCE.NS",
       addWatch: (symbol) => {
         const s = normalizeSymbol(symbol);
@@ -85,13 +105,25 @@ export const useDesk = create<DeskState>()(
         const now = new Date().toISOString();
         set({ alerts: get().alerts.map((a) => ids.includes(a.id) && a.status === "ACTIVE" ? { ...a, status: "TRIGGERED", triggeredAt: now } : a) });
       },
+      touchRuleAlert: (symbol, rule, day) => {
+        const existing = get().ruleAlerts.find((x) => x.symbol === symbol && x.rule === rule);
+        if (existing?.lastActiveDay === day) return existing;
+        const continued = existing?.lastActiveDay === previousTradingDay(day);
+        const next: RuleAlert = existing && continued
+          ? { ...existing, lastActiveDay: day, dayNumber: Math.min(3, existing.dayNumber + 1), sentSlots: existing.sentSlots.filter((x) => x.startsWith(`${day}:`)) }
+          : { symbol, rule, firstActiveDay: day, lastActiveDay: day, dayNumber: 1, sentSlots: [] };
+        set({ ruleAlerts: [...get().ruleAlerts.filter((x) => !(x.symbol === symbol && x.rule === rule)), next] });
+        return next;
+      },
+      markRuleAlertSlot: (symbol, rule, slot) => {
+        set({ ruleAlerts: get().ruleAlerts.map((x) => x.symbol === symbol && x.rule === rule && !x.sentSlots.includes(slot) ? { ...x, sentSlots: [...x.sentSlots, slot] } : x) });
+      },
       setLastSymbol: (symbol) => set({ lastSymbol: normalizeSymbol(symbol) }),
     }),
     {
       name: "artha-desk",
-      version: 2,
+      version: 3,
       storage: createJSONStorage(() => localStorage),
-      // Never replace a saved watchlist with DEFAULT_WATCHLIST during hydration.
       merge: (persistedState, currentState) => {
         const persisted = persistedState as Partial<DeskState> | undefined;
         return {
@@ -100,6 +132,7 @@ export const useDesk = create<DeskState>()(
           watchlist: Array.isArray(persisted?.watchlist)
             ? persisted.watchlist.map(normalizeSymbol).filter(Boolean)
             : currentState.watchlist,
+          ruleAlerts: Array.isArray(persisted?.ruleAlerts) ? persisted.ruleAlerts : [],
         };
       },
       migrate: (persistedState) => persistedState as DeskState,
