@@ -12,9 +12,19 @@ export const Route = createFileRoute("/")({ component: Home });
 
 type MetalPrices = { gold10g: number | null; silverKg: number | null; asOf: string | null; source: string };
 
+type MetalsResponse = {
+  status?: string;
+  timestamp?: string;
+  error_message?: string;
+  error?: string;
+  metals?: Record<string, unknown>;
+};
+
 const fetchPreciousMetals = createServerFn({ method: "GET" }).handler(async (): Promise<MetalPrices> => {
-  const apiKey = process.env.METALS_DEV_API_KEY;
-  if (!apiKey) throw new Error("METALS_DEV_API_KEY is missing");
+  // Keep the API key server-side. Support both names so the Vercel variable can be
+  // named METALS_DEV_API_KEY or METALS_API_KEY without exposing it to the browser.
+  const apiKey = process.env.METALS_DEV_API_KEY || process.env.METALS_API_KEY;
+  if (!apiKey) throw new Error("Metals.Dev API key is not configured in Vercel");
 
   const url = new URL("https://api.metals.dev/v1/latest");
   url.searchParams.set("api_key", apiKey);
@@ -25,23 +35,18 @@ const fetchPreciousMetals = createServerFn({ method: "GET" }).handler(async (): 
     headers: { Accept: "application/json" },
     cache: "no-store",
   });
-  if (!res.ok) throw new Error(`Metals.Dev HTTP ${res.status}`);
 
-  const raw = await res.json() as {
-    status?: string;
-    timestamp?: string;
-    error_message?: string;
-    metals?: { gold?: unknown; silver?: unknown };
-  };
-
-  if (raw.status !== "success") {
-    throw new Error(raw.error_message || "Metals.Dev API request failed");
+  const raw = await res.json().catch(() => ({})) as MetalsResponse;
+  if (!res.ok || raw.status !== "success") {
+    throw new Error(raw.error_message || raw.error || `Metals.Dev HTTP ${res.status}`);
   }
 
-  const goldPerGram = Number(raw.metals?.gold);
-  const silverPerGram = Number(raw.metals?.silver);
-  if (!Number.isFinite(goldPerGram) || !Number.isFinite(silverPerGram)) {
-    throw new Error("Gold/Silver price missing from Metals.Dev response");
+  const metals = raw.metals || {};
+  const goldPerGram = Number(metals.gold);
+  const silverPerGram = Number(metals.silver);
+
+  if (!Number.isFinite(goldPerGram) || !Number.isFinite(silverPerGram) || goldPerGram <= 0 || silverPerGram <= 0) {
+    throw new Error("Metals.Dev returned no valid gold/silver prices");
   }
 
   return {
@@ -75,7 +80,7 @@ function Home() {
 
 function PreciousMetals() {
   const metals = useQuery({
-    queryKey: ["precious-metals-metalsdev-v1"],
+    queryKey: ["precious-metals-metalsdev-v2"],
     queryFn: () => fetchPreciousMetals(),
     staleTime: 15000,
     refetchInterval: 60000,
