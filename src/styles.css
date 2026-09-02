@@ -1,18 +1,18 @@
 @import "tailwindcss";
 
 @theme {
-  --color-bg: #000000;
-  --color-surface: #13151a;
-  --color-surface-2: #1b1e25;
-  --color-surface-3: #242830;
-  --color-fg: #ffffff;
-  --color-muted: #ffffff;
-  --color-subtle: #ffffff;
-  --color-accent: #ffffff;
-  --color-accent-fg: #000000;
-  --color-up: #4eae7a;
-  --color-down: #d15c5c;
-  --color-border: #ffffff14;
+  --color-bg: #E8F0F2;
+  --color-surface: #FFFFFF;
+  --color-surface-2: #F2F6F7;
+  --color-surface-3: #DCE8EA;
+  --color-fg: #17323A;
+  --color-muted: #5F747B;
+  --color-subtle: #71858B;
+  --color-accent: #B8F23D;
+  --color-accent-fg: #17323A;
+  --color-up: #39B878;
+  --color-down: #E56B6F;
+  --color-border: #174B5718;
   --font-sans: Aptos, Arial, Helvetica, sans-serif;
   --font-display: Aptos, Arial, Helvetica, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
@@ -20,8 +20,8 @@
   --radius-md: 12px;
   --radius-lg: 16px;
   --radius-xl: 24px;
-  --shadow-border: 0 0 0 1px rgba(255, 255, 255, 0.08);
-  --shadow-border-hover: 0 0 0 1px rgba(255, 255, 255, 0.14);
+  --shadow-border: 0 0 0 1px rgba(23, 75, 87, 0.10);
+  --shadow-border-hover: 0 0 0 1px rgba(23, 75, 87, 0.18);
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --motion-quick: 150ms;
   --motion-fast: 250ms;
