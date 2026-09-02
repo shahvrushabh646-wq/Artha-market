@@ -12,18 +12,15 @@ export const Route = createFileRoute("/")({ component: Home });
 
 type MetalPrices = { gold10g: number | null; silverKg: number | null; asOf: string | null; source: string };
 type MetalsResponse = { status?: string; timestamp?: string; error_message?: string; error?: string; metals?: Record<string, unknown> };
-
 const TROY_OUNCE_GRAMS = 31.1034768;
 
 const fetchPreciousMetals = createServerFn({ method: "GET" }).handler(async (): Promise<MetalPrices> => {
-  const apiKey = (process.env.METALS_DEV_API_KEY || process.env.METALS_API_KEY || process.env.METALSDEV_API_KEY || "").trim();
-  if (!apiKey) throw new Error("Metals.Dev API key is not configured in Vercel");
+  const apiKey = (process.env.METAL || "").trim();
+  if (!apiKey) throw new Error("METAL API key is not configured in Vercel");
 
   const url = new URL("https://api.metals.dev/v1/latest");
   url.searchParams.set("api_key", apiKey);
   url.searchParams.set("currency", "INR");
-  // Use the documented default precious-metal unit (troy ounce) and convert locally.
-  // This avoids relying on server-side unit conversion while still giving INR/10g and INR/kg.
   url.searchParams.set("unit", "toz");
 
   const res = await fetch(url.toString(), { headers: { Accept: "application/json" }, cache: "no-store" });
@@ -65,7 +62,7 @@ function Home() {
 }
 
 function PreciousMetals() {
-  const metals = useQuery({ queryKey: ["precious-metals-metalsdev-v3"], queryFn: () => fetchPreciousMetals(), staleTime: 30000, refetchInterval: 60000, refetchOnWindowFocus: true, retry: 2 });
+  const metals = useQuery({ queryKey: ["precious-metals-metalsdev-v4"], queryFn: () => fetchPreciousMetals(), staleTime: 30000, refetchInterval: 60000, refetchOnWindowFocus: true, retry: 2 });
   const cards = [
     { name: "Gold", price: metals.data?.gold10g ?? null, unit: "₹ / 10g" },
     { name: "Silver", price: metals.data?.silverKg ?? null, unit: "₹ / kg" },
