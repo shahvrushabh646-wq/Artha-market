@@ -19,6 +19,17 @@ function date(v: string | null) {
   return v ? new Date(`${v}T00:00:00`).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "માહિતી ઉપલબ્ધ નથી";
 }
 
+const businessGujarati: Record<string, string> = {
+  "deepa-jewellers": "હોલમાર્ક કરેલી સોનાની જ્વેલરીનું B2B ડિઝાઇન, પ્રોસેસિંગ અને સપ્લાય કરે છે. મુખ્ય ગ્રાહકોમાં જ્વેલરી રિટેલ ચેઇન્સ અને સ્વતંત્ર સ્ટોર્સનો સમાવેશ થાય છે.",
+  "rays-of-belief": "ન્યુરો-ડેવલપમેન્ટલ સમસ્યાઓ ધરાવતા બાળકો માટે કસ્ટમાઇઝ્ડ સારવાર અને ક્લિનિકલ કેર પ્રોગ્રામ્સ પૂરા પાડતી હેલ્થકેર સંસ્થા છે.",
+  "purple-style-labs": "ડિઝાઇનર કપડાં, જ્વેલરી, એસેસરીઝ અને કિડ્સવેરનું લક્ઝરી ઓમ્ની-ચેનલ ફેશન પ્લેટફોર્મ ચલાવે છે, જે સ્ટોર્સ અને ડિજિટલ ચેનલ દ્વારા વેચાણ કરે છે.",
+  "shanti-inorganics": "ઇનઓર્ગેનિક કેમિકલ્સ અને સંબંધિત ઔદ્યોગિક ઉત્પાદનોનું ઉત્પાદન કરે છે.",
+  "phychem-technologies": "હોલો પ્લાસ્ટિક ઉત્પાદનો બનાવવા માટે ઉપયોગમાં લેવાતા રોટેશનલ-મોલ્ડિંગ કમ્પાઉન્ડ્સ અને કસ્ટમાઇઝ્ડ પોલિઇથિલિન કમ્પાઉન્ડ્સનું ઉત્પાદન કરે છે.",
+  "ashutosh-fibre": "સિન્થેટિક અને રિસાયકલ્ડ ટેક્સટાઇલ ફાઇબર ઉત્પાદનોનું ઉત્પાદન અને સપ્લાય કરે છે.",
+  "farm-peace": "કૃષિ અને ફાર્મ સંબંધિત ઉત્પાદનો તથા સેવાઓ સાથે સંકળાયેલ વ્યવસાય કરે છે.",
+  "fly-hi-maritime": "મેરીટાઇમ ટ્રાવેલ અને સંબંધિત પરિવહન સેવાઓ પૂરી પાડે છે.",
+};
+
 const flag = (country: string) => ({
   India: "🇮🇳",
   "United States": "🇺🇸",
@@ -26,14 +37,18 @@ const flag = (country: string) => ({
   "Other countries": "🌍",
 }[country] ?? "🌍");
 
-const gujaratiCountryBusiness = (country: string, business: string) => {
-  const known: Record<string, string> = {
-    Jewellery: "જ્વેલરી વ્યવસાય",
-    "Healthcare services": "હેલ્થકેર સેવાઓ",
-    "Luxury fashion": "લક્ઝરી ફેશન",
-  };
-  return known[business] ?? business;
-};
+const countryNameGujarati = (country: string) => ({
+  India: "ભારત",
+  "United States": "અમેરિકા",
+  "United Kingdom": "યુનાઇટેડ કિંગડમ",
+  "Other countries": "અન્ય દેશો",
+}[country] ?? country);
+
+const gujaratiCountryBusiness = (business: string) => ({
+  Jewellery: "જ્વેલરી વ્યવસાય",
+  "Healthcare services": "હેલ્થકેર સેવાઓ",
+  "Luxury fashion": "લક્ઝરી ફેશન",
+}[business] ?? business);
 
 function IpoPage() {
   const { id } = Route.useSearch();
@@ -69,7 +84,7 @@ function IpoDetail({ id, ipos, loading, onRefresh }: { id: string; ipos: Awaited
     <Section title="IPO વિશે માહિતી">
       <Info n="1" title="કંપનીનું નામ" value={ipo.name}/>
       <Info n="2" title="કંપનીનું સ્થાન" value={ipo.city && ipo.state ? `${ipo.city}, ${ipo.state}` : "માહિતી ઉપલબ્ધ નથી"}/>
-      <Info n="3" title="કંપની શું કરે છે" value={ipo.business ?? "કંપનીના વ્યવસાયની verified માહિતી ઉપલબ્ધ નથી."}/>
+      <Info n="3" title="કંપની શું કરે છે" value={businessGujarati[ipo.id] ?? ipo.business ?? "કંપનીના વ્યવસાયની verified માહિતી ઉપલબ્ધ નથી."}/>
 
       <div className="border-b border-border py-4">
         <div className="flex gap-3">
@@ -77,14 +92,8 @@ function IpoDetail({ id, ipos, loading, onRefresh }: { id: string; ipos: Awaited
           <div className="min-w-0 flex-1">
             <div className="text-sm font-medium text-fg">કયા દેશોમાં બિઝનેસ કરે છે અને વેચાણ કેટલું છે</div>
             {ipo.countries.length ? <div className="mt-3 overflow-hidden rounded-lg border border-border">
-              <div className="grid grid-cols-[1.05fr_1.25fr_.7fr] bg-surface-2 px-3 py-2 text-[11px] font-semibold text-muted">
-                <div>દેશ</div><div>બિઝનેસ</div><div className="text-right">વેચાણ %</div>
-              </div>
-              {ipo.countries.map(c => <div key={c.country} className="grid grid-cols-[1.05fr_1.25fr_.7fr] items-center border-t border-border px-3 py-3 text-xs">
-                <div className="flex items-center gap-2 font-medium text-fg"><span className="text-base">{flag(c.country)}</span><span>{c.country === "India" ? "ભારત" : c.country === "United States" ? "અમેરિકા" : c.country === "United Kingdom" ? "યુનાઇટેડ કિંગડમ" : "અન્ય દેશો"}</span></div>
-                <div className="text-muted">{gujaratiCountryBusiness(c.country, c.business)}</div>
-                <div className="text-right tabular font-semibold text-fg">{c.salesPct == null ? "—" : `${c.salesPct}%`}</div>
-              </div>)}
+              <div className="grid grid-cols-[1.05fr_1.25fr_.7fr] bg-surface-2 px-3 py-2 text-[11px] font-semibold text-muted"><div>દેશ</div><div>બિઝનેસ</div><div className="text-right">વેચાણ %</div></div>
+              {ipo.countries.map(c => <div key={c.country} className="grid grid-cols-[1.05fr_1.25fr_.7fr] items-center border-t border-border px-3 py-3 text-xs"><div className="flex items-center gap-2 font-medium text-fg"><span className="text-base">{flag(c.country)}</span><span>{countryNameGujarati(c.country)}</span></div><div className="text-muted">{gujaratiCountryBusiness(c.business)}</div><div className="text-right tabular font-semibold text-fg">{c.salesPct == null ? "—" : `${c.salesPct}%`}</div></div>)}
             </div> : <div className="mt-1 text-sm leading-6 text-muted">દેશવાર verified વેચાણની માહિતી ઉપલબ્ધ નથી.</div>}
           </div>
         </div>
