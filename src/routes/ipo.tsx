@@ -112,7 +112,18 @@ function IpoDetail({ id, ipos, loading, onRefresh }: { id: string; ipos: Awaited
         </div>
       </div>
 
-      <Info n="6" title="IPO કેટલો subscribe થયો" value={ipo.subscription == null ? "Live verified subscription data ઉપલબ્ધ નથી." : `${ipo.subscription}x`}/>
+      <div className="border-b border-border py-4 last:border-b-0">
+        <div className="flex gap-3">
+          <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-accent/15 text-xs font-semibold text-accent">6</span>
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-medium text-fg">પ્રાઇસ બેન્ડ અને ફાળવાતા શેર</div>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <div className="rounded-lg bg-surface-2 p-3"><div className="text-[10px] uppercase tracking-wide text-subtle">પ્રાઇસ બેન્ડ</div><div className="mt-1 text-sm tabular font-semibold text-fg">{ipo.priceBand ?? "માહિતી ઉપલબ્ધ નથી"}</div></div>
+              <div className="rounded-lg bg-surface-2 p-3"><div className="text-[10px] uppercase tracking-wide text-subtle">એક લોટમાં શેર</div><div className="mt-1 text-sm tabular font-semibold text-fg">{ipo.lotSize == null ? "માહિતી ઉપલબ્ધ નથી" : `${ipo.lotSize.toLocaleString("en-IN")} શેર`}</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
     </Section>
 
     <Panel className="mt-4 p-4"><button type="button" onClick={() => setShowSources(v => !v)} className="text-sm font-medium text-fg">GMP source verification {showSources ? "▲" : "▼"}</button>{showSources ? <div className="mt-3 space-y-2">{ipo.gmpSources.map(s => <div key={s.source} className="flex items-center justify-between text-xs"><span className="text-muted">{s.source}</span><span className="tabular text-fg">{s.pct == null ? "No value" : `${s.pct}%`}</span></div>)}</div> : null}</Panel>
