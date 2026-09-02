@@ -1,5 +1,5 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { Bell, Bookmark, CandlestickChart, Eye, LayoutGrid, Settings } from "lucide-react";
+import { Bell, Bookmark, CandlestickChart, Eye, LayoutGrid, Settings, Ticket } from "lucide-react";
 import type { ReactNode } from "react";
 import { APP_NAME } from "@/lib/market/config";
 import { getMarketClock } from "@/lib/market/math";
@@ -12,6 +12,7 @@ const NAV = [
   { to: "/stock", label: "Analyze", icon: CandlestickChart },
   { to: "/portfolio", label: "Book", icon: Bookmark },
   { to: "/watchlist", label: "Watch", icon: Eye },
+  { to: "/ipo", label: "IPO", icon: Ticket },
   { to: "/alerts", label: "Alerts", icon: Bell },
 ] as const;
 
@@ -46,7 +47,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       </main>
 
       <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-bg/94 pb-[env(safe-area-inset-bottom)] backdrop-blur-md">
-        <ul className="mx-auto grid max-w-5xl grid-cols-5">
+        <ul className="mx-auto grid max-w-5xl grid-cols-6">
           {NAV.map((item) => {
             const active = item.to === "/" ? pathname === "/" : pathname === item.to || pathname.startsWith(`${item.to}/`);
             const Icon = item.icon;
