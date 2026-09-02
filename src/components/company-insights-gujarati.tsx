@@ -1,6 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { useQuery } from "@tanstack/react-query";
 import { z } from "zod";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { Panel } from "./widgets";
 
 type Props = { symbol: string; companyName: string };
@@ -11,15 +13,15 @@ type Insights = { description: string; profits: ProfitRow[]; countries: CountryR
 const cache = new Map<string, { expires: number; value: Insights }>();
 const UA = "Mozilla/5.0 (compatible; Artha-market/1.0)";
 
-function bareSymbol(symbol: string) { return symbol.replace(/\\.(NS|BO)$/i, "").trim().toUpperCase(); }
-function cleanHtml(html: string) { return html.replace(/<script[\\s\\S]*?<\\/script>/gi, " ").replace(/<style[\\s\\S]*?<\\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/\\s+/g, " ").trim(); }
+function bareSymbol(symbol: string) { return symbol.replace(/\.(NS|BO)$/i, "").trim().toUpperCase(); }
+function cleanHtml(html: string) { return html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, " ").trim(); }
 function gujaratiFallback(name: string) { return `${name} તેના ઉદ્યોગ ક્ષેત્રમાં ઉત્પાદનો અને સેવાઓ પ્રદાન કરતી કંપની છે. કંપનીની ચોક્કસ પ્રવૃત્તિ જાહેર નાણાકીય માહિતી પરથી બતાવવામાં આવે છે.`; }
 async function fetchText(url: string) { const r = await fetch(url, { headers: { "User-Agent": UA, Accept: "text/html,application/xhtml+xml" }, cache: "no-store" }); if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.text(); }
 async function translate(text: string) { const url = new URL("https://translate.googleapis.com/translate_a/single"); url.search = new URLSearchParams({ client: "gtx", sl: "en", tl: "gu", dt: "t", q: text.slice(0, 1800) }).toString(); const r = await fetch(url.toString(), { headers: { "User-Agent": UA }, cache: "no-store" }); if (!r.ok) throw new Error(`Translate HTTP ${r.status}`); const data = await r.json() as unknown[]; const parts = Array.isArray(data?.[0]) ? data[0] : []; return parts.map(x => Array.isArray(x) ? String(x[0] ?? "") : "").join("").trim(); }
 
 const countryMeta: Array<[RegExp, string, string]> = [
-  [/united states|u\\.?s\\.?a?\\b|america/i, "🇺🇸", "અમેરિકા"],
-  [/united kingdom|u\\.?k\\.?\\b|britain/i, "🇬🇧", "યુનાઇટેડ કિંગડમ"],
+  [/united states|u\.?s\.?a?\b|america/i, "🇺🇸", "અમેરિકા"],
+  [/united kingdom|u\.?k\.?\b|britain/i, "🇬🇧", "યુનાઇટેડ કિંગડમ"],
   [/india/i, "🇮🇳", "ભારત"],
   [/canada/i, "🇨🇦", "કેનેડા"],
   [/australia/i, "🇦🇺", "ઓસ્ટ્રેલિયા"],
@@ -37,8 +39,8 @@ const countryMeta: Array<[RegExp, string, string]> = [
 function findCountryRows(text: string, business: string): CountryRow[] {
   const rows: CountryRow[] = [];
   for (const [pattern, flag, country] of countryMeta) {
-    const match = text.match(new RegExp(`(?:${pattern.source})[\\s\\S]{0,140}?(\\d+(?:\\.\\d+)?)%`, "i"));
-    const reverse = text.match(new RegExp(`(\\d+(?:\\.\\d+)?)%[\\s\\S]{0,140}?(?:${pattern.source})`, "i"));
+    const match = text.match(new RegExp(`(?:${pattern.source})[\s\S]{0,140}?(\d+(?:\.\d+)?)%`, "i"));
+    const reverse = text.match(new RegExp(`(\d+(?:\.\d+)?)%[\s\S]{0,140}?(?:${pattern.source})`, "i"));
     const pct = match?.[1] ?? reverse?.[1];
     if (pct && !rows.some(r => r.country === country)) rows.push({ flag, country, business, percentage: `${pct}%` });
   }
@@ -46,14 +48,14 @@ function findCountryRows(text: string, business: string): CountryRow[] {
 }
 
 function parseLatestProfits(text: string): ProfitRow[] {
-  const q = text.match(/\\|\\s*((?:Jun|Sep|Dec|Mar)\\s+20\\d{2})\\s*\\|([\\s\\S]{0,1200}?)\\|\\s*---/i);
+  const q = text.match(/\|\s*((?:Jun|Sep|Dec|Mar)\s+20\d{2})\s*\|([\s\S]{0,1200}?)\|\s*---/i);
   const header = q?.[1] ? [q[1]] : [];
-  const dates = Array.from(text.matchAll(/(?:Jun|Sep|Dec|Mar)\\s+20\\d{2}/g)).map(m => m[0]);
+  const dates = Array.from(text.matchAll(/(?:Jun|Sep|Dec|Mar)\s+20\d{2}/g)).map(m => m[0]);
   const uniqueDates = [...new Set(dates)];
   const recentDates = uniqueDates.slice(0, 13);
-  const net = text.match(/Net Profit\\s*\\+?\\s*\\|([\\s\\S]{0,500}?)(?:\\|\\s*EPS|EPS in Rs)/i);
+  const net = text.match(/Net Profit\s*\+?\s*\|([\s\S]{0,500}?)(?:\|\s*EPS|EPS in Rs)/i);
   if (!net) return [];
-  const nums = Array.from(net[1].matchAll(/(?:^|\\|)\\s*(-?\\d[\\d,]*(?:\\.\\d+)?)\\s*(?=\\||$)/g)).map(m => Number(m[1].replace(/,/g, ""))).filter(Number.isFinite);
+  const nums = Array.from(net[1].matchAll(/(?:^|\|)\s*(-?\d[\d,]*(?:\.\d+)?)\s*(?=\||$)/g)).map(m => Number(m[1].replace(/,/g, ""))).filter(Number.isFinite);
   const values = nums.slice(-Math.min(13, nums.length)).slice(-4);
   const labels = (recentDates.length >= 4 ? recentDates.slice(-4) : header.concat(recentDates).slice(-4));
   return values.map((v, i) => ({ quarter: labels[i] ?? `Q${i + 1}`, profit: `₹${v.toLocaleString("en-IN")} Cr` }));
@@ -66,8 +68,8 @@ async function buildInsights(symbol: string, companyName: string): Promise<Insig
   try {
     const html = await fetchText(`https://www.screener.in/company/${encodeURIComponent(key)}/consolidated/`);
     const text = cleanHtml(html);
-    const aboutMatch = text.match(/About\\s+(.{40,1600}?)(?:\\s+Key Points|\\s+Website|\\s+Market Cap)/i);
-    const englishDescription = (aboutMatch?.[1] ?? "").replace(/\\s+\\^\\{.*?\\}/g, " ").trim();
+    const aboutMatch = text.match(/About\s+(.{40,1600}?)(?:\s+Key Points|\s+Website|\s+Market Cap)/i);
+    const englishDescription = (aboutMatch?.[1] ?? "").replace(/\s+\^\{.*?\}/g, " ").trim();
     const description = englishDescription ? ((await translate(englishDescription)) || gujaratiFallback(companyName)) : gujaratiFallback(companyName);
     const profits = parseLatestProfits(text);
     const countries = findCountryRows(text, englishDescription || companyName);
@@ -82,10 +84,24 @@ export const fetchCompanyInsightsGujarati = createServerFn({ method: "POST" }).v
 export function CompanyInsightsGujarati({ symbol, companyName }: Props) {
   const q = useQuery({ queryKey: ["company-insights-gujarati", symbol, companyName], queryFn: () => fetchCompanyInsightsGujarati({ data: { symbol, companyName } }), staleTime: 6 * 60 * 60_000, gcTime: 24 * 60 * 60_000, retry: 1, refetchOnWindowFocus: false });
   const data = q.data;
-  return <section className="mt-5 space-y-3">
+  const [mount, setMount] = useState<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const dividend = Array.from(document.querySelectorAll("section")).find(section => section.querySelector("h2")?.textContent?.trim() === "Dividends");
+    if (!dividend?.parentElement) return;
+    const host = document.createElement("div");
+    host.className = "contents";
+    dividend.parentElement.insertBefore(host, dividend);
+    setMount(host);
+    return () => { host.remove(); };
+  }, [symbol]);
+
+  const content = <section className="mt-5 space-y-3">
     <Panel className="p-4"><div className="text-[11px] uppercase tracking-[0.14em] text-subtle">કંપની શું કરે છે?</div><p className="mt-2 text-sm leading-relaxed text-muted">{q.isFetching ? "કંપનીની ગુજરાતી માહિતી લાવી રહ્યા છીએ…" : data?.description ?? "કંપનીનું ગુજરાતી વર્ણન હાલમાં ઉપલબ્ધ નથી."}</p></Panel>
     <Panel className="p-4"><div className="text-[11px] uppercase tracking-[0.14em] text-subtle">છેલ્લા 4 ક્વાર્ટરનો નેટ પ્રોફિટ</div><div className="mt-3 overflow-x-auto"><table className="w-full min-w-[360px] text-sm"><thead><tr className="border-b border-border text-left text-xs text-subtle"><th className="px-2 py-2">ક્રમ</th><th className="px-2 py-2">ક્વાર્ટર</th><th className="px-2 py-2 text-right">નેટ પ્રોફિટ</th></tr></thead><tbody>{data?.profits.length ? data.profits.map((r,i)=><tr key={`${r.quarter}-${i}`} className="border-b border-border/60"><td className="px-2 py-2 text-muted">{i+1}</td><td className="px-2 py-2 text-fg">{r.quarter}</td><td className="px-2 py-2 text-right font-medium tabular text-fg">{r.profit}</td></tr>) : <tr><td colSpan={3} className="px-2 py-3 text-muted">છેલ્લા 4 ક્વાર્ટરનો જાહેર ડેટા હાલમાં ઉપલબ્ધ નથી.</td></tr>}</tbody></table></div></Panel>
     <Panel className="p-4"><div className="text-[11px] uppercase tracking-[0.14em] text-subtle">દેશવાર બિઝનેસ</div><div className="mt-3 overflow-x-auto"><table className="w-full min-w-[560px] text-sm"><thead><tr className="border-b border-border text-left text-xs text-subtle"><th className="px-2 py-2">ક્રમ</th><th className="px-2 py-2">દેશ</th><th className="px-2 py-2">બિઝનેસ</th><th className="px-2 py-2 text-right">બિઝનેસ %</th></tr></thead><tbody>{data?.countries.length ? data.countries.map((r,i)=><tr key={r.country} className="border-b border-border/60"><td className="px-2 py-2 text-muted">{i+1}</td><td className="px-2 py-2 whitespace-nowrap text-fg"><span className="mr-2 text-lg">{r.flag}</span>{r.country}</td><td className="px-2 py-2 text-muted">{r.business}</td><td className="px-2 py-2 text-right font-medium tabular text-fg">{r.percentage}</td></tr>) : <tr><td colSpan={4} className="px-2 py-3 text-muted">દેશવાર વેચાણ/બિઝનેસની ટકાવારી જાહેર સ્રોતમાં ઉપલબ્ધ નથી — ખોટો આંકડો બતાવવામાં આવશે નહીં.</td></tr>}</tbody></table></div><p className="mt-2 text-[10px] text-subtle">દેશવાર ટકાવારી માત્ર જાહેર રીતે ઉપલબ્ધ અને ચકાસી શકાય તેવા આંકડા મળ્યા ત્યારે જ બતાવવામાં આવે છે.</p></Panel>
     <p className="text-[10px] text-subtle">Source: {data?.source ?? "જાહેર કંપની માહિતી"}</p>
   </section>;
+
+  return mount ? createPortal(content, mount) : null;
 }
