@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowLeft, RefreshCw } from "lucide-react";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Panel, SkeletonBlock } from "@/components/widgets";
 import { fetchOpenIpos } from "@/lib/market/ipo";
 import { cn } from "@/lib/utils";
