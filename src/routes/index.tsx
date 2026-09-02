@@ -11,47 +11,33 @@ import { fetchDashboard } from "@/lib/market/server";
 export const Route = createFileRoute("/")({ component: Home });
 
 type MetalPrices = { gold10g: number | null; silverKg: number | null; asOf: string | null; source: string };
+type MetalsResponse = { status?: string; timestamp?: string; error_message?: string; error?: string; metals?: Record<string, unknown> };
 
-type MetalsResponse = {
-  status?: string;
-  timestamp?: string;
-  error_message?: string;
-  error?: string;
-  metals?: Record<string, unknown>;
-};
+const TROY_OUNCE_GRAMS = 31.1034768;
 
 const fetchPreciousMetals = createServerFn({ method: "GET" }).handler(async (): Promise<MetalPrices> => {
-  // Keep the API key server-side. Support both names so the Vercel variable can be
-  // named METALS_DEV_API_KEY or METALS_API_KEY without exposing it to the browser.
-  const apiKey = process.env.METALS_DEV_API_KEY || process.env.METALS_API_KEY;
+  const apiKey = (process.env.METALS_DEV_API_KEY || process.env.METALS_API_KEY || process.env.METALSDEV_API_KEY || "").trim();
   if (!apiKey) throw new Error("Metals.Dev API key is not configured in Vercel");
 
   const url = new URL("https://api.metals.dev/v1/latest");
   url.searchParams.set("api_key", apiKey);
   url.searchParams.set("currency", "INR");
-  url.searchParams.set("unit", "g");
+  // Use the documented default precious-metal unit (troy ounce) and convert locally.
+  // This avoids relying on server-side unit conversion while still giving INR/10g and INR/kg.
+  url.searchParams.set("unit", "toz");
 
-  const res = await fetch(url.toString(), {
-    headers: { Accept: "application/json" },
-    cache: "no-store",
-  });
-
+  const res = await fetch(url.toString(), { headers: { Accept: "application/json" }, cache: "no-store" });
   const raw = await res.json().catch(() => ({})) as MetalsResponse;
-  if (!res.ok || raw.status !== "success") {
-    throw new Error(raw.error_message || raw.error || `Metals.Dev HTTP ${res.status}`);
-  }
+  if (!res.ok || raw.status !== "success") throw new Error(raw.error_message || raw.error || `Metals.Dev HTTP ${res.status}`);
 
   const metals = raw.metals || {};
-  const goldPerGram = Number(metals.gold);
-  const silverPerGram = Number(metals.silver);
-
-  if (!Number.isFinite(goldPerGram) || !Number.isFinite(silverPerGram) || goldPerGram <= 0 || silverPerGram <= 0) {
-    throw new Error("Metals.Dev returned no valid gold/silver prices");
-  }
+  const goldToz = Number(metals.gold);
+  const silverToz = Number(metals.silver);
+  if (!Number.isFinite(goldToz) || !Number.isFinite(silverToz) || goldToz <= 0 || silverToz <= 0) throw new Error("Metals.Dev returned invalid gold/silver rates");
 
   return {
-    gold10g: goldPerGram * 10,
-    silverKg: silverPerGram * 1000,
+    gold10g: goldToz * 10 / TROY_OUNCE_GRAMS,
+    silverKg: silverToz * 1000 / TROY_OUNCE_GRAMS,
     asOf: raw.timestamp ?? null,
     source: "Metals.Dev",
   };
@@ -79,14 +65,7 @@ function Home() {
 }
 
 function PreciousMetals() {
-  const metals = useQuery({
-    queryKey: ["precious-metals-metalsdev-v2"],
-    queryFn: () => fetchPreciousMetals(),
-    staleTime: 15000,
-    refetchInterval: 60000,
-    refetchOnWindowFocus: true,
-    retry: 2,
-  });
+  const metals = useQuery({ queryKey: ["precious-metals-metalsdev-v3"], queryFn: () => fetchPreciousMetals(), staleTime: 30000, refetchInterval: 60000, refetchOnWindowFocus: true, retry: 2 });
   const cards = [
     { name: "Gold", price: metals.data?.gold10g ?? null, unit: "₹ / 10g" },
     { name: "Silver", price: metals.data?.silverKg ?? null, unit: "₹ / kg" },
