@@ -1,19 +1,19 @@
 @import "tailwindcss";
 
 @theme {
-  /* Artha — Angel One inspired trading palette. Replaces the previous navy palette. */
-  --color-bg: #F4F7FB;
+  /* Artha — Premium Purple + White theme. Replaces the previous Angel One-inspired palette. */
+  --color-bg: #F7F7FB;
   --color-surface: #FFFFFF;
-  --color-surface-2: #F0F5FF;
-  --color-surface-3: #E3ECFF;
-  --color-fg: #172033;
-  --color-muted: #667085;
-  --color-subtle: #98A2B3;
-  --color-accent: #0057FF;
+  --color-surface-2: #F3F1FF;
+  --color-surface-3: #ECE8FF;
+  --color-fg: #171525;
+  --color-muted: #6B6878;
+  --color-subtle: #9793A6;
+  --color-accent: #6C4EFF;
   --color-accent-fg: #FFFFFF;
-  --color-up: #00A86B;
-  --color-down: #EF4444;
-  --color-border: rgba(23, 32, 51, 0.10);
+  --color-up: #16A36A;
+  --color-down: #E5484D;
+  --color-border: #E7E5EF;
   --font-sans: Aptos, Arial, Helvetica, sans-serif;
   --font-display: Aptos, Arial, Helvetica, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
@@ -21,8 +21,8 @@
   --radius-md: 12px;
   --radius-lg: 16px;
   --radius-xl: 24px;
-  --shadow-border: 0 1px 2px rgba(23, 32, 51, 0.06), 0 0 0 1px rgba(23, 32, 51, 0.07);
-  --shadow-border-hover: 0 8px 24px rgba(0, 87, 255, 0.12), 0 0 0 1px rgba(0, 87, 255, 0.18);
+  --shadow-border: 0 1px 2px rgba(23, 21, 37, 0.05), 0 0 0 1px #E7E5EF;
+  --shadow-border-hover: 0 8px 24px rgba(108, 78, 255, 0.12), 0 0 0 1px rgba(108, 78, 255, 0.20);
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --motion-quick: 150ms;
   --motion-fast: 250ms;
