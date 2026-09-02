@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowLeft, RefreshCw } from "lucide-react";
+import type { ReactNode } from "react";
 import { useState } from "react";
 import { Panel, SkeletonBlock } from "@/components/widgets";
 import { fetchOpenIpos } from "@/lib/market/ipo";
@@ -30,7 +31,7 @@ function IpoList({ ipos, loading, onRefresh }: { ipos: Awaited<ReturnType<typeof
         <div className="mt-4 grid grid-cols-3 gap-2"><Mini label="Min. Subscription" value={money(ipo.minSubscription)} /><Mini label="Subscription" value={ipo.subscription == null ? "માહિતી ઉપલબ્ધ નથી" : `${ipo.subscription}x`} /><Mini label="GMP" value={ipo.gmpPct == null ? "Verifying" : `+${ipo.gmpPct}%`} green={ipo.gmpPct != null} /></div>
       </Panel></Link>)}
     </div>
-    <p className="mt-4 text-[11px] text-subtle">GMP unofficial grey-market data છે. Artha માત્ર ત્યારે percentage બતાવે છે જ્યારે ઓછામાં ઓછા 2 independent sources વચ્ચે consensus મળે.</p>
+    <p className="mt-4 text-[11px] text-subtle">GMP unofficial grey-market data છે. Artha percentage ત્યારે જ green માં બતાવે છે જ્યારે independent sources વચ્ચે consensus મળે.</p>
   </div>;
 }
 
@@ -46,7 +47,7 @@ function IpoDetail({ id, ipos, loading, onRefresh }: { id: string; ipos: Awaited
     <Section title="IPO વિશે માહિતી">
       <Info n="1" title="કંપનીનું નામ" value={ipo.name}/>
       <Info n="2" title="કંપનીનું સ્થાન" value={ipo.city && ipo.state ? `${ipo.city}, ${ipo.state}` : "માહિતી ઉપલબ્ધ નથી"}/>
-      <Info n="3" title="કંપની શું કરે છે" value={ipo.business ?? "વિગત verified source માંથી ઉપલબ્ધ થયા પછી અહીં દેખાશે."}/>
+      <Info n="3" title="કંપની શું કરે છે" value={ipo.business ?? "Verified company profile ઉપલબ્ધ નથી."}/>
       <Info n="4" title="કયા દેશોમાં business કરે છે અને વેચાણ કેટલું છે" value={ipo.countries.length ? ipo.countries.map(c => `${c.country}: ${c.business}${c.salesPct == null ? "" : ` — ${c.salesPct}%`}`).join(" · ") : "દેશવાર verified sales split ઉપલબ્ધ નથી."}/>
       <Info n="5" title="છેલ્લા 3 વર્ષનો નફો" value={ipo.profits.length ? ipo.profits.map(p => `${p.year}: ${money(p.value)}`).join(" · ") : "છેલ્લા 3 વર્ષના verified profit figures ઉપલબ્ધ નથી."}/>
       <Info n="6" title="IPO કેટલો subscribe થયો" value={ipo.subscription == null ? "Live verified subscription data ઉપલબ્ધ નથી." : `${ipo.subscription}x`}/>
@@ -56,6 +57,6 @@ function IpoDetail({ id, ipos, loading, onRefresh }: { id: string; ipos: Awaited
   </div>;
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) { return <section className="mt-6"><h2 className="mb-3 font-display text-xl tracking-tight">{title}</h2><Panel className="p-4">{children}</Panel></section>; }
+function Section({ title, children }: { title: string; children: ReactNode }) { return <section className="mt-6"><h2 className="mb-3 font-display text-xl tracking-tight">{title}</h2><Panel className="p-4">{children}</Panel></section>; }
 function Info({ n, title, value }: { n: string; title: string; value: string }) { return <div className="border-b border-border py-4 first:pt-0 last:border-b-0 last:pb-0"><div className="flex gap-3"><span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-accent/15 text-xs font-semibold text-accent">{n}</span><div className="min-w-0"><div className="text-sm font-medium text-fg">{title}</div><div className="mt-1 text-sm leading-6 text-muted">{value}</div></div></div></div>; }
 function Mini({ label, value, green }: { label: string; value: string; green?: boolean }) { return <div className="rounded-lg bg-surface-2 p-2.5"><div className="text-[10px] uppercase tracking-wide text-subtle">{label}</div><div className={cn("mt-1 truncate text-sm tabular", green ? "text-up" : "text-fg")}>{value}</div></div>; }
