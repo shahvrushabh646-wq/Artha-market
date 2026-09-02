@@ -9,27 +9,47 @@ import { getMarketClock } from "@/lib/market/math";
 import { fetchDashboard } from "@/lib/market/server";
 
 export const Route = createFileRoute("/")({ component: Home });
-
-type MetalPrices = { gold10g: number | null; silverKg: number | null; asOf: string | null; source: string };
-
 async function fetchIndianMetalPrices(): Promise<MetalPrices> {
-  const res = await fetch("https://api.oropocket.com/public/prices", {
+  const apiKey = process.env.METALS_DEV_API_KEY;
+
+  if (!apiKey) {
+    throw new Error("METALS_DEV_API_KEY is missing");
+  }
+
+  const url =
+    `https://api.metals.dev/v1/latest` +
+    `?api_key=${encodeURIComponent(apiKey)}` +
+    `&currency=INR` +
+    `&unit=g`;
+
+  const res = await fetch(url, {
+    headers: { Accept: "application/json" },
     cache: "no-store",
-    headers: { Accept: "application/json", "User-Agent": "Artha-market/1.0" },
   });
-  if (!res.ok) throw new Error(`Metal API HTTP ${res.status}`);
-  const raw = await res.json() as any;
-  const goldPerGram = Number(raw?.gold?.sell ?? raw?.gold?.buy ?? raw?.gold?.price ?? NaN);
-  const silverPerGram = Number(raw?.silver?.sell ?? raw?.silver?.buy ?? raw?.silver?.price ?? NaN);
-  if (!Number.isFinite(goldPerGram) || !Number.isFinite(silverPerGram)) throw new Error("Invalid metal price response");
+
+  if (!res.ok) {
+    throw new Error(`Metals.Dev HTTP ${res.status}`);
+  }
+
+  const raw = await res.json();
+
+  if (raw?.status !== "success") {
+    throw new Error(
+      raw?.error_message || "Metals.Dev API request failed"
+    );
+  }
+
+  const goldPerGram = Number(raw?.metals?.gold);
+  const silverPerGram = Number(raw?.metals?.silver);
+
+  if (!Number.isFinite(goldPerGram) || !Number.isFinite(silverPerGram)) {
+    throw new Error("Gold/Silver price missing from Metals.Dev response");
+  }
+
   return {
     gold10g: goldPerGram * 10,
     silverKg: silverPerGram * 1000,
-    asOf: raw?.updated_at ?? raw?.timestamp ?? null,
-    source: "Indian gold & silver market reference",
+    asOf: raw?.timestamp ?? null,
+    source: "Metals.Dev",
   };
 }
-
-function Home() { const clock = getMarketClock(); const dash = useQuery({ queryKey: ["dashboard"], queryFn: () => fetchDashboard(), refetchInterval: 60000 }); return <div><p className="text-xs uppercase tracking-[0.2em] text-subtle">Indian cash market</p><div className="flex items-start justify-between gap-3"><div><h1 className="mt-1 font-display text-3xl tracking-tight text-fg">The tape, on your phone.</h1><p className="mt-2 max-w-xl text-sm text-muted">{clock.label}</p></div><Link to="/suggestions" className="flex h-11 shrink-0 items-center gap-2 rounded-xl bg-accent px-3 text-sm font-medium text-accent-fg shadow-[var(--shadow-border)]"><Lightbulb className="size-4" /> Suggestions</Link></div><div className="mt-5"><SymbolSearch /></div><PreciousMetals /><Section title="Overview" hint="NIFTY, Sensex and sector indices">{dash.isLoading ? <div className="flex gap-2 overflow-x-auto pb-1">{Array.from({ length: 5 }).map((_, i) => <SkeletonBlock key={i} className="h-24 min-w-[9.5rem] flex-1" />)}</div> : dash.isError ? <Panel><p className="text-sm text-muted">Index data is unavailable right now. Pull to refresh in a minute.</p></Panel> : <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:grid sm:grid-cols-5 sm:overflow-visible sm:px-0">{dash.data?.indices.map(row => <IndexCard key={row.quote.symbol} name={row.short} quote={row.quote} />)}</div>}</Section><Section title="Market movers" hint="From a liquid large-cap NSE basket — not a full-exchange screener"><div className="grid gap-3 sm:grid-cols-2"><Panel className="p-2"><div className="px-2 pb-1 pt-2 text-[11px] uppercase tracking-[0.16em] text-up">Top gainers</div>{dash.data?.gainers.map(q => <MoverRow key={q.symbol} quote={q} />)}</Panel><Panel className="p-2"><div className="px-2 pb-1 pt-2 text-[11px] uppercase tracking-[0.16em] text-down">Top losers</div>{dash.data?.losers.map(q => <MoverRow key={q.symbol} quote={q} />)}</Panel></div></Section><p className="mt-8 text-xs text-subtle">{DATA_NOTE}</p></div>; }
-
-function PreciousMetals() { const metals = useQuery({ queryKey: ["precious-metals-india-v10"], queryFn: () => fetchIndianMetalPrices(), staleTime: 60000, refetchInterval: 60000, refetchOnWindowFocus: true, retry: 2 }); const cards = [{ name: "Gold", price: metals.data?.gold10g ?? null, unit: "₹ / 10g" }, { name: "Silver", price: metals.data?.silverKg ?? null, unit: "₹ / kg" }]; const formatINR = (value: number) => `₹${Math.round(value).toLocaleString("en-IN")}`; return <Section title="Gold & Silver" hint="Indian market reference prices"><div className="grid gap-3 sm:grid-cols-2">{cards.map(m => <Panel key={m.name} className="p-4"><div className="flex items-start justify-between gap-3"><div><div className="text-sm font-medium text-fg">{m.name}</div><div className="mt-1 text-xs text-muted">{m.unit}</div></div><div className="text-xs text-muted">INR</div></div><div className="mt-2 text-2xl font-semibold tabular text-fg">{m.price != null ? formatINR(m.price) : metals.isLoading ? "Loading…" : "Price unavailable"}</div><div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">{[10,20,30,40].map(d => <div key={d} className="rounded-lg bg-surface-2 p-2"><div className="text-xs text-muted">{d}% discount</div><div className="mt-1 tabular text-sm text-fg">{m.price != null ? formatINR(m.price * (1-d/100)) : "—"}</div></div>)}</div></Panel>)}</div><p className="mt-2 text-[11px] text-subtle">Gold is shown per 10g and Silver per kg. Prices are market reference rates, not jewellery retail prices.</p></Section>; }
