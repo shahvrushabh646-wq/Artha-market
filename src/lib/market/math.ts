@@ -8,8 +8,8 @@ export function periodHighLow(bars: Bar[]): { high: number | null; highT: number
 export function customValuation(high5y: number | null, current: number | null): Valuation | null {
   if (high5y == null || current == null) return null;
 
-  // Stocks below ₹20 use the 90% rule: buy at 10% of the 5Y high.
-  // Stocks at or above ₹20 use the 75% rule: buy at 25% of the 5Y high.
+  // Keep the existing 90% rule unchanged: stocks below ₹20 buy at 10% of the 5Y high.
+  // Stocks at or above ₹20 keep the existing 75% rule: buy at 25% of the 5Y high.
   const lowPriceRule = current < 20;
   const buyFraction = lowPriceRule ? 0.10 : 0.25;
   const activeRuleLabel = lowPriceRule ? "90% RULE" : "75% RULE";
@@ -18,16 +18,16 @@ export function customValuation(high5y: number | null, current: number | null): 
 
   return {
     high5y,
-    price75: buyPrice,
+    price75: round2(high5y * 0.25),
+    price80: round2(high5y * 0.20),
     price85: round2(high5y * 0.15),
-    price95: round2(high5y * 0.05),
+    price90: round2(high5y * 0.10),
     currentPrice: current,
     signal: `${activeRuleLabel} · ${buy ? "BUY" : "WAIT"}` as Valuation["signal"],
-    activeRuleLabel,
-  } as Valuation & { activeRuleLabel: string };
+  };
 }
 
-export function optionalBelowHighLevels(high: number | null): { label: string; price: number }[] { if (!high) return []; return [5, 10, 15, 20, 25, 30, 50].map((pct) => ({ label: `${pct}% below high`, price: round2(high * (1 - pct / 100)) })); }
+export function optionalBelowHighLevels(high: number | null): { label: string; price: number }[] { if (!high) return []; return [75, 80, 85, 90].map((pct) => ({ label: `${pct}% level`, price: round2(high * ((100 - pct) / 100)) })); }
 export function sma(values: number[], window: number): number[] { const out = Array<number>(values.length).fill(Number.NaN); if (window <= 0 || values.length < window) return out; let sum = 0; for (let i = 0; i < values.length; i++) { sum += values[i]; if (i >= window) sum -= values[i - window]; if (i >= window - 1) out[i] = sum / window; } return out; }
 export function lastValid(series: number[]): number | null { for (let i = series.length - 1; i >= 0; i--) { const v = series[i]; if (Number.isFinite(v)) return round2(v); } return null; }
 export function rsi(closes: number[], period = 14): number[] { const out = Array<number>(closes.length).fill(Number.NaN); if (closes.length < period + 1) return out; const gains: number[] = [], losses: number[] = []; for (let i = 1; i < closes.length; i++) { const d = closes[i] - closes[i - 1]; gains.push(Math.max(d, 0)); losses.push(Math.max(-d, 0)); } let avgG = 0, avgL = 0; for (let i = 0; i < period; i++) { avgG += gains[i]; avgL += losses[i]; } avgG /= period; avgL /= period; const write = (idx: number, g: number, l: number) => { out[idx] = l === 0 ? 100 : 100 - 100 / (1 + g / l); }; write(period, avgG, avgL); for (let i = period; i < gains.length; i++) { avgG = (avgG * (period - 1) + gains[i]) / period; avgL = (avgL * (period - 1) + losses[i]) / period; write(i + 1, avgG, avgL); } return out; }
