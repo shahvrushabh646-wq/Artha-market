@@ -74,8 +74,9 @@ export type TechnicalSummary = {
 export type Valuation = {
   high5y: number;
   price75: number;
+  price80: number;
   price85: number;
-  price95: number;
+  price90: number;
   currentPrice: number;
   signal: "BUY" | "WAIT";
 };
