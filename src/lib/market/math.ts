@@ -8,12 +8,10 @@ export function periodHighLow(bars: Bar[]): { high: number | null; highT: number
 export function customValuation(high5y: number | null, current: number | null): Valuation | null {
   if (high5y == null || current == null) return null;
 
-  // Keep the existing 90% rule unchanged: stocks below ₹20 buy at 10% of the 5Y high.
-  // Stocks at or above ₹20 keep the existing 75% rule: buy at 25% of the 5Y high.
-  const lowPriceRule = current < 20;
-  const buyFraction = lowPriceRule ? 0.10 : 0.25;
-  const activeRuleLabel = lowPriceRule ? "90% RULE" : "75% RULE";
-  const buyPrice = round2(high5y * buyFraction);
+  // Valuation is based only on percentage drop from the 5-year high.
+  // 75% drop = 25% of 5Y high, 80% drop = 20%, 85% drop = 15%, 90% drop = 10%.
+  // Keep the valuation signal tied to the 75% drop trigger (25% of 5Y high).
+  const buyPrice = round2(high5y * 0.25);
   const buy = current <= buyPrice;
 
   return {
@@ -23,7 +21,7 @@ export function customValuation(high5y: number | null, current: number | null): 
     price85: round2(high5y * 0.15),
     price90: round2(high5y * 0.10),
     currentPrice: current,
-    signal: `${activeRuleLabel} · ${buy ? "BUY" : "WAIT"}` as Valuation["signal"],
+    signal: (buy ? "BUY" : "WAIT") as Valuation["signal"],
   };
 }
 
