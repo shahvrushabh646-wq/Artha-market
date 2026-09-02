@@ -1,19 +1,19 @@
 @import "tailwindcss";
 
 @theme {
-  /* Artha Premium Navy — professional finance-app palette */
-  --color-bg: #0B1220;
-  --color-surface: #111C2E;
-  --color-surface-2: #17243A;
-  --color-surface-3: #1D2D46;
-  --color-fg: #F8FAFC;
-  --color-muted: #A7B4C6;
-  --color-subtle: #7E8DA3;
-  --color-accent: #3B82F6;
+  /* Artha — Angel One inspired trading palette. Replaces the previous navy palette. */
+  --color-bg: #F4F7FB;
+  --color-surface: #FFFFFF;
+  --color-surface-2: #F0F5FF;
+  --color-surface-3: #E3ECFF;
+  --color-fg: #172033;
+  --color-muted: #667085;
+  --color-subtle: #98A2B3;
+  --color-accent: #0057FF;
   --color-accent-fg: #FFFFFF;
-  --color-up: #22C55E;
+  --color-up: #00A86B;
   --color-down: #EF4444;
-  --color-border: rgba(248, 250, 252, 0.10);
+  --color-border: rgba(23, 32, 51, 0.10);
   --font-sans: Aptos, Arial, Helvetica, sans-serif;
   --font-display: Aptos, Arial, Helvetica, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
@@ -21,8 +21,8 @@
   --radius-md: 12px;
   --radius-lg: 16px;
   --radius-xl: 24px;
-  --shadow-border: 0 1px 2px rgba(0, 0, 0, 0.20), 0 0 0 1px rgba(248, 250, 252, 0.08);
-  --shadow-border-hover: 0 8px 24px rgba(0, 0, 0, 0.28), 0 0 0 1px rgba(59, 130, 246, 0.22);
+  --shadow-border: 0 1px 2px rgba(23, 32, 51, 0.06), 0 0 0 1px rgba(23, 32, 51, 0.07);
+  --shadow-border-hover: 0 8px 24px rgba(0, 87, 255, 0.12), 0 0 0 1px rgba(0, 87, 255, 0.18);
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --motion-quick: 150ms;
   --motion-fast: 250ms;
