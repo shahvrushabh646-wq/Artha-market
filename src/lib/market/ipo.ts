@@ -3,12 +3,8 @@ import { z } from "zod";
 
 type Ipo={id:string;name:string;type:"Mainboard"|"SME";closeDate:string|null;minSubscription:number|null;subscription:number|null;gmpPct:number|null;gmpSources:{source:string;pct:number|null}[];city:string|null;state:string|null;business:string|null;countries:{country:string;business:string;salesPct:number|null}[];profits:{year:string;value:number|null}[];priceBand:string|null;lotSize:number|null;verifiedAt:string};
 
-const SOURCES=[
-  {name:"IPO Watch",url:"https://ipowatch.in/ipo-subscription-status-today/"},
-  {name:"Moneycontrol",url:"https://www.moneycontrol.com/ipo/ipo-subscription-status.html"},
-  {name:"Groww",url:"https://groww.in/ipo/subscription"},
-  {name:"NiftyTrader",url:"https://www.niftytrader.in/ipo/subscription-status"},
-] as const;
+type NseIpo={companyName?:string;issueEndDate?:string;issueStartDate?:string;status?:string;symbol?:string;series?:string;category?:string;noOfSharesOffered?:string|number;noOfsharesBid?:string|number;noOfTime?:string|number;isBse?:string};
+
 const GMP_SOURCES=[
   {name:"IPOwiz",url:"https://www.ipowiz.in/ipo-grey-market-premium-live-ipo-gmp"},
   {name:"IPO Cracker",url:"https://ipocracker.com/ipo-gmp"},
@@ -17,40 +13,53 @@ const GMP_SOURCES=[
 const cache=new Map<string,{exp:number;value:Ipo[]}>();
 const UA="Mozilla/5.0 (compatible; Artha-market/1.0)";
 
-async function getHtml(url:string,timeoutMs=5000){
+async function getHtml(url:string,timeoutMs=7000){
   const controller=new AbortController();
   const timer=setTimeout(()=>controller.abort(),timeoutMs);
   try{
     const r=await fetch(url,{headers:{"User-Agent":UA,Accept:"text/html,application/xhtml+xml","Accept-Language":"en-US,en;q=0.9"},cache:"no-store",signal:controller.signal});
-    if(!r.ok) throw new Error(`HTTP ${r.status}`);
+    if(!r.ok)throw new Error(`HTTP ${r.status}`);
     return await r.text();
   }finally{clearTimeout(timer)}
 }
-function clean(h:string){return h.replace(/<script[\s\S]*?<\/script>/gi," ").replace(/<style[\s\S]*?<\/style>/gi," ").replace(/<[^>]+>/g," ").replace(/&nbsp;/gi," ").replace(/&amp;/gi,"&").replace(/&#8377;|&#x20b9;/gi,"₹").replace(/&times;/gi,"x").replace(/\s+/g," ").trim()}
-function norm(s:string){return s.toLowerCase().replace(/limited|ltd\.?|ipo|\(.*?\)/g,"").replace(/[^a-z0-9]+/g," ").trim()}
 
-// Read ONLY the subscription total belonging to this IPO row.
-// The old parser took the maximum x-value in a large window, which could
-// accidentally pick QIB/retail values or another IPO's subscription.
-function parseSubscription(html:string,name:string):number|null{
-  const text=clean(html), n=norm(name); if(!n)return null;
-  const lower=text.toLowerCase(), pos=lower.indexOf(n); if(pos<0)return null;
-  const near=text.slice(pos,Math.min(text.length,pos+1400));
-  const patterns=[
-    /times\s*subscribed\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*x\b/i,
-    /total\s*subscription(?:\s*times)?\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*x\b/i,
-    /overall\s*subscription(?:\s*times)?\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*x\b/i,
-    /total\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*x\b/i,
-  ];
-  for(const re of patterns){
-    const m=near.match(re);
-    if(m){const v=Number(m[1]);if(Number.isFinite(v)&&v>=0&&v<100000)return v;}
+function clean(h:string){return h.replace(/<script[\s\S]*?<\/script>/gi," ").replace(/<style[\s\S]*?<\/style>/gi," ").replace(/<[^>]+>/g," ").replace(/&nbsp;/gi," ").replace(/&amp;/gi,"&").replace(/&#8377;|&#x20b9;/gi,"₹").replace(/&times;/gi,"x").replace(/\s+/g," ").trim()}
+function norm(s:string){return s.toLowerCase().replace(/&amp;/g,"and").replace(/limited|ltd\.?|private|pvt\.?|ipo|inc\.?/g,"").replace(/[^a-z0-9]+/g," ").trim()}
+function nseNameMatch(a:string,b:string){const x=norm(a),y=norm(b);return !!x&&!!y&&(x===y||x.includes(y)||y.includes(x))}
+function num(v:unknown){const n=Number(String(v??"").replace(/,/g,""));return Number.isFinite(n)?n:null}
+
+// Subscription is deliberately read from the official NSE IPO feed.
+// NSE publishes the overall subscription as `category: Total` + `noOfTime`.
+// We never scrape third-party IPO websites for subscription and never guess a value.
+async function getNseSubscription():Promise<Map<string,number>>{
+  const out=new Map<string,number>();
+  try{
+    // Warm the NSE session first. This materially improves reliability on server deployments.
+    await fetch("https://www.nseindia.com/",{headers:{"User-Agent":UA,Accept:"text/html,application/xhtml+xml","Accept-Language":"en-US,en;q=0.9"},cache:"no-store"});
+    const r=await fetch("https://www.nseindia.com/api/ipo-current-issue",{headers:{"User-Agent":UA,Accept:"application/json,text/plain,*/*","Accept-Language":"en-US,en;q=0.9","Referer":"https://www.nseindia.com/market-data/all-upcoming-issues-ipo","Origin":"https://www.nseindia.com"},cache:"no-store"});
+    if(!r.ok)throw new Error(`NSE HTTP ${r.status}`);
+    const rows=await r.json() as unknown;
+    if(!Array.isArray(rows))return out;
+    for(const raw of rows){
+      const row=raw as NseIpo;
+      const name=String(row.companyName??"").trim();
+      const value=num(row.noOfTime);
+      if(!name||value==null||value<0||value>=100000)continue;
+      // The endpoint can contain category rows. Only the Total row is the IPO's overall subscription.
+      const category=String(row.category??"").trim().toLowerCase();
+      if(category && category!=="total")continue;
+      const key=norm(name);
+      if(key)out.set(key,value);
+    }
+  }catch{
+    // Return an empty map so the UI shows a truthful unavailable state instead of fabricated data.
   }
-  return null;
+  return out;
 }
+
 function parseGmp(html:string,name:string):number|null{
-  const text=clean(html), n=norm(name); if(!n)return null;
-  const pos=text.toLowerCase().indexOf(n); if(pos<0)return null;
+  const text=clean(html),n=norm(name);if(!n)return null;
+  const pos=text.toLowerCase().indexOf(n);if(pos<0)return null;
   const near=text.slice(pos,Math.min(text.length,pos+1800));
   const m=near.match(/(?:gmp|premium)[^0-9]{0,80}(?:₹\s*)?([+-]?\d+(?:\.\d+)?)\s*%/i);
   return m?Number(m[1]):null;
@@ -80,19 +89,26 @@ function currentSnapshot():Ipo[]{
 }
 
 async function loadIpos():Promise<Ipo[]>{
-  const hit=cache.get("open");
-  if(hit&&hit.exp>Date.now())return hit.value;
+  const hit=cache.get("open");if(hit&&hit.exp>Date.now())return hit.value;
   const ipos=currentSnapshot();
-  const pages=await Promise.allSettled(SOURCES.map(async s=>({source:s.name,html:await getHtml(s.url)})));
+
+  // Official exchange data only for subscription.
+  const nse=await getNseSubscription();
   for(const ipo of ipos){
-    const vals=pages.flatMap(p=>p.status==="fulfilled"?[parseSubscription(p.value.html,ipo.name)]:[]).filter((v):v is number=>v!=null);
-    const c=consensus(vals); if(c!=null)ipo.subscription=c;
+    const key=norm(ipo.name);
+    const exact=nse.get(key);
+    if(exact!=null){ipo.subscription=exact;continue;}
+    for(const [nseName,value] of nse){
+      if(nseNameMatch(ipo.name,nseName)){ipo.subscription=value;break;}
+    }
   }
+
+  // GMP is separate and remains explicitly unofficial. It does not affect subscription.
   const gmpPages=await Promise.allSettled(GMP_SOURCES.map(async s=>({source:s.name,html:await getHtml(s.url)})));
   for(const ipo of ipos){
     const extra=gmpPages.flatMap(p=>p.status==="fulfilled"?[{source:p.value.source,pct:parseGmp(p.value.html,ipo.name)}]:[]).filter((x):x is {source:string;pct:number}=>x.pct!=null);
     for(const x of extra)if(!ipo.gmpSources.some(y=>y.source===x.source))ipo.gmpSources.push(x);
-    const c=consensus(ipo.gmpSources.map(x=>x.pct).filter((v):v is number=>v!=null)); if(c!=null)ipo.gmpPct=c;
+    const c=consensus(ipo.gmpSources.map(x=>x.pct).filter((v):v is number=>v!=null));if(c!=null)ipo.gmpPct=c;
     ipo.verifiedAt=new Date().toISOString();
   }
   cache.set("open",{exp:Date.now()+60_000,value:ipos});
