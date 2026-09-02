@@ -1,19 +1,19 @@
 @import "tailwindcss";
 
 @theme {
-  /* Artha — Dark Purple theme with brighter text and tabs. */
+  /* Artha — Dark Purple theme with extra-bright readable text. */
   --color-bg: #140B24;
   --color-surface: #1D1233;
-  --color-surface-2: #30204F;
-  --color-surface-3: #3A285C;
+  --color-surface-2: #352354;
+  --color-surface-3: #412D65;
   --color-fg: #FFFFFF;
-  --color-muted: #D2CCDD;
-  --color-subtle: #AAA0B8;
+  --color-muted: #F1EDF7;
+  --color-subtle: #DDD6E7;
   --color-accent: #8B6CFF;
   --color-accent-fg: #FFFFFF;
   --color-up: #20C98A;
   --color-down: #FF5C67;
-  --color-border: #493763;
+  --color-border: #513D6D;
   --font-sans: Aptos, Arial, Helvetica, sans-serif;
   --font-display: Aptos, Arial, Helvetica, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
@@ -21,7 +21,7 @@
   --radius-md: 12px;
   --radius-lg: 16px;
   --radius-xl: 24px;
-  --shadow-border: 0 1px 2px rgba(0, 0, 0, 0.20), 0 0 0 1px #493763;
+  --shadow-border: 0 1px 2px rgba(0, 0, 0, 0.20), 0 0 0 1px #513D6D;
   --shadow-border-hover: 0 8px 24px rgba(139, 108, 255, 0.22), 0 0 0 1px rgba(139, 108, 255, 0.35);
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --motion-quick: 150ms;
