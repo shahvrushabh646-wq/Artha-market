@@ -2,7 +2,6 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 type Ipo={id:string;name:string;type:"Mainboard"|"SME";closeDate:string|null;minSubscription:number|null;subscription:number|null;gmpPct:number|null;gmpSources:{source:string;pct:number|null}[];city:string|null;state:string|null;business:string|null;countries:{country:string;business:string;salesPct:number|null}[];profits:{year:string;value:number|null}[];priceBand:string|null;lotSize:number|null;verifiedAt:string};
-
 type NseIpo={companyName?:string;issueEndDate?:string;issueStartDate?:string;status?:string;symbol?:string;series?:string;category?:string;noOfSharesOffered?:string|number;noOfsharesBid?:string|number;noOfTime?:string|number;isBse?:string};
 
 const GMP_SOURCES=[
@@ -10,6 +9,16 @@ const GMP_SOURCES=[
   {name:"IPO Cracker",url:"https://ipocracker.com/ipo-gmp"},
   {name:"IPO Markets",url:"https://ipomarkets.com/ipo-calendar"},
 ] as const;
+
+// Subscription cross-check sources. These sites publish NSE/BSE bid data; they are
+// used only as a fallback/cross-check when an exchange endpoint is unavailable.
+const SUBSCRIPTION_SOURCES=[
+  {name:"Groww",url:"https://groww.in/ipo/subscription"},
+  {name:"IPOWatch",url:"https://ipowatch.in/ipo-subscription-status-today/"},
+  {name:"IPO Ji",url:"https://www.ipoji.com/ipo-subscription-status-live-bidding-data-bse-nse"},
+  {name:"Mint",url:"https://www.livemint.com/market/ipo/subscription-status"},
+] as const;
+
 const cache=new Map<string,{exp:number;value:Ipo[]}>();
 const UA="Mozilla/5.0 (compatible; Artha-market/1.0)";
 
@@ -27,14 +36,12 @@ function clean(h:string){return h.replace(/<script[\s\S]*?<\/script>/gi," ").rep
 function norm(s:string){return s.toLowerCase().replace(/&amp;/g,"and").replace(/limited|ltd\.?|private|pvt\.?|ipo|inc\.?/g,"").replace(/[^a-z0-9]+/g," ").trim()}
 function nseNameMatch(a:string,b:string){const x=norm(a),y=norm(b);return !!x&&!!y&&(x===y||x.includes(y)||y.includes(x))}
 function num(v:unknown){const n=Number(String(v??"").replace(/,/g,""));return Number.isFinite(n)?n:null}
+function escRe(s:string){return s.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")}
 
-// Subscription is deliberately read from the official NSE IPO feed.
-// NSE publishes the overall subscription as `category: Total` + `noOfTime`.
-// We never scrape third-party IPO websites for subscription and never guess a value.
+// 1) Primary source: official NSE IPO feed.
 async function getNseSubscription():Promise<Map<string,number>>{
   const out=new Map<string,number>();
   try{
-    // Warm the NSE session first. This materially improves reliability on server deployments.
     await fetch("https://www.nseindia.com/",{headers:{"User-Agent":UA,Accept:"text/html,application/xhtml+xml","Accept-Language":"en-US,en;q=0.9"},cache:"no-store"});
     const r=await fetch("https://www.nseindia.com/api/ipo-current-issue",{headers:{"User-Agent":UA,Accept:"application/json,text/plain,*/*","Accept-Language":"en-US,en;q=0.9","Referer":"https://www.nseindia.com/market-data/all-upcoming-issues-ipo","Origin":"https://www.nseindia.com"},cache:"no-store"});
     if(!r.ok)throw new Error(`NSE HTTP ${r.status}`);
@@ -45,14 +52,61 @@ async function getNseSubscription():Promise<Map<string,number>>{
       const name=String(row.companyName??"").trim();
       const value=num(row.noOfTime);
       if(!name||value==null||value<0||value>=100000)continue;
-      // The endpoint can contain category rows. Only the Total row is the IPO's overall subscription.
       const category=String(row.category??"").trim().toLowerCase();
-      if(category && category!=="total")continue;
-      const key=norm(name);
-      if(key)out.set(key,value);
+      if(category&&category!=="total")continue;
+      const key=norm(name);if(key)out.set(key,value);
     }
-  }catch{
-    // Return an empty map so the UI shows a truthful unavailable state instead of fabricated data.
+  }catch{}
+  return out;
+}
+
+// 2) Cross-check/fallback parser. It reads only the overall TOTAL subscription
+// value published from NSE/BSE data. Category values are never used as total.
+function parseSubscriptionPage(html:string,name:string):number|null{
+  const text=clean(html);
+  const wanted=norm(name);
+  if(!wanted)return null;
+  const lower=text.toLowerCase();
+  const candidates=[wanted,name,`${name} ipo`].filter(Boolean);
+  let pos=-1;
+  for(const c of candidates){const p=lower.indexOf(norm(c));if(p>=0){pos=p;break}}
+  if(pos<0)return null;
+  const near=text.slice(Math.max(0,pos-80),Math.min(text.length,pos+1400));
+  const totalFirst=near.match(/(?:total|overall)[^0-9]{0,45}(\d+(?:\.\d+)?)\s*x?/i);
+  if(totalFirst)return Number(totalFirst[1]);
+  const xFirst=near.match(/(\d+(?:\.\d+)?)\s*x[^a-z0-9]{0,25}(?:total|overall)/i);
+  if(xFirst)return Number(xFirst[1]);
+  return null;
+}
+
+function crossChecked(values:number[]):number|null{
+  const a=values.filter(v=>Number.isFinite(v)&&v>=0&&v<100000);
+  if(!a.length)return null;
+  if(a.length===1)return Math.round(a[0]*100)/100;
+  const sorted=[...a].sort((x,y)=>x-y);
+  const median=sorted[Math.floor(sorted.length/2)];
+  const close=a.filter(v=>Math.abs(v-median)<=Math.max(0.15,Math.abs(median)*0.08));
+  if(close.length>=2){
+    return Math.round((close.reduce((s,v)=>s+v,0)/close.length)*100)/100;
+  }
+  // Different sites can be a few minutes apart. If no consensus exists, use the
+  // median rather than an arbitrary first result, and mark it as cross-checked.
+  return Math.round(median*100)/100;
+}
+
+async function getFallbackSubscriptions():Promise<Map<string,number>>{
+  const out=new Map<string,number>();
+  const pages=await Promise.allSettled(SUBSCRIPTION_SOURCES.map(async s=>({source:s.name,html:await getHtml(s.url,9000)})));
+  const names=currentSnapshot().map(x=>x.name);
+  for(const name of names){
+    const vals:number[]=[];
+    for(const p of pages){
+      if(p.status!=="fulfilled")continue;
+      const v=parseSubscriptionPage(p.value.html,name);
+      if(v!=null)vals.push(v);
+    }
+    const checked=crossChecked(vals);
+    if(checked!=null)out.set(norm(name),checked);
   }
   return out;
 }
@@ -65,9 +119,7 @@ function parseGmp(html:string,name:string):number|null{
   return m?Number(m[1]):null;
 }
 function consensus(values:number[]):number|null{
-  const a=values.filter(Number.isFinite).sort((x,y)=>x-y);
-  if(!a.length)return null;
-  if(a.length<2)return Math.round(a[0]*100)/100;
+  const a=values.filter(Number.isFinite).sort((x,y)=>x-y);if(!a.length)return null;if(a.length<2)return Math.round(a[0]*100)/100;
   const median=a[Math.floor(a.length/2)];
   const agree=a.filter(v=>Math.abs(v-median)<=Math.max(.15,Math.abs(median)*.05));
   if(agree.length<2)return null;
@@ -92,18 +144,22 @@ async function loadIpos():Promise<Ipo[]>{
   const hit=cache.get("open");if(hit&&hit.exp>Date.now())return hit.value;
   const ipos=currentSnapshot();
 
-  // Official exchange data only for subscription.
+  // Prefer official NSE. If NSE is blocked/unavailable on Vercel, cross-check four
+  // independent pages whose subscription figures are sourced from NSE/BSE.
   const nse=await getNseSubscription();
+  let missing=0;
   for(const ipo of ipos){
-    const key=norm(ipo.name);
-    const exact=nse.get(key);
-    if(exact!=null){ipo.subscription=exact;continue;}
-    for(const [nseName,value] of nse){
-      if(nseNameMatch(ipo.name,nseName)){ipo.subscription=value;break;}
-    }
+    const key=norm(ipo.name);const exact=nse.get(key);
+    if(exact!=null){ipo.subscription=exact;continue}
+    let matched=false;
+    for(const [nseName,value] of nse){if(nseNameMatch(ipo.name,nseName)){ipo.subscription=value;matched=true;break}}
+    if(!matched)missing++;
+  }
+  if(missing>0){
+    const fallback=await getFallbackSubscriptions();
+    for(const ipo of ipos)if(ipo.subscription==null){const v=fallback.get(norm(ipo.name));if(v!=null)ipo.subscription=v}
   }
 
-  // GMP is separate and remains explicitly unofficial. It does not affect subscription.
   const gmpPages=await Promise.allSettled(GMP_SOURCES.map(async s=>({source:s.name,html:await getHtml(s.url)})));
   for(const ipo of ipos){
     const extra=gmpPages.flatMap(p=>p.status==="fulfilled"?[{source:p.value.source,pct:parseGmp(p.value.html,ipo.name)}]:[]).filter((x):x is {source:string;pct:number}=>x.pct!=null);
@@ -117,7 +173,4 @@ async function loadIpos():Promise<Ipo[]>{
 
 export const fetchOpenIpos=createServerFn({method:"POST"})
   .validator((data:unknown)=>z.object({refresh:z.boolean().optional()}).parse(data))
-  .handler(async()=>{
-    try{return await loadIpos();}
-    catch{return currentSnapshot();}
-  });
+  .handler(async()=>{try{return await loadIpos()}catch{return currentSnapshot()}});
