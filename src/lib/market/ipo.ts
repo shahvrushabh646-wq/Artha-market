@@ -28,12 +28,25 @@ async function getHtml(url:string,timeoutMs=5000){
 }
 function clean(h:string){return h.replace(/<script[\s\S]*?<\/script>/gi," ").replace(/<style[\s\S]*?<\/style>/gi," ").replace(/<[^>]+>/g," ").replace(/&nbsp;/gi," ").replace(/&amp;/gi,"&").replace(/&#8377;|&#x20b9;/gi,"₹").replace(/&times;/gi,"x").replace(/\s+/g," ").trim()}
 function norm(s:string){return s.toLowerCase().replace(/limited|ltd\.?|ipo|\(.*?\)/g,"").replace(/[^a-z0-9]+/g," ").trim()}
+
+// Read ONLY the subscription total belonging to this IPO row.
+// The old parser took the maximum x-value in a large window, which could
+// accidentally pick QIB/retail values or another IPO's subscription.
 function parseSubscription(html:string,name:string):number|null{
   const text=clean(html), n=norm(name); if(!n)return null;
-  const pos=text.toLowerCase().indexOf(n); if(pos<0)return null;
-  const near=text.slice(pos,Math.min(text.length,pos+1800));
-  const nums=[...near.matchAll(/\b\d+(?:\.\d+)?\s*x\b/gi)].map(m=>Number(m[0].replace(/x/i,""))).filter(v=>Number.isFinite(v)&&v>=0&&v<100000);
-  return nums.length?Math.max(...nums):null;
+  const lower=text.toLowerCase(), pos=lower.indexOf(n); if(pos<0)return null;
+  const near=text.slice(pos,Math.min(text.length,pos+1400));
+  const patterns=[
+    /times\s*subscribed\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*x\b/i,
+    /total\s*subscription(?:\s*times)?\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*x\b/i,
+    /overall\s*subscription(?:\s*times)?\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*x\b/i,
+    /total\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*x\b/i,
+  ];
+  for(const re of patterns){
+    const m=near.match(re);
+    if(m){const v=Number(m[1]);if(Number.isFinite(v)&&v>=0&&v<100000)return v;}
+  }
+  return null;
 }
 function parseGmp(html:string,name:string):number|null{
   const text=clean(html), n=norm(name); if(!n)return null;
