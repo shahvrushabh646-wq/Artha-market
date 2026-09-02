@@ -1,14 +1,14 @@
 @import "tailwindcss";
 
 @theme {
-  /* Artha — Dark Purple theme with extra-bright readable text. */
+  /* Artha — Dark Purple theme with Absolute White (L161) text. */
   --color-bg: #140B24;
   --color-surface: #1D1233;
   --color-surface-2: #352354;
   --color-surface-3: #412D65;
   --color-fg: #FFFFFF;
-  --color-muted: #F1EDF7;
-  --color-subtle: #DDD6E7;
+  --color-muted: #FFFFFF;
+  --color-subtle: #FFFFFF;
   --color-accent: #8B6CFF;
   --color-accent-fg: #FFFFFF;
   --color-up: #20C98A;
