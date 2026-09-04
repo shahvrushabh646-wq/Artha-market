@@ -80,12 +80,16 @@ function extractGmp(text: string) { const t = clean(text); const m = t.match(/(?
 async function enrichGmp(ipo: Ipo) {
   const values: { source: string; pct: number | null }[] = [];
   for (const [source, url] of Object.entries(GMP_SOURCE_URLS(ipo.id))) { try { const g = extractGmp(await getHtml(url, 10000)); if (g != null) values.push({ source, pct: g }); } catch {} }
-  ipo.gmpSources = values; ipo.gmpPct = median(values.map(x => x.pct).filter((x): x is number => x != null));
+  ipo.gmpSources = values;
+  // GMP is unofficial. Only show a value when at least 2 independent GMP sources agree.
+  ipo.gmpPct = values.length >= 2 ? median(values.map(x => x.pct).filter((x): x is number => x != null)) : null;
 }
 function todayIST() { return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()); }
 
 async function loadIpos() {
   const hit = cache.get("open"); if (hit && hit.exp > Date.now()) return hit.value;
+  // Groww is used for live IPO discovery and subscription verification. We do not
+  // scrape Angel One because its current terms prohibit automated scraping.
   const [dashboard, subscription] = await Promise.allSettled([getHtml(GROWW_DASHBOARD), getHtml(GROWW_SUBSCRIPTION)]);
   let ipos = dashboard.status === "fulfilled" ? parseDashboardOpen(dashboard.value) : [];
   const today = todayIST();
@@ -94,7 +98,7 @@ async function loadIpos() {
   const enriched = await Promise.all(ipos.map(async ipo => {
     const growwSub = growwSubs.get(norm(ipo.name)) ?? null;
     ipo.subscription = growwSub;
-    ipo.subscriptionSource = growwSub != null ? "Groww verified" : null;
+    ipo.subscriptionSource = growwSub != null ? "Groww verified" : "Not verified";
     await enrichGmp(ipo);
     ipo.verifiedAt = new Date().toISOString();
     return ipo;
