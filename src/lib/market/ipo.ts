@@ -7,7 +7,7 @@ const GROWW_SUBSCRIPTION="https://groww.in/ipo/subscription";
 const SCREENER_IPO="https://www.screener.in/ipo/";
 const MONEYCONTROL_OPEN="https://www.moneycontrol.com/ipo/open-ipos/";
 const MONEYCONTROL_ROOT="https://www.moneycontrol.com/ipo/";
-const GMP_SOURCE_URLS=(id:string)=>({"IPO Watch":`https://ipowatch.in/${id}-ipo-gmp-grey-market-premium/`,`IPO Central`:`https://ipocentral.in/${id}-ipo-gmp-price-allotment/`,`GMP IPO Watch`:`https://www.gmpipowatch.in/ipo/${id}`,InvestorGain:`https://www.investorgain.com/gmp/${id}-ipo-gmp/`});
+const GMP_SOURCE_URLS=(id:string)=>({"IPO Watch":`https://ipowatch.in/${id}-ipo-gmp-grey-market-premium/`,"IPO Central":`https://ipocentral.in/${id}-ipo-gmp-price-allotment/`,"GMP IPO Watch":`https://www.gmpipowatch.in/ipo/${id}`,"InvestorGain":`https://www.investorgain.com/gmp/${id}-ipo-gmp/`});
 const cache=new Map<string,{exp:number;value:Ipo[]}>();
 const UA="Mozilla/5.0 (compatible; Artha-market/1.0)";
 async function getHtml(url:string,timeoutMs=12000){const c=new AbortController();const timer=setTimeout(()=>c.abort(),timeoutMs);try{const r=await fetch(url,{headers:{"User-Agent":UA,Accept:"text/html,application/xhtml+xml,application/json","Accept-Language":"en-US,en;q=0.9"},cache:"no-store",signal:c.signal});if(!r.ok)throw new Error(`HTTP ${r.status}`);return await r.text();}finally{clearTimeout(timer);}}
