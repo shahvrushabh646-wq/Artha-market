@@ -1,7 +1,7 @@
 export function applyVerifiedIpoOverrides<T extends { name: string }>(ipos: T[]): T[] {
   return ipos.map((ipo) => {
     const key = ipo.name.toLowerCase().replace(/limited|ltd\.?|[^a-z0-9]+/g, "");
-    if (!key.includes("assetreconstructioncompanyindia")) return ipo;
+    if (!key.includes("assetreconstruction")) return ipo;
     return {
       ...ipo,
       id: "asset-reconstruction-company-india",
