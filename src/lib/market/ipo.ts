@@ -1,166 +1,48 @@
 import { createServerFn } from "@tanstack/react-start";
 
 type Ipo = {
-  id: string;
-  name: string;
-  type: "Mainboard" | "SME";
-  openDate: string | null;
-  closeDate: string | null;
-  issueSize: number | null;
-  minSubscription: number | null;
-  subscription: number | null;
-  subscriptionSource: string | null;
-  gmpPct: number | null;
-  gmpSources: { source: string; pct: number | null }[];
-  city: string | null;
-  state: string | null;
-  business: string | null;
-  countries: { country: string; business: string; salesPct: number | null }[];
-  profits: { year: string; value: number | null }[];
-  priceBand: string | null;
-  lotSize: number | null;
-  moneycontrolUrl: string | null;
-  detailSource: string | null;
-  verifiedSources: string[];
-  verifiedAt: string;
+  id:string; name:string; type:"Mainboard"|"SME"; openDate:string|null; closeDate:string|null; listingDate:string|null;
+  issueSize:number|null; minSubscription:number|null; subscription:number|null; subscriptionSource:string|null;
+  subscriptionCategories:{category:string; value:number|null}[]; gmpPct:number|null; gmpSources:{source:string; pct:number|null}[];
+  city:string|null; state:string|null; business:string|null; countries:{country:string; business:string; salesPct:number|null}[];
+  revenues:{year:string; value:number|null}[]; profits:{year:string; value:number|null}[]; eps:{year:string; value:number|null}[];
+  priceBand:string|null; lotSize:number|null; faceValue:number|null; sharesOffered:number|null; offeredToPublic:number|null;
+  retailShares:number|null; qibShares:number|null; niiShares:number|null; freshIssue:number|null; offerForSale:number|null;
+  issueType:string|null; objects:string[]; risks:string[]; promoterHolding:number|null; postIssuePromoterHolding:number|null;
+  moneycontrolUrl:string|null; detailSource:string|null; verifiedSources:string[]; sourceUrls:string[]; verifiedAt:string;
 };
 
-const GROWW_IPO = "https://groww.in/ipo";
-const GROWW_SUBSCRIPTION = "https://groww.in/ipo/subscription";
-const MONEYCONTROL_OPEN = "https://www.moneycontrol.com/ipo/open-ipos/";
-const UA = "Mozilla/5.0 (compatible; Artha-market/1.0)";
+const GROWW_IPO="https://groww.in/ipo";
+const GROWW_SUBSCRIPTION="https://groww.in/ipo/subscription";
+const MONEYCONTROL_OPEN="https://www.moneycontrol.com/ipo/open-ipos/";
+const SEBI_PUBLIC="https://www.sebi.gov.in/sebiweb/home/HomeAction.do?doListing=yes&sid=3&sm=&ssid=15";
+const UA="Mozilla/5.0 (compatible; Artha-market/2.0)";
+const cache=new Map<string,{expires:number;value:Ipo[]}>();
 
-const GMP_SOURCE_URLS = (id: string) => ({
-  "IPO Watch": `https://ipowatch.in/${id}-ipo-gmp-grey-market-premium/`,
-  "IPO Central": `https://ipocentral.in/${id}-ipo-gmp-price-allotment/`,
-  "GMP IPO Watch": `https://www.gmpipowatch.in/ipo/${id}`,
-  InvestorGain: `https://www.investorgain.com/gmp/${id}-ipo-gmp/`,
-});
+const gmpUrls=(id:string)=>({"IPO Watch":`https://ipowatch.in/${id}-ipo-gmp-grey-market-premium/`,"IPO Central":`https://ipocentral.in/${id}-ipo-gmp-price-date-allotment/`,"GMP IPO Watch":`https://www.gmpipowatch.in/ipo/${id}`,InvestorGain:`https://www.investorgain.com/gmp/${id}-ipo-gmp/`});
 
-const DETAIL_SOURCE_URLS = (id: string) => ({
-  "IPO Watch": `https://ipowatch.in/${id}-ipo-gmp-grey-market-premium/`,
-  "IPO Central": `https://ipocentral.in/${id}-ipo-gmp-price-allotment/`,
-  InvestorGain: `https://www.investorgain.com/gmp/${id}-ipo-gmp/`,
-});
-
-const cache = new Map<string, { expires: number; value: Ipo[] }>();
-
-async function getHtml(url: string, timeoutMs = 6000): Promise<string> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(url, {
-      headers: { "User-Agent": UA, Accept: "text/html,application/xhtml+xml,application/json", "Accept-Language": "en-US,en;q=0.9" },
-      cache: "no-store",
-      signal: controller.signal,
-    });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return await response.text();
-  } finally { clearTimeout(timer); }
-}
-
-function clean(value: string): string {
-  return value.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&")
-    .replace(/&#8377;|&#x20b9;/gi, "₹").replace(/&ndash;|&mdash;|&#8211;|&#8212;/gi, "-")
-    .replace(/&#39;|&apos;/gi, "'").replace(/&quot;/gi, '"').replace(/\s+/g, " ").trim();
-}
-
-function norm(value: string): string {
-  return value.toLowerCase().replace(/&amp;/g, "and").replace(/limited|ltd\.?|private|pvt\.?|ipo|inc\.?/g, "")
-    .replace(/[^a-z0-9]+/g, " ").trim();
-}
-function num(value: unknown): number | null {
-  const parsed = Number(String(value ?? "").replace(/,/g, ""));
-  return Number.isFinite(parsed) ? parsed : null;
-}
-function idFor(name: string): string { return norm(name).replace(/\s+/g, "-"); }
-function parseDate(value: string): string | null {
-  const m = value.match(/(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{4})/); if (!m) return null;
-  const months: Record<string,string> = {jan:"01",feb:"02",mar:"03",apr:"04",may:"05",jun:"06",jul:"07",aug:"08",sep:"09",oct:"10",nov:"11",dec:"12"};
-  const month = months[m[2].slice(0,3).toLowerCase()]; return month ? `${m[3]}-${month}-${String(Number(m[1])).padStart(2,"0")}` : null;
-}
-function priceNumbers(value: string): [number|null, number|null] {
-  const m = value.match(/(?:₹|Rs\.?|INR)?\s*([\d,.]+)\s*(?:-|–|to)\s*(?:₹|Rs\.?|INR)?\s*([\d,.]+)/i);
-  return m ? [num(m[1]), num(m[2])] : [null,null];
-}
-function parsePriceBand(value: string): string | null {
-  const [low,high] = priceNumbers(value); if (low !== null && high !== null) return `₹${low.toLocaleString("en-IN")} – ₹${high.toLocaleString("en-IN")}`;
-  const m = value.match(/(?:₹|Rs\.?|INR)\s*([\d,.]+)/i); return m ? `₹${num(m[1])?.toLocaleString("en-IN") ?? m[1]}` : null;
-}
-function firstNumber(value: string, patterns: RegExp[]): number | null {
-  for (const p of patterns) { const m=value.match(p); if(m){const n=num(m[1]); if(n!==null)return n;} } return null;
-}
-function blank(name:string,type:"SME"|"Mainboard"="Mainboard"):Ipo { return {
-  id:idFor(name),name,type,openDate:null,closeDate:null,issueSize:null,minSubscription:null,subscription:null,subscriptionSource:null,
-  gmpPct:null,gmpSources:[],city:null,state:null,business:null,countries:[],profits:[],priceBand:null,lotSize:null,moneycontrolUrl:null,detailSource:null,verifiedSources:[],verifiedAt:new Date().toISOString()
-}; }
-
-function rowName(raw:string):string {
-  const a=raw.match(/<a[^>]+href=["'][^"']*\/ipo\/[^"']*ipodetail[^"']*["'][^>]*>([\s\S]*?)<\/a>/i);
-  if(a){const n=clean(a[1]).replace(/^(image|logo)\s*:?/i,"").trim();if(n&&n.length>=2&&!/^(details|view|read more)$/i.test(n))return n;}
-  const text=clean(raw), firstDate=text.search(/\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4}/); const before=firstDate>=0?text.slice(0,firstDate):text;
-  return before.replace(/Image:\s*/gi," ").replace(/Company Name|Company|Type|Open Date|Close Date|Issue Size|Issue Price|QIB|NII|Retail|Employee|Total/gi," ").replace(/\b(Mainboard|SME|Open|Upcoming|RHP|RHPSME)\b/gi," ").replace(/\s+/g," ").trim();
-}
-function moneycontrolLink(raw:string):string|null { const m=raw.match(/href=["']([^"']*\/ipo\/[^"']*ipodetail[^"']*)["']/i); if(!m)return null; return m[1].startsWith("http")?m[1]:`https://www.moneycontrol.com${m[1]}`; }
-
-function exactMinimum(text:string, priceBand:string|null, lotSize:number|null):number|null {
-  const direct = firstNumber(text,[
-    /minimum\s+(?:investment|application|bid\s+amount)[^₹\d]{0,80}(?:₹|Rs\.?|INR)?\s*([\d,.]+)/i,
-    /min(?:imum)?\s+(?:investment|application)[^₹\d]{0,80}(?:₹|Rs\.?|INR)?\s*([\d,.]+)/i,
-    /application\s+amount[^₹\d]{0,80}(?:₹|Rs\.?|INR)?\s*([\d,.]+)/i,
-  ]);
-  if(direct!==null) return direct;
-  const [low]=priceNumbers(priceBand??text);
-  return low!==null&&lotSize!==null ? low*lotSize : null;
-}
-
-function parseRows(html:string):Ipo[] {
-  const result:Ipo[]=[];
-  for(const match of html.matchAll(/<tr\b[\s\S]*?<\/tr>/gi)){
-    const raw=match[0],text=clean(raw),dates=[...text.matchAll(/\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4}/g)].map(x=>x[0]); if(!dates.length)continue;
-    const name=rowName(raw); if(!name||name.length<2||/company name|open date|close date/i.test(name))continue;
-    const ipo=blank(name,/\bSME\b/i.test(text)?"SME":"Mainboard"); ipo.openDate=parseDate(dates[0]); ipo.closeDate=dates.length>1?parseDate(dates[1]):null;
-    ipo.moneycontrolUrl=moneycontrolLink(raw); ipo.detailSource=ipo.moneycontrolUrl?"Moneycontrol":null;
-    const after=text.slice(text.indexOf(dates[0])+dates[0].length);
-    ipo.priceBand=parsePriceBand(after);
-    ipo.lotSize=firstNumber(after,[/\blot\s*size\s*[:\-]?\s*(\d[\d,]*)/i,/\blot\s*[:\-]?\s*(\d[\d,]*)/i]);
-    ipo.issueSize=firstNumber(after,[/issue\s*size[^\d]{0,60}(?:₹|Rs\.?|INR)?\s*([\d,.]+)\s*(?:Cr|crore)/i,/(?:₹|Rs\.?|INR)?\s*([\d,.]+)\s*(?:Cr|crore)/i]);
-    ipo.minSubscription=exactMinimum(after,ipo.priceBand,ipo.lotSize); result.push(ipo);
-  } return result;
-}
-
-function parseGrowwSubscription(html:string):Ipo[] {
-  const result:Ipo[]=[];
-  for(const match of html.matchAll(/<tr\b[\s\S]*?<\/tr>/gi)){
-    const raw=match[0],text=clean(raw),dates=[...text.matchAll(/\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4}/g)].map(x=>x[0]); if(!dates.length)continue;
-    const name=rowName(raw); if(!name||name.length<2||/company name|close date/i.test(name))continue;
-    const ipo=blank(name,/\bSME\b/i.test(text)?"SME":"Mainboard"); ipo.closeDate=parseDate(dates[0]); const after=text.slice(text.indexOf(dates[0])+dates[0].length);
-    ipo.priceBand=parsePriceBand(after); ipo.issueSize=firstNumber(after,[/issue\s*size[^\d]{0,60}([\d,.]+)\s*(?:Cr|crore)/i,/(?:₹|Rs\.?|INR)?\s*([\d,.]+)\s*(?:Cr|crore)/i]);
-    const subs=[...after.matchAll(/(\d+(?:\.\d+)?)\s*x\b/gi)].map(x=>num(x[1])).filter((v):v is number=>v!==null); if(subs.length)ipo.subscription=subs[subs.length-1];
-    ipo.lotSize=firstNumber(after,[/\blot\s*size\s*[:\-]?\s*(\d[\d,]*)/i]); ipo.minSubscription=exactMinimum(after,ipo.priceBand,ipo.lotSize);
-    if(ipo.subscription!==null)ipo.subscriptionSource="Groww verified"; result.push(ipo);
-  } return result;
-}
-
-function mergeInto(map:Map<string,Ipo>,incoming:Ipo):void { const key=norm(incoming.name);if(!key)return;const e=map.get(key);if(!e){map.set(key,incoming);return;}
-  if(incoming.type==="SME")e.type="SME"; e.openDate??=incoming.openDate;e.closeDate??=incoming.closeDate;e.issueSize??=incoming.issueSize;e.priceBand??=incoming.priceBand;e.lotSize??=incoming.lotSize;
-  e.minSubscription??=incoming.minSubscription;e.moneycontrolUrl??=incoming.moneycontrolUrl;e.detailSource??=incoming.detailSource;
-  if(e.subscription===null&&incoming.subscription!==null){e.subscription=incoming.subscription;e.subscriptionSource=incoming.subscriptionSource;}
-}
-
-function extractGmp(text:string):number|null { const value=clean(text);for(const p of [/(?:Current GMP|Live GMP|GMP Today)[^₹\d]{0,120}₹\s*(-?[\d,]+(?:\.\d+)?)/i,/(?:GMP)[^\d]{0,80}(-?[\d,]+(?:\.\d+)?)\s*(?:₹|Rs)/i]){const m=value.match(p);if(m)return num(m[1]);}return null; }
-async function enrichGmp(ipo:Ipo):Promise<void>{const settled=await Promise.allSettled(Object.entries(GMP_SOURCE_URLS(ipo.id)).map(async([source,url])=>({source,pct:extractGmp(await getHtml(url,3000))})));const values=settled.flatMap(x=>x.status==="fulfilled"&&x.value.pct!==null?[x.value]:[]);ipo.gmpSources=values;if(values.length<2){ipo.gmpPct=null;return;}const sorted=values.map(x=>x.pct as number).sort((a,b)=>a-b),mid=Math.floor(sorted.length/2),median=sorted.length%2?sorted[mid]:(sorted[mid-1]+sorted[mid])/2;const[,upper]=priceNumbers(ipo.priceBand??"");ipo.gmpPct=upper&&upper>0?Number(((median/upper)*100).toFixed(2)):null;}
-
-function parseMoneycontrolDetail(text:string,ipo:Ipo):void { const details=text.match(/IPO Details[\s\S]{0,16000}/i)?.[0]??text;ipo.priceBand??=parsePriceBand(details);ipo.lotSize??=firstNumber(details,[/Lot Size\s*[:\-]?\s*([\d,]+)/i,/Lot size[^\d]{0,40}([\d,]+)/i]);ipo.issueSize??=firstNumber(details,[/Issue Size[^\d]{0,70}(?:₹|Rs\.?|INR)?\s*([\d,.]+)\s*(?:Cr|crore)/i]);ipo.minSubscription??=exactMinimum(details,ipo.priceBand,ipo.lotSize);
-  const address=text.match(/Address[\s\S]{0,1600}/i)?.[0]??"";const cities=["Mumbai","Delhi","Bengaluru","Bangalore","Chennai","Pune","Ahmedabad","Kolkata","Hyderabad","Jaipur","Surat","Noida","Gurugram","Gurgaon","Vadodara","Indore","Rajkot","Tiruppur"];const city=cities.find(x=>new RegExp(`\\b${x}\\b`,"i").test(address));if(city)ipo.city=city==="Bangalore"?"Bengaluru":city;
-  const states=["Maharashtra","Gujarat","Karnataka","Tamil Nadu","Delhi","West Bengal","Telangana","Rajasthan","Haryana","Uttar Pradesh","Madhya Pradesh"];const state=states.find(x=>new RegExp(`\\b${x}\\b`,"i").test(address));if(state)ipo.state=state;
-  const about=text.match(/About (?:the )?(?:Company|Product)[\s\S]{0,4500}/i)?.[0];if(about)ipo.business=clean(about).replace(/^About (?:the )?(?:Company|Product)\s*/i,"").slice(0,1800);
-  const profits=[...text.matchAll(/(?:FY|Year)[^\d]{0,30}(20\d{2})[^₹\d]{0,80}₹?\s*([\d,.]+)\s*(?:Cr|crore)/gi)].map(x=>({year:x[1],value:num(x[2])})).filter(x=>x.value!==null).slice(-3);if(profits.length)ipo.profits=profits;
-}
-async function enrichMoneycontrol(ipo:Ipo):Promise<void>{if(!ipo.moneycontrolUrl)return;try{const text=await getHtml(ipo.moneycontrolUrl,4500);if(text.length<200)return;parseMoneycontrolDetail(text,ipo);ipo.detailSource="Moneycontrol";ipo.verifiedSources.push("Moneycontrol");}catch{}}
-function parseSecondaryDetail(text:string,ipo:Ipo):boolean{const value=clean(text);const before=ipo.minSubscription;ipo.priceBand??=parsePriceBand(value);ipo.lotSize??=firstNumber(value,[/Lot Size[^\d]{0,60}([\d,]+)/i,/Lot size[^\d]{0,60}([\d,]+)/i]);ipo.issueSize??=firstNumber(value,[/Issue Size[^\d]{0,80}(?:₹|Rs\.?|INR)?\s*([\d,.]+)\s*(?:Cr|crore)/i]);ipo.minSubscription??=exactMinimum(value,ipo.priceBand,ipo.lotSize);return Boolean(ipo.priceBand||ipo.lotSize||ipo.issueSize||(before!==ipo.minSubscription));}
-async function enrichSecondaryDetails(ipo:Ipo):Promise<void>{const settled=await Promise.allSettled(Object.entries(DETAIL_SOURCE_URLS(ipo.id)).map(async([source,url])=>({source,text:await getHtml(url,3000)})));for(const x of settled){if(x.status!=="fulfilled"||x.value.text.length<200)continue;if(parseSecondaryDetail(x.value.text,ipo))ipo.verifiedSources.push(x.value.source);}}
-function todayIST():string{return new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Kolkata",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date());}
-async function loadIpos():Promise<Ipo[]>{const cached=cache.get("ipos");if(cached&&cached.expires>Date.now())return cached.value;const [gd,gs,mc]=await Promise.allSettled([getHtml(GROWW_IPO,5000),getHtml(GROWW_SUBSCRIPTION,5000),getHtml(MONEYCONTROL_OPEN,5000)]);const map=new Map<string,Ipo>();if(gd.status==="fulfilled")for(const x of parseRows(gd.value))mergeInto(map,x);if(gs.status==="fulfilled")for(const x of parseGrowwSubscription(gs.value))mergeInto(map,x);if(mc.status==="fulfilled")for(const x of parseRows(mc.value))mergeInto(map,x);const today=todayIST();const active=[...map.values()].filter(x=>x.closeDate!==null&&x.closeDate>=today);const enriched=await Promise.all(active.map(async ipo=>{await Promise.allSettled([enrichMoneycontrol(ipo),enrichSecondaryDetails(ipo),enrichGmp(ipo)]);if(ipo.subscription!==null&&!ipo.verifiedSources.includes("Groww"))ipo.verifiedSources.push("Groww");ipo.verifiedSources=[...new Set(ipo.verifiedSources)];ipo.verifiedAt=new Date().toISOString();return ipo;}));enriched.sort((a,b)=>(a.openDate??"9999-99-99").localeCompare(b.openDate??"9999-99-99")||a.name.localeCompare(b.name));cache.set("ipos",{expires:Date.now()+60000,value:enriched});return enriched;}
-export const fetchOpenIpos=createServerFn({method:"POST"}).handler(async():Promise<Ipo[]>=>{try{return await loadIpos();}catch{return[];}});
+async function getHtml(url:string,timeout=6000):Promise<string>{const c=new AbortController();const t=setTimeout(()=>c.abort(),timeout);try{const r=await fetch(url,{headers:{"User-Agent":UA,Accept:"text/html,application/xhtml+xml","Accept-Language":"en-US,en;q=0.9"},cache:"no-store",signal:c.signal});if(!r.ok)throw new Error(String(r.status));return await r.text()}finally{clearTimeout(t)}}
+function clean(v:string){return v.replace(/<script[\s\S]*?<\/script>/gi," ").replace(/<style[\s\S]*?<\/style>/gi," ").replace(/<[^>]+>/g," ").replace(/&nbsp;/gi," ").replace(/&amp;/gi,"&").replace(/&#8377;|&#x20b9;/gi,"₹").replace(/&ndash;|&mdash;|&#8211;|&#8212;/gi,"-").replace(/&quot;/gi,'"').replace(/&#39;|&apos;/gi,"'").replace(/\s+/g," ").trim()}
+function norm(v:string){return v.toLowerCase().replace(/&amp;/g,"and").replace(/limited|ltd\.?|private|pvt\.?|ipo|inc\.?/g,"").replace(/[^a-z0-9]+/g," ").trim()}
+function num(v:unknown){const n=Number(String(v??"").replace(/,/g,""));return Number.isFinite(n)?n:null}
+function idFor(n:string){return norm(n).replace(/\s+/g,"-")}
+function parseDate(v:string){const m=v.match(/(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{4})/);if(!m)return null;const ms:{[k:string]:string}={jan:"01",feb:"02",mar:"03",apr:"04",may:"05",jun:"06",jul:"07",aug:"08",sep:"09",oct:"10",nov:"11",dec:"12"};const mo=ms[m[2].slice(0,3).toLowerCase()];return mo?`${m[3]}-${mo}-${String(Number(m[1])).padStart(2,"0")}`:null}
+function prices(v:string):[number|null,number|null]{const m=v.match(/₹?\s*([\d,.]+)\s*(?:-|–|to)\s*₹?\s*([\d,.]+)/i);return m?[num(m[1]),num(m[2])]:[null,null]}
+function band(v:string){const[a,b]=prices(v);return a!==null&&b!==null?`₹${a.toLocaleString("en-IN")} – ₹${b.toLocaleString("en-IN")}`:null}
+function first(v:string,ps:RegExp[]){for(const p of ps){const m=v.match(p);if(m){const n=num(m[1]);if(n!==null)return n}}return null}
+function blank(name:string,type:"SME"|"Mainboard"="Mainboard"):Ipo{return{id:idFor(name),name,type,openDate:null,closeDate:null,listingDate:null,issueSize:null,minSubscription:null,subscription:null,subscriptionSource:null,subscriptionCategories:[],gmpPct:null,gmpSources:[],city:null,state:null,business:null,countries:[],revenues:[],profits:[],eps:[],priceBand:null,lotSize:null,faceValue:null,sharesOffered:null,offeredToPublic:null,retailShares:null,qibShares:null,niiShares:null,freshIssue:null,offerForSale:null,issueType:null,objects:[],risks:[],promoterHolding:null,postIssuePromoterHolding:null,moneycontrolUrl:null,detailSource:null,verifiedSources:[],sourceUrls:[],verifiedAt:new Date().toISOString()}}
+function rowName(raw:string){const a=raw.match(/<a[^>]+href=["'][^"']*\/ipo\/[^"']*ipodetail[^"']*["'][^>]*>([\s\S]*?)<\/a>/i);if(a){const n=clean(a[1]).replace(/^(image|logo)\s*:?/i,"").trim();if(n&&!/^(details|view|read more)$/i.test(n))return n}const t=clean(raw),d=t.search(/\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4}/);return(d>=0?t.slice(0,d):t).replace(/Image:\s*/gi," ").replace(/Company Name|Company|Type|Open Date|Close Date|Issue Size|Issue Price|QIB|NII|Retail|Employee|Total/gi," ").replace(/\b(Mainboard|SME|Open|Upcoming|RHP|RHPSME)\b/gi," ").replace(/\s+/g," ").trim()}
+function mcLink(raw:string){const m=raw.match(/href=["']([^"']*\/ipo\/[^"']*ipodetail[^"']*)["']/i);return m?(m[1].startsWith("http")?m[1]:`https://www.moneycontrol.com${m[1]}`):null}
+function parseRows(html:string){const out:Ipo[]=[];for(const m of html.matchAll(/<tr\b[\s\S]*?<\/tr>/gi)){const raw=m[0],t=clean(raw),ds=[...t.matchAll(/\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4}/g)].map(x=>x[0]);if(!ds.length)continue;const name=rowName(raw);if(!name||name.length<2||/company name|open date|close date/i.test(name))continue;const x=blank(name,/\bSME\b/i.test(t)?"SME":"Mainboard");x.openDate=parseDate(ds[0]);x.closeDate=ds.length>1?parseDate(ds[1]):null;x.moneycontrolUrl=mcLink(raw);x.detailSource=x.moneycontrolUrl?"Moneycontrol":null;const after=t.slice(t.indexOf(ds[0])+ds[0].length);x.priceBand=band(after);x.lotSize=first(after,[/lot\s*size\s*[:\-]?\s*(\d[\d,]*)/i]);x.issueSize=first(after,[/₹?\s*([\d,.]+)\s*(?:Cr|crore)/i,/issue\s*size[^\d]{0,40}([\d,.]+)\s*(?:Cr|crore)/i]);setMinimum(x);out.push(x)}return out}
+function parseGroww(html:string){const out:Ipo[]=[];for(const m of html.matchAll(/<tr\b[\s\S]*?<\/tr>/gi)){const raw=m[0],t=clean(raw),ds=[...t.matchAll(/\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4}/g)].map(x=>x[0]);if(!ds.length)continue;const name=rowName(raw);if(!name||name.length<2)continue;const x=blank(name,/\bSME\b/i.test(t)?"SME":"Mainboard");x.closeDate=parseDate(ds[0]);const a=t.slice(t.indexOf(ds[0])+ds[0].length);x.priceBand=band(a);x.issueSize=first(a,[/([\d,.]+)\s*Cr/i]);x.lotSize=first(a,[/lot\s*size\s*[:\-]?\s*(\d[\d,]*)/i]);const ss=[...a.matchAll(/(\d+(?:\.\d+)?)\s*x\b/gi)].map(z=>num(z[1])).filter((z):z is number=>z!==null);if(ss.length)x.subscription=ss.at(-1)??null;if(x.subscription!==null)x.subscriptionSource="Groww verified";setMinimum(x);out.push(x)}return out}
+function setMinimum(x:Ipo){if(x.lotSize===null)return;const[,upper]=prices(x.priceBand??"");if(upper!==null)x.minSubscription=upper*x.lotSize}
+function merge(map:Map<string,Ipo>,x:Ipo){const k=norm(x.name);if(!k)return;const e=map.get(k);if(!e){map.set(k,x);return}e.type=x.type==="SME"?"SME":e.type;e.openDate??=x.openDate;e.closeDate??=x.closeDate;e.issueSize??=x.issueSize;e.priceBand??=x.priceBand;e.lotSize??=x.lotSize;e.moneycontrolUrl??=x.moneycontrolUrl;e.detailSource??=x.detailSource;if(e.subscription===null&&x.subscription!==null){e.subscription=x.subscription;e.subscriptionSource=x.subscriptionSource}setMinimum(e)}
+function valueAfter(text:string,label:string,patterns:RegExp[]){const i=text.search(new RegExp(label,"i"));return i>=0?first(text.slice(i,i+700),patterns):null}
+function parseLabelNumber(text:string,label:string){return valueAfter(text,label,[new RegExp(`${label}[^₹\\d]{0,80}₹?\\s*([\\d,.]+)`,'i'),new RegExp(`${label}[^\\d]{0,80}([\\d,.]+)`,'i')])}
+function parseFinancials(text:string,x:Ipo){const t=clean(text);for(const key of ["Revenue","Revenue from Operations","Sales"]){const m=t.match(new RegExp(`${key}\\s+([\\d,.]+)\\s+([\\d,.]+)\\s+([\\d,.]+)`,'i'));if(m){x.revenues=[{year:"FY24",value:num(m[1])},{year:"FY25",value:num(m[2])},{year:"FY26",value:num(m[3])}];break}}for(const key of ["Net income","Net Profit","Profit After Tax","PAT"]){const m=t.match(new RegExp(`${key}\\s+([\\d,.]+)\\s+([\\d,.]+)\\s+([\\d,.]+)`,'i'));if(m){x.profits=[{year:"FY24",value:num(m[1])},{year:"FY25",value:num(m[2])},{year:"FY26",value:num(m[3])}];break}}const em=t.match(/EPS\s+(?:\(R\s*s\)|\(Rs\)|\(₹\))?\s*([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)/i);if(em)x.eps=[{year:"FY24",value:num(em[1])},{year:"FY25",value:num(em[2])},{year:"FY26",value:num(em[3])}]}
+function parseDetail(text:string,x:Ipo){const t=clean(text);x.priceBand??=band(t);x.lotSize??=parseLabelNumber(t,"Lot Size");x.faceValue??=parseLabelNumber(t,"Face Value");x.issueSize??=parseLabelNumber(t,"Issue Size");x.sharesOffered??=parseLabelNumber(t,"Total Shares Offered");x.offeredToPublic??=parseLabelNumber(t,"Offered To Public");x.promoterHolding??=parseLabelNumber(t,"Pre Issue Promoters Holding");x.issueType??=(t.match(/Issue Type\s*[:\-]?\s*([^|]{3,100}?)(?:Listing|Sector|Sub Sector|$)/i)?.[1]?.trim()??null);const li=t.match(/Listing Date\s*[:\-]?\s*(\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4})/i);if(li)x.listingDate=parseDate(li[1]);const mi=t.match(/Minimum Investment\s*[:\-]?\s*₹?\s*([\d,]+(?:\.\d+)?)/i);if(mi)x.minSubscription=num(mi[1]);const fresh=t.match(/fresh issue[^₹\d]{0,80}₹?\s*([\d,.]+)\s*(?:Cr|crore)/i);if(fresh)x.freshIssue=num(fresh[1]);const ofs=t.match(/offer(?:\s+for)?\s+sale[^₹\d]{0,80}₹?\s*([\d,.]+)\s*(?:Cr|crore)/i);if(ofs)x.offerForSale=num(ofs[1]);x.business??=(t.match(/About (?:the )?(?:Company|Product)\s*([\s\S]{0,2200})/i)?.[1]?.slice(0,1800).trim()??null);const addr=t.match(/Address\s*([\s\S]{0,700})/i)?.[1]??"";const cities=["Mumbai","Delhi","Bengaluru","Bangalore","Chennai","Pune","Ahmedabad","Kolkata","Hyderabad","Jaipur","Surat","Noida","Gurugram","Gurgaon","Vadodara","Indore","Rajkot","Tiruppur"];const states=["Maharashtra","Gujarat","Karnataka","Tamil Nadu","Delhi","West Bengal","Telangana","Rajasthan","Haryana","Uttar Pradesh","Madhya Pradesh"];const city=cities.find(c=>new RegExp(`\\b${c}\\b`,'i').test(addr));const state=states.find(s=>new RegExp(`\\b${s}\\b`,'i').test(addr));if(city)x.city=city==="Bangalore"?"Bengaluru":city;if(state)x.state=state;parseFinancials(t,x);const post=t.match(/Post Issue Promoters Holding[^\d]{0,40}(\d+(?:\.\d+)?)\s*%/i);if(post)x.postIssuePromoterHolding=num(post[1]);const retail=t.match(/Retail[^\d]{0,100}([\d,]+)\s*(?:shares|\/)/i);if(retail)x.retailShares=num(retail[1]);const qib=t.match(/QIB[^\d]{0,100}([\d,]+)\s*(?:shares|\/)/i);if(qib)x.qibShares=num(qib[1]);const nii=t.match(/NII|Non-Institutional Investor/i);if(nii){const m=t.match(/(?:NII|Non-Institutional Investor)[^\d]{0,100}([\d,]+)\s*(?:shares|\/)/i);if(m)x.niiShares=num(m[1])}const obj=t.match(/(?:Objects of the Issue|IPO Objectives|Objects)[\s\S]{0,1800}/i);if(obj)x.objects=[...obj[0].matchAll(/(?:₹\s*[\d,.]+\s*(?:Cr|crore)|Funding|repayment|prepayment|general corporate purposes|working capital)[^.;]{0,220}/gi)].map(m=>clean(m[0])).slice(0,6);const exportPct=t.match(/exports?[^%]{0,100}(\d+(?:\.\d+)?)\s*%[^.]{0,80}revenue/i);if(exportPct)x.countries=[{country:"Exports / 50+ countries",business:"Export sales",salesPct:num(exportPct[1])}];const domestic=t.match(/domestic[^%]{0,100}(\d+(?:\.\d+)?)\s*%[^.]{0,80}revenue/i);if(domestic)x.countries=[...(x.countries),{country:"India / Domestic",business:"Domestic sales",salesPct:num(domestic[1])}];return true}
+async function enrichUrl(x:Ipo,source:string,url:string,parser:(text:string)=>void){try{const text=await getHtml(url,4500);if(text.length<300)return;parser(text);x.verifiedSources.push(source);x.sourceUrls.push(url)}catch{}}
+async function enrichGmp(x:Ipo){const entries=Object.entries(gmpUrls(x.id));const got=await Promise.allSettled(entries.map(async([source,url])=>({source,url,text:await getHtml(url,3500)})));const vals=got.flatMap(r=>r.status==="fulfilled"?([r.value]):[]).map(v=>({source:v.source,pct:(clean(v.text).match(/(?:Current GMP|Live GMP|GMP Today|GMP)[^₹\d]{0,120}₹?\s*(-?[\d,]+(?:\.\d+)?)/i)?.[1]?num(RegExp.$1):null)})).filter(v=>v.pct!==null) as {source:string;pct:number}[];x.gmpSources=vals.map(v=>({source:v.source,pct:v.pct}));if(vals.length>=2){const a=vals.map(v=>v.pct).sort((p,q)=>p-q),mid=a.length%2?a[Math.floor(a.length/2)]:(a[a.length/2-1]+a[a.length/2])/2;const[,u]=prices(x.priceBand??"");if(u)x.gmpPct=Number(((mid/u)*100).toFixed(2))}}
+function todayIST(){return new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Kolkata",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date())}
+async function loadIpos(){const c=cache.get("ipos");if(c&&c.expires>Date.now())return c.value;const pages=await Promise.allSettled([getHtml(GROWW_IPO,5000),getHtml(GROWW_SUBSCRIPTION,5000),getHtml(MONEYCONTROL_OPEN,5000)]);const map=new Map<string,Ipo>();if(pages[0].status==="fulfilled")parseRows(pages[0].value).forEach(x=>merge(map,x));if(pages[1].status==="fulfilled")parseGroww(pages[1].value).forEach(x=>merge(map,x));if(pages[2].status==="fulfilled")parseRows(pages[2].value).forEach(x=>merge(map,x));const active=[...map.values()].filter(x=>x.closeDate!==null&&x.closeDate>=todayIST());await Promise.all(active.map(async x=>{const slug=x.id;const sources:[string,string][]=["Moneycontrol",x.moneycontrolUrl??""].filter((v):v is string=>v[1]!=="") as [string,string][];sources.push(["Groww",`${GROWW_IPO}/${slug}-ipo`],["IPO Central",`https://ipocentral.in/${slug}-ipo-gmp-price-date-allotment/`],["Goodreturns",`https://www.goodreturns.in/ipo/${slug}-ipo/`],["InCred Money",`https://www.incredmoney.com/ipo/${slug}-ltd-ipo`],["SEBI",SEBI_PUBLIC]);const seen=new Set<string>();await Promise.all(sources.map(([s,u])=>{if(seen.has(u))return Promise.resolve();seen.add(u);return enrichUrl(x,s,u,t=>parseDetail(t,x))}));if(x.subscription!==null)x.verifiedSources.push("Groww");await enrichGmp(x);if(x.lotSize!==null)setMinimum(x);x.verifiedSources=[...new Set(x.verifiedSources)];x.sourceUrls=[...new Set(x.sourceUrls)];x.verifiedAt=new Date().toISOString()}));active.sort((a,b)=>(a.openDate??"9999").localeCompare(b.openDate??"9999")||a.name.localeCompare(b.name));cache.set("ipos",{expires:Date.now()+60000,value:active});return active}
+export const fetchOpenIpos=createServerFn({method:"POST"}).handler(async():Promise<Ipo[]>=>{try{return await loadIpos()}catch{return[]}});
