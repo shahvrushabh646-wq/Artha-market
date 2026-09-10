@@ -24,6 +24,7 @@ type Ipo = {
   verifiedAt: string;
 };
 
+const GROWW_IPO = "https://groww.in/ipo";
 const GROWW_SUBSCRIPTION = "https://groww.in/ipo/subscription";
 const MONEYCONTROL_OPEN = "https://www.moneycontrol.com/ipo/open-ipos/";
 const UA = "Mozilla/5.0 (compatible; Artha-market/1.0)";
@@ -35,7 +36,7 @@ const GMP_SOURCE_URLS = (id: string) => ({
   InvestorGain: `https://www.investorgain.com/gmp/${id}-ipo-gmp/`,
 });
 
-const cache = new Map<string, { exp: number; value: Ipo[] }>();
+const cache = new Map<string, { expires: number; value: Ipo[] }>();
 
 async function getHtml(url: string, timeoutMs = 6000): Promise<string> {
   const controller = new AbortController();
@@ -68,6 +69,7 @@ function clean(value: string): string {
     .replace(/&ndash;|&mdash;/gi, "-")
     .replace(/&#39;|&apos;/gi, "'")
     .replace(/&quot;/gi, '"')
+    .replace(/&#8211;|&#8212;/gi, "-")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -102,16 +104,17 @@ function parseDate(value: string): string | null {
   return `${match[3]}-${month}-${String(Number(match[1])).padStart(2, "0")}`;
 }
 
-function parsePriceBand(value: string): string | null {
-  const match = value.match(/₹?\s*([\d,.]+)\s*(?:-|–|to)\s*₹?\s*([\d,.]+)/i);
-  if (match) return `₹${match[1]} – ₹${match[2]}`;
-  const single = value.match(/₹\s*([\d,.]+)/);
-  return single ? single[0] : null;
-}
-
 function priceNumbers(value: string): [number | null, number | null] {
   const match = value.match(/₹?\s*([\d,.]+)\s*(?:-|–|to)\s*₹?\s*([\d,.]+)/i);
-  return match ? [num(match[1]), num(match[2])] : [null, null];
+  if (!match) return [null, null];
+  return [num(match[1]), num(match[2])];
+}
+
+function parsePriceBand(value: string): string | null {
+  const [low, high] = priceNumbers(value);
+  if (low !== null && high !== null) return `₹${low.toLocaleString("en-IN")} – ₹${high.toLocaleString("en-IN")}`;
+  const single = value.match(/₹\s*([\d,.]+)/);
+  return single ? single[0] : null;
 }
 
 function firstNumber(value: string, patterns: RegExp[]): number | null {
@@ -127,60 +130,83 @@ function firstNumber(value: string, patterns: RegExp[]): number | null {
 
 function blank(name: string, type: "SME" | "Mainboard" = "Mainboard"): Ipo {
   return {
-    id: idFor(name), name, type, openDate: null, closeDate: null,
-    issueSize: null, minSubscription: null, subscription: null,
-    subscriptionSource: null, gmpPct: null, gmpSources: [], city: null,
-    state: null, business: null, countries: [], profits: [], priceBand: null,
-    lotSize: null, moneycontrolUrl: null, detailSource: null,
+    id: idFor(name),
+    name,
+    type,
+    openDate: null,
+    closeDate: null,
+    issueSize: null,
+    minSubscription: null,
+    subscription: null,
+    subscriptionSource: null,
+    gmpPct: null,
+    gmpSources: [],
+    city: null,
+    state: null,
+    business: null,
+    countries: [],
+    profits: [],
+    priceBand: null,
+    lotSize: null,
+    moneycontrolUrl: null,
+    detailSource: null,
     verifiedAt: new Date().toISOString(),
   };
 }
 
-function findName(raw: string): string {
-  const anchor = raw.match(/<a[^>]*>([\s\S]*?)<\/a>/i);
-  if (anchor) {
-    const candidate = clean(anchor[1])
-      .replace(/^(image|logo)\s*:?/i, "")
-      .trim();
-    if (candidate && candidate.length >= 2 && !/^(details|view|read more)$/i.test(candidate)) return candidate;
+function rowName(raw: string): string {
+  const detailAnchor = raw.match(/<a[^>]+href=["'][^"']*\/ipo\/[^"']*ipodetail[^"']*["'][^>]*>([\s\S]*?)<\/a>/i);
+  if (detailAnchor) {
+    const name = clean(detailAnchor[1]).replace(/^(image|logo)\s*:?/i, "").trim();
+    if (name && name.length >= 2 && !/^(details|view|read more)$/i.test(name)) return name;
   }
+
   const text = clean(raw);
-  return text
-    .replace(/Company Name|Type|Open Date|Close Date|Issue Size|Issue Price|QIB|NII|Retail|Employee|Total/gi, " ")
-    .replace(/\b(Mainboard|SME|Open|RHP|RHPSME)\b/gi, " ")
+  const firstDate = text.search(/\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4}/);
+  const beforeDate = firstDate >= 0 ? text.slice(0, firstDate) : text;
+  return beforeDate
+    .replace(/Image:\s*/gi, " ")
+    .replace(/Company Name|Company|Type|Open Date|Close Date|Issue Size|Issue Price|QIB|NII|Retail|Employee|Total/gi, " ")
+    .replace(/\b(Mainboard|SME|Open|Upcoming|RHP|RHPSME)\b/gi, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
 
-function parseMoneycontrolRows(html: string): Ipo[] {
+function moneycontrolLink(raw: string): string | null {
+  const match = raw.match(/href=["']([^"']*\/ipo\/[^"']*ipodetail[^"']*)["']/i);
+  if (!match) return null;
+  return match[1].startsWith("http") ? match[1] : `https://www.moneycontrol.com${match[1]}`;
+}
+
+function parseRows(html: string): Ipo[] {
   const result: Ipo[] = [];
   const rows = [...html.matchAll(/<tr\b[\s\S]*?<\/tr>/gi)];
 
-  for (const rowMatch of rows) {
-    const raw = rowMatch[0];
+  for (const match of rows) {
+    const raw = match[0];
     const text = clean(raw);
-    const dates = [...text.matchAll(/\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4}/g)].map((m) => m[0]);
+    const dates = [...text.matchAll(/\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4}/g)].map((item) => item[0]);
     if (!dates.length) continue;
 
-    const link = raw.match(/href=["']([^"']*\/ipo\/[^"']*ipodetail[^"']*)["']/i);
-    const name = findName(raw);
+    const name = rowName(raw);
     if (!name || name.length < 2 || /company name|open date|close date/i.test(name)) continue;
 
-    const ipo = blank(name, /SME/i.test(text) ? "SME" : "Mainboard");
+    const ipo = blank(name, /\bSME\b/i.test(text) ? "SME" : "Mainboard");
     ipo.openDate = parseDate(dates[0]);
     ipo.closeDate = dates.length > 1 ? parseDate(dates[1]) : null;
-
-    if (link) {
-      ipo.moneycontrolUrl = link[1].startsWith("http") ? link[1] : `https://www.moneycontrol.com${link[1]}`;
-      ipo.detailSource = "Moneycontrol";
-    }
+    ipo.moneycontrolUrl = moneycontrolLink(raw);
+    ipo.detailSource = ipo.moneycontrolUrl ? "Moneycontrol" : null;
 
     const after = text.slice(text.indexOf(dates[0]) + dates[0].length);
     ipo.priceBand = parsePriceBand(after);
     ipo.lotSize = firstNumber(after, [/lot\s*size\s*[:\-]?\s*(\d[\d,]*)/i]);
-    ipo.issueSize = firstNumber(after, [/₹?\s*([\d,.]+)\s*(?:Cr|crore)/i, /issue\s*size[^\d]{0,30}([\d,.]+)\s*(?:Cr|crore)/i]);
+    ipo.issueSize = firstNumber(after, [
+      /₹?\s*([\d,.]+)\s*(?:Cr|crore)/i,
+      /issue\s*size[^\d]{0,40}([\d,.]+)\s*(?:Cr|crore)/i,
+    ]);
+
     const [low] = priceNumbers(ipo.priceBand ?? after);
-    if (ipo.lotSize && low !== null) ipo.minSubscription = low * ipo.lotSize;
+    if (ipo.lotSize !== null && low !== null) ipo.minSubscription = low * ipo.lotSize;
     result.push(ipo);
   }
 
@@ -191,29 +217,29 @@ function parseGrowwSubscription(html: string): Ipo[] {
   const result: Ipo[] = [];
   const rows = [...html.matchAll(/<tr\b[\s\S]*?<\/tr>/gi)];
 
-  for (const rowMatch of rows) {
-    const raw = rowMatch[0];
+  for (const match of rows) {
+    const raw = match[0];
     const text = clean(raw);
-    const dates = [...text.matchAll(/\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4}/g)].map((m) => m[0]);
+    const dates = [...text.matchAll(/\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4}/g)].map((item) => item[0]);
     if (!dates.length) continue;
 
-    const name = findName(raw);
+    const name = rowName(raw);
     if (!name || name.length < 2 || /company name|close date/i.test(name)) continue;
 
-    const ipo = blank(name, /SME/i.test(text) ? "SME" : "Mainboard");
+    const ipo = blank(name, /\bSME\b/i.test(text) ? "SME" : "Mainboard");
     ipo.closeDate = parseDate(dates[0]);
     const after = text.slice(text.indexOf(dates[0]) + dates[0].length);
     ipo.priceBand = parsePriceBand(after);
     ipo.issueSize = firstNumber(after, [/([\d,.]+)\s*Cr/i]);
 
-    const subscriptionMatches = [...after.matchAll(/(\d+(?:\.\d+)?)\s*x\b/gi)]
-      .map((m) => num(m[1]))
+    const subscriptions = [...after.matchAll(/(\d+(?:\.\d+)?)\s*x\b/gi)]
+      .map((item) => num(item[1]))
       .filter((value): value is number => value !== null);
-    if (subscriptionMatches.length) ipo.subscription = subscriptionMatches[subscriptionMatches.length - 1];
+    if (subscriptions.length) ipo.subscription = subscriptions[subscriptions.length - 1];
 
     ipo.lotSize = firstNumber(after, [/lot\s*size\s*[:\-]?\s*(\d[\d,]*)/i]);
     const [low] = priceNumbers(ipo.priceBand ?? after);
-    if (ipo.lotSize && low !== null) ipo.minSubscription = low * ipo.lotSize;
+    if (ipo.lotSize !== null && low !== null) ipo.minSubscription = low * ipo.lotSize;
     if (ipo.subscription !== null) ipo.subscriptionSource = "Groww verified";
     result.push(ipo);
   }
@@ -259,12 +285,10 @@ function extractGmp(text: string): number | null {
 }
 
 async function enrichGmp(ipo: Ipo): Promise<void> {
-  const entries = Object.entries(GMP_SOURCE_URLS(ipo.id));
-  const settled = await Promise.allSettled(entries.map(async ([source, url]) => ({
-    source,
-    pct: extractGmp(await getHtml(url, 3000)),
-  })));
-
+  const sources = Object.entries(GMP_SOURCE_URLS(ipo.id));
+  const settled = await Promise.allSettled(
+    sources.map(async ([source, url]) => ({ source, pct: extractGmp(await getHtml(url, 3000)) })),
+  );
   const values = settled.flatMap((item) =>
     item.status === "fulfilled" && item.value.pct !== null ? [item.value] : [],
   );
@@ -276,41 +300,65 @@ async function enrichGmp(ipo: Ipo): Promise<void> {
   }
 
   const sorted = values.map((item) => item.pct as number).sort((a, b) => a - b);
-  const median = sorted.length % 2
-    ? sorted[Math.floor(sorted.length / 2)]
-    : (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2;
+  const middle = Math.floor(sorted.length / 2);
+  const median = sorted.length % 2 === 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
   const [, upper] = priceNumbers(ipo.priceBand ?? "");
   ipo.gmpPct = upper && upper > 0 ? Number(((median / upper) * 100).toFixed(2)) : null;
 }
 
 function parseMoneycontrolDetail(text: string, ipo: Ipo): void {
-  const details = text.match(/IPO Details[\s\S]{0,9000}/i)?.[0] ?? text;
+  const details = text.match(/IPO Details[\s\S]{0,12000}/i)?.[0] ?? text;
   ipo.priceBand ??= parsePriceBand(details);
-  ipo.lotSize ??= firstNumber(details, [/Lot Size\s*[:\-]?\s*([\d,]+)/i, /Lot size[^\d]{0,30}([\d,]+)/i]);
-  ipo.issueSize ??= firstNumber(details, [/Issue Size[^\d]{0,60}₹?\s*([\d,.]+)\s*(?:Cr|crore)/i]);
+  ipo.lotSize ??= firstNumber(details, [
+    /Lot Size\s*[:\-]?\s*([\d,]+)/i,
+    /Lot size[^\d]{0,40}([\d,]+)/i,
+  ]);
+  ipo.issueSize ??= firstNumber(details, [
+    /Issue Size[^\d]{0,70}₹?\s*([\d,.]+)\s*(?:Cr|crore)/i,
+    /₹\s*([\d,.]+)\s*(?:Cr|crore)[^\n]{0,40}Issue Size/i,
+  ]);
 
-  const address = text.match(/Address[\s\S]{0,800}/i)?.[0] ?? "";
-  const cities = ["Mumbai", "Delhi", "Bengaluru", "Bangalore", "Chennai", "Pune", "Ahmedabad", "Kolkata", "Hyderabad", "Jaipur", "Surat", "Noida", "Gurugram", "Gurgaon", "Vadodara", "Indore", "Rajkot", "Tiruppur"];
+  const [low] = priceNumbers(ipo.priceBand ?? "");
+  if (ipo.minSubscription === null && ipo.lotSize !== null && low !== null) {
+    ipo.minSubscription = low * ipo.lotSize;
+  }
+
+  const address = text.match(/Address[\s\S]{0,1200}/i)?.[0] ?? "";
+  const cities = [
+    "Mumbai", "Delhi", "Bengaluru", "Bangalore", "Chennai", "Pune", "Ahmedabad",
+    "Kolkata", "Hyderabad", "Jaipur", "Surat", "Noida", "Gurugram", "Gurgaon",
+    "Vadodara", "Indore", "Rajkot", "Tiruppur",
+  ];
   const city = cities.find((item) => new RegExp(`\\b${item}\\b`, "i").test(address));
   if (city) ipo.city = city;
 
-  const states = ["Maharashtra", "Gujarat", "Karnataka", "Tamil Nadu", "Delhi", "West Bengal", "Telangana", "Rajasthan", "Haryana", "Uttar Pradesh", "Madhya Pradesh"];
+  const states = [
+    "Maharashtra", "Gujarat", "Karnataka", "Tamil Nadu", "Delhi", "West Bengal",
+    "Telangana", "Rajasthan", "Haryana", "Uttar Pradesh", "Madhya Pradesh",
+  ];
   const state = states.find((item) => new RegExp(`\\b${item}\\b`, "i").test(address));
   if (state) ipo.state = state;
 
   const about = text.match(/About (?:the )?(?:Company|Product)[\s\S]{0,3500}/i)?.[0];
-  if (about) ipo.business = clean(about).slice(0, 1800);
+  if (about) ipo.business = clean(about).replace(/^About (?:the )?(?:Company|Product)\s*/i, "").slice(0, 1800);
+
+  const profitMatches = [...text.matchAll(/(?:FY|Year)[^\d]{0,30}(20\d{2})[^₹\d]{0,80}₹?\s*([\d,.]+)\s*(?:Cr|crore)/gi)];
+  const profits = profitMatches
+    .map((item) => ({ year: item[1], value: num(item[2]) }))
+    .filter((item) => item.value !== null)
+    .slice(-3);
+  if (profits.length) ipo.profits = profits;
 }
 
 async function enrichMoneycontrol(ipo: Ipo): Promise<void> {
   if (!ipo.moneycontrolUrl) return;
   try {
-    const html = await getHtml(ipo.moneycontrolUrl, 4000);
-    if (html.length < 200) return;
-    parseMoneycontrolDetail(html, ipo);
+    const text = await getHtml(ipo.moneycontrolUrl, 4500);
+    if (text.length < 200) return;
+    parseMoneycontrolDetail(text, ipo);
     ipo.detailSource = "Moneycontrol";
   } catch {
-    // Keep the IPO with the data already obtained from the other source.
+    // Keep the IPO usable when one detail page is unavailable.
   }
 }
 
@@ -324,45 +372,53 @@ function todayIST(): string {
 }
 
 async function loadIpos(): Promise<Ipo[]> {
-  const cached = cache.get("open");
-  if (cached && cached.exp > Date.now()) return cached.value;
+  const cached = cache.get("ipos");
+  if (cached && cached.expires > Date.now()) return cached.value;
 
-  const [groww, moneycontrol] = await Promise.allSettled([
-    getHtml(GROWW_SUBSCRIPTION),
-    getHtml(MONEYCONTROL_OPEN),
+  const [growwDashboard, growwSubscription, moneycontrol] = await Promise.allSettled([
+    getHtml(GROWW_IPO, 5000),
+    getHtml(GROWW_SUBSCRIPTION, 5000),
+    getHtml(MONEYCONTROL_OPEN, 5000),
   ]);
 
   const map = new Map<string, Ipo>();
-  if (groww.status === "fulfilled") {
-    for (const ipo of parseGrowwSubscription(groww.value)) mergeInto(map, ipo);
+
+  if (growwDashboard.status === "fulfilled") {
+    for (const ipo of parseRows(growwDashboard.value)) mergeInto(map, ipo);
+  }
+  if (growwSubscription.status === "fulfilled") {
+    for (const ipo of parseGrowwSubscription(growwSubscription.value)) mergeInto(map, ipo);
   }
   if (moneycontrol.status === "fulfilled") {
-    for (const ipo of parseMoneycontrolRows(moneycontrol.value)) mergeInto(map, ipo);
+    for (const ipo of parseRows(moneycontrol.value)) mergeInto(map, ipo);
   }
 
   const today = todayIST();
-  const current = [...map.values()].filter((ipo) => !ipo.closeDate || ipo.closeDate >= today);
+  const active = [...map.values()].filter((ipo) => ipo.closeDate === null || ipo.closeDate >= today);
 
-  const enriched = await Promise.all(current.map(async (ipo) => {
-    await Promise.allSettled([enrichMoneycontrol(ipo), enrichGmp(ipo)]);
-    ipo.verifiedAt = new Date().toISOString();
-    return ipo;
-  }));
+  const enriched = await Promise.all(
+    active.map(async (ipo) => {
+      await Promise.allSettled([enrichMoneycontrol(ipo), enrichGmp(ipo)]);
+      ipo.verifiedAt = new Date().toISOString();
+      return ipo;
+    }),
+  );
 
   enriched.sort((a, b) => {
-    const aDate = a.closeDate ?? "9999-99-99";
-    const bDate = b.closeDate ?? "9999-99-99";
-    return aDate === bDate ? a.name.localeCompare(b.name) : aDate.localeCompare(bDate);
+    const ad = a.openDate ?? "9999-99-99";
+    const bd = b.openDate ?? "9999-99-99";
+    if (ad !== bd) return ad.localeCompare(bd);
+    return a.name.localeCompare(b.name);
   });
 
-  cache.set("open", { exp: Date.now() + 60_000, value: enriched });
+  cache.set("ipos", { expires: Date.now() + 60000, value: enriched });
   return enriched;
 }
 
-export const fetchOpenIpos = createServerFn({ method: "POST" }).handler(async () => {
+export const fetchOpenIpos = createServerFn({ method: "POST" }).handler(async (): Promise<Ipo[]> => {
   try {
     return await loadIpos();
   } catch {
-    return [] as Ipo[];
+    return [];
   }
 });
