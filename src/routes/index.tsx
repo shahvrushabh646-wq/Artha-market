@@ -15,21 +15,36 @@ type QuoteResult = { price: number | null; asOf: string | null };
 type YahooChartResponse = { chart?: { result?: Array<{ indicators?: { quote?: Array<{ high?: Array<number | null> }> } }> } };
 const TROY_OUNCE_GRAMS = 31.1034768;
 
-async function getApiNinjasPrice(kind: "gold999" | "silver999"): Promise<QuoteResult> {
-  const key = process.env.API_NINJAS_KEY;
-  if (!key) return { price: null, asOf: null };
+async function apiNinjasRequest(url: string, key: string): Promise<{ price?: number; updated?: number | string } | null> {
   try {
-    const name = kind === "gold999" ? "gold" : "silver";
-    const unit = kind === "gold999" ? "g" : "kg";
-    const res = await fetch(`https://api.api-ninjas.com/v1/commodityprice?name=${name}&currency=INR&unit=${unit}`, { headers: { "X-Api-Key": key, Accept: "application/json" }, cache: "no-store" });
-    if (!res.ok) return { price: null, asOf: null };
-    const data = await res.json() as { price?: number; updated?: string };
-    if (typeof data.price !== "number" || !Number.isFinite(data.price) || data.price <= 0) return { price: null, asOf: null };
-    const price = kind === "gold999" ? data.price * 10 : data.price;
-    if (kind === "gold999" && (price < 50000 || price > 500000)) return { price: null, asOf: null };
-    if (kind === "silver999" && (price < 50000 || price > 1000000)) return { price: null, asOf: null };
-    return { price, asOf: data.updated ?? new Date().toISOString() };
-  } catch { return { price: null, asOf: null }; }
+    const res = await fetch(url, { headers: { "X-Api-Key": key, Accept: "application/json" }, cache: "no-store" });
+    if (!res.ok) return null;
+    const data = await res.json() as { price?: number; updated?: number | string };
+    return typeof data.price === "number" && Number.isFinite(data.price) && data.price > 0 ? data : null;
+  } catch { return null; }
+}
+
+async function getApiNinjasPrice(kind: "gold999" | "silver999"): Promise<QuoteResult> {
+  const key = process.env.API_NINJAS_KEY?.trim();
+  if (!key) return { price: null, asOf: null };
+  const name = kind === "gold999" ? "gold" : "silver";
+  const unit = kind === "gold999" ? "g" : "kg";
+
+  // Primary: Commodity Price API with INR/unit conversion, as documented by API Ninjas.
+  const converted = await apiNinjasRequest(`https://api.api-ninjas.com/v1/commodityprice?name=${name}&currency=INR&unit=${unit}`, key);
+  if (converted?.price != null) {
+    const price = kind === "gold999" ? converted.price * 10 : converted.price;
+    if (Number.isFinite(price) && price > 0) return { price, asOf: converted.updated != null ? new Date(typeof converted.updated === "number" ? converted.updated * 1000 : converted.updated).toISOString() : new Date().toISOString() };
+  }
+
+  // Gold-only fallback: dedicated Gold Price API, also supports INR and grams.
+  if (kind === "gold999") {
+    const gold = await apiNinjasRequest("https://api.api-ninjas.com/v1/goldprice?currency=INR&unit=g", key);
+    if (gold?.price != null && Number.isFinite(gold.price) && gold.price > 0) {
+      return { price: gold.price * 10, asOf: gold.updated != null ? new Date(typeof gold.updated === "number" ? gold.updated * 1000 : gold.updated).toISOString() : new Date().toISOString() };
+    }
+  }
+  return { price: null, asOf: null };
 }
 
 async function getGoldFiveYearHigh10g(currentGoldTozInr: number): Promise<number | null> {
@@ -74,7 +89,7 @@ function Home() {
 }
 
 function PreciousMetals() {
-  const metals = useQuery({ queryKey: ["precious-metals-api-ninjas-v1"], queryFn: () => fetchPreciousMetals(), staleTime: 30000, refetchInterval: 60000, refetchOnWindowFocus: true, retry: 2 });
+  const metals = useQuery({ queryKey: ["precious-metals-api-ninjas-v2"], queryFn: () => fetchPreciousMetals(), staleTime: 30000, refetchInterval: 60000, refetchOnWindowFocus: true, retry: 2 });
   const formatINR = (value: number) => `₹${Math.round(value).toLocaleString("en-IN")}`;
   return <Section title="Gold & Silver" hint="API Ninjas commodity prices">
     <div className="grid gap-3 sm:grid-cols-2">
