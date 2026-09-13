@@ -11,11 +11,11 @@ import { fetchDashboard } from "@/lib/market/server";
 export const Route = createFileRoute("/")({ component: Home });
 
 type MetalPrices = { gold10g: number | null; silverKg: number | null; gold5yHigh10g: number | null; gold75Price10g: number | null; gold85Price10g: number | null; gold95Price10g: number | null; goldSignal: "BUY" | "WAIT" | null; asOf: string | null; source: string };
-type MoneycontrolResult = { price: number | null; asOf: string | null };
+type AibResult = { price: number | null; asOf: string | null };
 type YahooChartResponse = { chart?: { result?: Array<{ timestamp?: number[]; indicators?: { quote?: Array<{ high?: Array<number | null> }> } }> } };
 const TROY_OUNCE_GRAMS = 31.1034768;
 
-function decodeMoneycontrolText(value: string): string {
+function decodeAibText(value: string): string {
   return value
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
     .replace(/<style[\s\S]*?<\/style>/gi, " ")
@@ -28,10 +28,10 @@ function decodeMoneycontrolText(value: string): string {
     .trim();
 }
 
-async function getMoneycontrolPrice(kind: "gold" | "silver"): Promise<MoneycontrolResult> {
+async function getAibPrice(kind: "gold999" | "silver999"): Promise<AibResult> {
   try {
-    const path = kind === "gold" ? "gold-rates-today/mumbai/" : "silver-rates-today/mumbai/";
-    const res = await fetch(`https://www.moneycontrol.com/news/${path}`, {
+    const url = "https://allindiabullion.com/gold-rate/maharashtra/mumbai";
+    const res = await fetch(`${url}?artha=${Date.now()}`, {
       headers: {
         Accept: "text/html,application/xhtml+xml",
         "User-Agent": "Mozilla/5.0 (compatible; ArthaMarket/1.0)",
@@ -39,21 +39,18 @@ async function getMoneycontrolPrice(kind: "gold" | "silver"): Promise<Moneycontr
       cache: "no-store",
     });
     if (!res.ok) return { price: null, asOf: null };
-    const html = await res.text();
-    const text = decodeMoneycontrolText(html);
 
-    // Moneycontrol Mumbai pages expose the standard current retail reference:
-    // Gold = 24 Carat / 10 Gram, Silver = 1 KG.
-    const pattern = kind === "gold"
-      ? /Current Price\s*\(24 Carat\s*\/\s*10 Gram\)\s*₹?\s*([0-9,]+(?:\.[0-9]+)?)/i
-      : /Current Price\s*\(1 KG\)\s*₹?\s*([0-9,]+(?:\.[0-9]+)?)/i;
-
+    const text = decodeAibText(await res.text());
+    const pattern = kind === "gold999"
+      ? /RETAIL\s+999\s+GOLD\s+₹?\s*([0-9,]+(?:\.[0-9]+)?)/i
+      : /RETAIL\s+999\s+SILVER\s+₹?\s*([0-9,]+(?:\.[0-9]+)?)/i;
     const match = text.match(pattern);
     if (!match) return { price: null, asOf: null };
+
     const price = Number(match[1].replace(/,/g, ""));
     if (!Number.isFinite(price) || price <= 0) return { price: null, asOf: null };
-    if (kind === "gold" && (price < 50000 || price > 500000)) return { price: null, asOf: null };
-    if (kind === "silver" && (price < 50000 || price > 1000000)) return { price: null, asOf: null };
+    if (kind === "gold999" && (price < 50000 || price > 500000)) return { price: null, asOf: null };
+    if (kind === "silver999" && (price < 50000 || price > 1000000)) return { price: null, asOf: null };
 
     return { price, asOf: new Date().toISOString() };
   } catch {
@@ -80,12 +77,12 @@ async function getGoldFiveYearHigh10g(currentGoldTozInr: number): Promise<number
 
 const fetchPreciousMetals = createServerFn({ method: "GET" }).handler(async (): Promise<MetalPrices> => {
   const [goldQuote, silverQuote] = await Promise.all([
-    getMoneycontrolPrice("gold"),
-    getMoneycontrolPrice("silver"),
+    getAibPrice("gold999"),
+    getAibPrice("silver999"),
   ]);
 
   if (goldQuote.price == null || silverQuote.price == null) {
-    throw new Error("Moneycontrol gold/silver price is temporarily unavailable");
+    throw new Error("AIB 999 gold/silver price is temporarily unavailable");
   }
 
   const gold10g = goldQuote.price;
@@ -97,7 +94,7 @@ const fetchPreciousMetals = createServerFn({ method: "GET" }).handler(async (): 
   const gold95Price10g = gold5yHigh10g != null ? Math.round(gold5yHigh10g * 0.05 * 100) / 100 : null;
   const goldSignal = gold75Price10g != null ? (gold10g <= gold75Price10g ? "BUY" : "WAIT") : null;
 
-  return { gold10g, silverKg, gold5yHigh10g, gold75Price10g, gold85Price10g, gold95Price10g, goldSignal, asOf: goldQuote.asOf, source: "Moneycontrol" };
+  return { gold10g, silverKg, gold5yHigh10g, gold75Price10g, gold85Price10g, gold95Price10g, goldSignal, asOf: goldQuote.asOf, source: "All India Bullion (AIB)" };
 });
 
 function Home() {
@@ -122,12 +119,12 @@ function Home() {
 }
 
 function PreciousMetals() {
-  const metals = useQuery({ queryKey: ["precious-metals-moneycontrol-v1"], queryFn: () => fetchPreciousMetals(), staleTime: 30000, refetchInterval: 60000, refetchOnWindowFocus: true, retry: 2 });
+  const metals = useQuery({ queryKey: ["precious-metals-aib-999-v1"], queryFn: () => fetchPreciousMetals(), staleTime: 30000, refetchInterval: 60000, refetchOnWindowFocus: true, retry: 2 });
   const formatINR = (value: number) => `₹${Math.round(value).toLocaleString("en-IN")}`;
-  return <Section title="Gold & Silver" hint="Live Moneycontrol prices for Mumbai">
+  return <Section title="Gold & Silver" hint="Live AIB 999 bullion prices for Mumbai">
     <div className="grid gap-3 sm:grid-cols-2">
       <Panel className="p-4">
-        <div className="flex items-start justify-between gap-3"><div><div className="text-sm font-medium text-fg">Gold</div><div className="mt-1 text-xs text-muted">Moneycontrol · ₹ / 10g · 24K</div></div><div className="text-xs text-muted">INR</div></div>
+        <div className="flex items-start justify-between gap-3"><div><div className="text-sm font-medium text-fg">Gold 999</div><div className="mt-1 text-xs text-muted">AIB · ₹ / 10g · 999 fine</div></div><div className="text-xs text-muted">INR</div></div>
         <div className="mt-2 text-2xl font-semibold tabular text-fg">{metals.data?.gold10g != null ? formatINR(metals.data.gold10g) : metals.isLoading ? "Loading…" : "Price unavailable"}</div>
         <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
           {[{ label: "75% discount", value: metals.data?.gold75Price10g }, { label: "85% discount", value: metals.data?.gold85Price10g }, { label: "95% discount", value: metals.data?.gold95Price10g }, { label: "Rule", value: null }].map((row) => <div key={row.label} className="rounded-lg bg-surface-2 p-2"><div className="text-xs text-muted">{row.label}</div><div className="mt-1 tabular text-sm text-fg">{row.value != null ? formatINR(row.value) : metals.data?.goldSignal ?? "—"}</div></div>)}
@@ -135,11 +132,11 @@ function PreciousMetals() {
         <div className="mt-3 text-xs text-muted">5Y high reference: {metals.data?.gold5yHigh10g != null ? formatINR(metals.data.gold5yHigh10g) : "—"} · Rule: BUY when current price ≤ 25% of 5Y high</div>
       </Panel>
       <Panel className="p-4">
-        <div className="flex items-start justify-between gap-3"><div><div className="text-sm font-medium text-fg">Silver</div><div className="mt-1 text-xs text-muted">Moneycontrol · ₹ / kg · Mumbai</div></div><div className="text-xs text-muted">INR</div></div>
+        <div className="flex items-start justify-between gap-3"><div><div className="text-sm font-medium text-fg">Silver 999</div><div className="mt-1 text-xs text-muted">AIB · ₹ / kg · 999 fine</div></div><div className="text-xs text-muted">INR</div></div>
         <div className="mt-2 text-2xl font-semibold tabular text-fg">{metals.data?.silverKg != null ? formatINR(metals.data.silverKg) : metals.isLoading ? "Loading…" : "Price unavailable"}</div>
-        <div className="mt-3 text-xs text-muted">Live Mumbai reference price from Moneycontrol. Silver is shown per kilogram.</div>
+        <div className="mt-3 text-xs text-muted">Live Mumbai 999 fine silver reference price. Silver is shown per kilogram.</div>
       </Panel>
     </div>
-    <p className="mt-2 text-[11px] text-subtle">Source: Moneycontrol Mumbai rates. Gold uses the 24-carat rate per 10g and Silver uses the standard rate per kg. Prices are reference market/retail rates and may differ from jewellery or dealer quotes{metals.data?.asOf ? ` · ${metals.data.asOf}` : ""}.</p>
+    <p className="mt-2 text-[11px] text-subtle">Source: All India Bullion (AIB), Mumbai. Gold uses Retail 999 per 10g and Silver uses Retail 999 per kg. Data is refreshed by the app every 60 seconds and fetched without browser cache.</p>
   </Section>;
 }
