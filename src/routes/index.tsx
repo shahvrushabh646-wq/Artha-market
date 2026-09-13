@@ -10,9 +10,7 @@ import { fetchDashboard } from "@/lib/market/server";
 
 export const Route = createFileRoute("/")({ component: Home });
 
-type MetalPrices = { gold10g: number | null; silverKg: number | null; gold5yHigh10g: number | null; gold75Price10g: number | null; gold85Price10g: number | null; gold95Price10g: number | null; gold40Price10g: number | null; goldSignal: "BUY" | "WAIT" | null; asOf: string | null; source: string };
-type YahooChartResponse = { chart?: { result?: Array<{ meta?: { currency?: string; regularMarketPrice?: number | null }; indicators?: { quote?: Array<{ high?: Array<number | null>; close?: Array<number | null> }> } }> } };
-const TROY_OUNCE_GRAMS = 31.1034768;
+type MetalPrices = { gold10g: number | null; silverKg: number | null; gold5yHigh10g: number | null; goldDiscount10Price10g: number | null; goldDiscount20Price10g: number | null; goldDiscount30Price10g: number | null; goldDiscount40Price10g: number | null; silver5yHighKg: number; silver25PriceKg: number; silver35PriceKg: number; silver45PriceKg: number; silver50PriceKg: number; silver55PriceKg: number; goldSignal: "BUY" | "WAIT" | null; asOf: string | null; source: string };
 
 async function getIndianMetalPrices(): Promise<{ gold10g: number; silverKg: number; asOf: string | null } | null> {
   try {
@@ -26,22 +24,23 @@ async function getIndianMetalPrices(): Promise<{ gold10g: number; silverKg: numb
   } catch { return null; }
 }
 
-async function getGoldFiveYearHigh10g(_currentGoldTozInr: number): Promise<number | null> {
-  return 170000;
-}
-
 const fetchPreciousMetals = createServerFn({ method: "GET" }).handler(async (): Promise<MetalPrices> => {
   const quote = await getIndianMetalPrices();
   if (!quote) throw new Error("Live Indian Gold/Silver rate is temporarily unavailable");
   const { gold10g, silverKg } = quote;
-  const currentGoldTozInr = gold10g * TROY_OUNCE_GRAMS / 10;
-  const gold5yHigh10g = await getGoldFiveYearHigh10g(currentGoldTozInr);
-  const gold75Price10g = gold5yHigh10g != null ? Math.round(gold5yHigh10g * 0.90 * 100) / 100 : null;
-  const gold85Price10g = gold5yHigh10g != null ? Math.round(gold5yHigh10g * 0.80 * 100) / 100 : null;
-  const gold95Price10g = gold5yHigh10g != null ? Math.round(gold5yHigh10g * 0.70 * 100) / 100 : null;
-  const gold40Price10g = gold5yHigh10g != null ? Math.round(gold5yHigh10g * 0.60 * 100) / 100 : null;
-  const goldSignal = gold5yHigh10g != null ? (gold10g <= gold40Price10g! ? "BUY" : "WAIT") : null;
-  return { gold10g, silverKg, gold5yHigh10g, gold75Price10g, gold85Price10g, gold95Price10g, gold40Price10g, goldSignal, asOf: quote.asOf, source: "Live Indian bullion quote" };
+  const gold5yHigh10g = 170000;
+  const silver5yHighKg = 400000;
+  const goldDiscount10Price10g = Math.round(gold5yHigh10g * 0.90);
+  const goldDiscount20Price10g = Math.round(gold5yHigh10g * 0.80);
+  const goldDiscount30Price10g = Math.round(gold5yHigh10g * 0.70);
+  const goldDiscount40Price10g = Math.round(gold5yHigh10g * 0.60);
+  const silver25PriceKg = Math.round(silver5yHighKg * 0.75);
+  const silver35PriceKg = Math.round(silver5yHighKg * 0.65);
+  const silver45PriceKg = Math.round(silver5yHighKg * 0.55);
+  const silver50PriceKg = Math.round(silver5yHighKg * 0.50);
+  const silver55PriceKg = Math.round(silver5yHighKg * 0.45);
+  const goldSignal = gold10g <= goldDiscount40Price10g ? "BUY" : "WAIT";
+  return { gold10g, silverKg, gold5yHigh10g, goldDiscount10Price10g, goldDiscount20Price10g, goldDiscount30Price10g, goldDiscount40Price10g, silver5yHighKg, silver25PriceKg, silver35PriceKg, silver45PriceKg, silver50PriceKg, silver55PriceKg, goldSignal, asOf: quote.asOf, source: "Live Indian bullion quote" };
 });
 
 function Home() {
@@ -58,12 +57,12 @@ function Home() {
 }
 
 function PreciousMetals() {
-  const metals = useQuery({ queryKey: ["precious-metals-india-live-v2"], queryFn: () => fetchPreciousMetals(), staleTime: 30000, refetchInterval: 60000, refetchOnWindowFocus: true, retry: 2 });
+  const metals = useQuery({ queryKey: ["precious-metals-india-live-v3"], queryFn: () => fetchPreciousMetals(), staleTime: 30000, refetchInterval: 60000, refetchOnWindowFocus: true, retry: 2 });
   const formatINR = (value: number) => `₹${Math.round(value).toLocaleString("en-IN")}`;
   return <Section title="Gold & Silver" hint="Live Indian bullion quote">
     <div className="grid gap-3 sm:grid-cols-2">
-      <Panel className="p-4"><div className="flex items-start justify-between gap-3"><div><div className="text-sm font-medium text-fg">Gold 999</div><div className="mt-1 text-xs text-muted">Live Indian quote · ₹ / 10g · 999 fine</div></div><div className="text-xs text-muted">INR</div></div><div className="mt-2 text-2xl font-semibold tabular text-fg">{metals.data?.gold10g != null ? formatINR(metals.data.gold10g) : metals.isLoading ? "Loading…" : "Price unavailable"}</div><div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">{[{ label: "10% discount", value: metals.data?.gold75Price10g }, { label: "20% discount", value: metals.data?.gold85Price10g }, { label: "30% discount", value: metals.data?.gold95Price10g }, { label: "40% discount", value: metals.data?.gold40Price10g }].map((row) => <div key={row.label} className="rounded-lg bg-surface-2 p-2"><div className="text-xs text-muted">{row.label}</div><div className="mt-1 tabular text-sm text-fg">{row.value != null ? formatINR(row.value) : "—"}</div></div>)}</div><div className="mt-3 text-xs text-muted">5Y high reference: {metals.data?.gold5yHigh10g != null ? formatINR(metals.data.gold5yHigh10g) : "—"} · Rule: BUY when current price ≤ 40% of 5Y high</div></Panel>
-      <Panel className="p-4"><div className="flex items-start justify-between gap-3"><div><div className="text-sm font-medium text-fg">Silver 999</div><div className="mt-1 text-xs text-muted">Live Indian quote · ₹ / kg · 999 fine</div></div><div className="text-xs text-muted">INR</div></div><div className="mt-2 text-2xl font-semibold tabular text-fg">{metals.data?.silverKg != null ? formatINR(metals.data.silverKg) : metals.isLoading ? "Loading…" : "Price unavailable"}</div><div className="mt-3 text-xs text-muted">Live Indian silver quote. Silver is shown per kilogram.</div></Panel>
+      <Panel className="p-4"><div className="flex items-start justify-between gap-3"><div><div className="text-sm font-medium text-fg">Gold 999</div><div className="mt-1 text-xs text-muted">Live Indian quote · ₹ / 10g · 999 fine</div></div><div className="text-xs text-muted">INR</div></div><div className="mt-2 text-2xl font-semibold tabular text-fg">{metals.data?.gold10g != null ? formatINR(metals.data.gold10g) : metals.isLoading ? "Loading…" : "Price unavailable"}</div><div className="mt-2 rounded-xl border border-accent/40 bg-accent/10 px-3 py-2"><div className="text-sm font-semibold text-fg">5-Year High: {formatINR(metals.data?.gold5yHigh10g ?? 170000)}</div></div><div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">{[{ label: "10% discount", value: metals.data?.goldDiscount10Price10g }, { label: "20% discount", value: metals.data?.goldDiscount20Price10g }, { label: "30% discount", value: metals.data?.goldDiscount30Price10g }, { label: "40% discount", value: metals.data?.goldDiscount40Price10g }].map((row) => <div key={row.label} className="rounded-lg bg-surface-2 p-2"><div className="text-xs text-muted">{row.label}</div><div className="mt-1 tabular text-sm text-fg">{row.value != null ? formatINR(row.value) : "—"}</div></div>)}</div><div className="mt-3 text-xs text-muted">Rule: BUY when current price ≤ 60% of 5-Year High</div></Panel>
+      <Panel className="p-4"><div className="flex items-start justify-between gap-3"><div><div className="text-sm font-medium text-fg">Silver 999</div><div className="mt-1 text-xs text-muted">Live Indian quote · ₹ / kg · 999 fine</div></div><div className="text-xs text-muted">INR</div></div><div className="mt-2 text-2xl font-semibold tabular text-fg">{metals.data?.silverKg != null ? formatINR(metals.data.silverKg) : metals.isLoading ? "Loading…" : "Price unavailable"}</div><div className="mt-2 rounded-xl border border-accent/40 bg-accent/10 px-3 py-2"><div className="text-sm font-semibold text-fg">5-Year High: {formatINR(metals.data?.silver5yHighKg ?? 400000)}</div></div><div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-5">{[{ label: "25%", value: metals.data?.silver25PriceKg }, { label: "35%", value: metals.data?.silver35PriceKg }, { label: "45%", value: metals.data?.silver45PriceKg }, { label: "50%", value: metals.data?.silver50PriceKg }, { label: "55%", value: metals.data?.silver55PriceKg }].map((row) => <div key={row.label} className="rounded-lg bg-surface-2 p-2"><div className="text-xs text-muted">{row.label}</div><div className="mt-1 tabular text-sm text-fg">{row.value != null ? formatINR(row.value) : "—"}</div></div>)}</div><div className="mt-3 text-xs text-muted">Silver rule levels are calculated from the fixed 5-Year High reference.</div></Panel>
     </div><p className="mt-2 text-[11px] text-subtle">Source: live Indian bullion buy quote, converted from ₹/gram to Gold ₹/10g and Silver ₹/kg. Quote timestamp is supplied by the price feed. Data is refreshed by the app every 60 seconds.</p>
   </Section>;
 }
