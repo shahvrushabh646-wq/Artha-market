@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMemo, useState, useEffect } from "react";
+import { Search } from "lucide-react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { Signed } from "@/components/price";
 import { Button } from "@/components/ui/button";
@@ -19,13 +20,32 @@ function WatchPage() {
   const addWatch = useDesk((s) => s.addWatch);
   const removeWatch = useDesk((s) => s.removeWatch);
   const [raw, setRaw] = useState("");
+  const [searchQ, setSearchQ] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
   const [showDailyAlert, setShowDailyAlert] = useState(false);
+  const searchBox = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSearchQ(raw.trim()), 100);
+    return () => window.clearTimeout(timer);
+  }, [raw]);
+
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => {
+      if (!searchBox.current?.contains(e.target as Node)) setSearchOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
 
   const search = useQuery({
-    queryKey: ["stock-search", raw.trim().toUpperCase()],
-    queryFn: () => searchStocks({ data: { query: raw.trim().toUpperCase() } }),
-    enabled: raw.trim().length >= 3,
+    queryKey: ["watchlist-stock-search", searchQ.toUpperCase()],
+    queryFn: () => searchStocks({ data: { query: searchQ.toUpperCase() } }),
+    enabled: searchQ.length >= 3,
     staleTime: 30_000,
+    gcTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
+    retry: false,
   });
 
   const pack = useQuery({ queryKey: ["watch", watchlist], queryFn: () => fetchWatchPack({ data: { symbols: watchlist } }), enabled: watchlist.length > 0, refetchInterval: 90_000 });
@@ -57,6 +77,8 @@ function WatchPage() {
     const added = addWatch(symbol);
     toast(added ? `Added ${displaySymbol(normalizeSymbol(symbol))}` : "Already watching");
     setRaw("");
+    setSearchQ("");
+    setSearchOpen(false);
   };
 
   return (
@@ -75,22 +97,43 @@ function WatchPage() {
       )}
       <h1 className="font-display text-3xl tracking-tight">Watchlist</h1>
       <p className="mt-1 text-sm text-muted">Live price, 52-week range, RSI and the 25%-of-high rule.</p>
-      <form className="mt-5 flex gap-2" onSubmit={(e) => { e.preventDefault(); if (!raw.trim()) return; const first = search.data?.[0]; addSelected(first?.symbol ?? raw); }}>
-        <div className="relative min-w-0 flex-1">
-          <Input value={raw} onChange={(e) => setRaw(e.target.value.toUpperCase())} placeholder="Search stock (type 3 letters)" autoCapitalize="characters" autoComplete="off" />
-          {raw.trim().length >= 3 && (search.data?.length ?? 0) > 0 && (
-            <div className="absolute left-0 right-0 top-full z-30 mt-1 overflow-hidden rounded-md border bg-background shadow-lg">
-              {search.data!.map((hit) => (
-                <button key={hit.symbol} type="button" className="flex w-full items-center justify-between px-3 py-2 text-left hover:bg-muted" onMouseDown={(e) => e.preventDefault()} onClick={() => addSelected(hit.symbol)}>
-                  <span><span className="font-medium text-fg">{hit.symbol.replace(/\.NS$/i, "")}</span><span className="ml-2 text-xs text-muted">{hit.name}</span></span>
-                  <span className="text-xs text-muted">NSE</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-        <Button type="submit" className="shrink-0">Add</Button>
-      </form>
+      <div ref={searchBox} className="relative mt-5">
+        <form className="flex gap-2" onSubmit={(e) => {
+          e.preventDefault();
+          if (!raw.trim()) return;
+          const first = search.data?.[0];
+          addSelected(first?.symbol ?? raw.trim());
+        }}>
+          <div className="relative flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-subtle" />
+            <Input value={raw} onChange={(e) => { setRaw(e.target.value.toUpperCase()); setSearchOpen(true); }} onFocus={() => setSearchOpen(true)} placeholder="RELIANCE, TCS, INFY…" autoCapitalize="characters" autoCorrect="off" spellCheck={false} enterKeyHint="search" className="pl-10" aria-label="Search stock symbol to add to watchlist" />
+          </div>
+          <Button type="submit" className="shrink-0">Open</Button>
+        </form>
+        {searchOpen && raw.trim().length >= 3 && (
+          <div className="absolute z-30 mt-2 w-full overflow-hidden rounded-xl bg-surface-2 shadow-[var(--shadow-border)]">
+            {search.data && search.data.length > 0 ? (
+              <ul>
+                {search.data.map((hit) => (
+                  <li key={hit.symbol}>
+                    <button type="button" className="flex w-full items-center justify-between gap-3 px-3 py-3 text-left hover:bg-surface-3" onMouseDown={(e) => e.preventDefault()} onClick={() => addSelected(hit.symbol)}>
+                      <span className="min-w-0">
+                        <span className="block text-sm text-fg">{hit.name}</span>
+                        <span className="block text-xs text-muted">{hit.symbol}</span>
+                      </span>
+                      <span className="text-[11px] uppercase tracking-wider text-subtle">{hit.exchange}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : search.isFetching ? (
+              <div className="px-3 py-3 text-sm text-muted">Searching…</div>
+            ) : (
+              <div className="px-3 py-3 text-sm text-muted">No NSE stocks found.</div>
+            )}
+          </div>
+        )}
+      </div>
       <div className="mt-5 space-y-2">
         {rows.length === 0 ? <Empty title="Nothing on the list" body="Search any NSE stock by typing at least 3 letters." /> : rows.map((row) => (
           <Panel key={row.symbol} className="p-3">
