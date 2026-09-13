@@ -9,9 +9,9 @@ import type { Quote } from "@/lib/market/types";
 import { Panel, Section, SignalBadge, SkeletonBlock } from "@/components/widgets";
 
 export const Route = createFileRoute("/suggestions")({ component: Suggestions });
-const STORAGE_KEY = "artha:suggestions:v5";
+const STORAGE_KEY = "artha:suggestions:v6";
 const PERIODS = [{value:"1d",label:"1 Day"},{value:"1w",label:"1 Week"},{value:"1m",label:"1 Month"},{value:"3m",label:"3 Months"},{value:"6m",label:"6 Months"}];
-const SECTORS = [{value:"All",label:"All Sectors"},{value:"IT",label:"IT"},{value:"FMCG",label:"FMCG"},{value:"Medicine",label:"Medicine / Pharma"},{value:"Banking",label:"Banking"},{value:"Finance",label:"Finance"},{value:"Automobile",label:"Automobile"},{value:"Chemicals",label:"Chemicals"},{value:"Real Estate",label:"Real Estate"},{value:"Energy",label:"Energy"},{value:"Industrials",label:"Industrials"},{value:"Utilities",label:"Utilities"},{value:"Communication Services",label:"Communication Services"}];
+const SECTORS = [{value:"All",label:"All Sectors"},{value:"IT",label:"IT"},{value:"FMCG",label:"FMCG"},{value:"Medicine / Pharma",label:"Medicine / Pharma"},{value:"Banking",label:"Banking"},{value:"Finance",label:"Finance"},{value:"Automobile",label:"Automobile"},{value:"Chemicals",label:"Chemicals"},{value:"Real Estate",label:"Real Estate"},{value:"Energy",label:"Energy"},{value:"Industrials",label:"Industrials"},{value:"Utilities",label:"Utilities"},{value:"Communication Services",label:"Communication Services"}];
 function readSavedSuggestions(): Quote[] { if(typeof window==="undefined")return []; try{const raw=window.localStorage.getItem(STORAGE_KEY);if(!raw)return [];const parsed=JSON.parse(raw) as unknown;return Array.isArray(parsed)?parsed as Quote[]:[];}catch{return [];} }
 function StockRow({quote,todayTrigger}:{quote:Quote;todayTrigger:boolean}){const isLow=(quote.price??0)<20;const level=(quote.high5y??0)*(isLow?.10:.25);return <Link to="/stock" search={{symbol:quote.symbol,period:"1Y"}} className="block"><Panel className="p-3 transition hover:bg-surface-2"><div className="flex items-center justify-between gap-3"><div><div className="font-medium text-fg">{displaySymbol(quote.symbol)}</div><div className="mt-1 text-xs text-muted">{isLow?"90% Rule":"75% Rule"} · Trigger ≤ {fmtCurrency(level)}</div></div><div className="text-right"><div className="tabular text-sm text-fg">{fmtCurrency(quote.price)}</div><div className="mt-1 text-xs text-muted">5Y high {fmtCurrency(quote.high5y)}</div></div></div><div className="mt-2 flex items-center justify-between"><SignalBadge signal="BUY" />{todayTrigger&&<span className="text-xs font-medium text-up">Triggered today</span>}</div></Panel></Link>}
 function Suggestions(){
@@ -19,7 +19,7 @@ function Suggestions(){
   const [period,setPeriod]=useState<"current"|"1d"|"1w"|"1m"|"3m"|"6m">("current");
   const [sector,setSector]=useState("All");
   const filterActive=period!=="current"||sector!=="All";
-  const q=useQuery({queryKey:["suggestions-scanner-v5",period,sector],queryFn:()=>fetchSuggestions({data:{period,sector}}),initialData:period==="current"&&sector==="All"&&saved.length?saved:undefined,staleTime:0,gcTime:24*60*60_000,refetchOnMount:"always",refetchOnWindowFocus:true,refetchInterval:30*60_000});
+  const q=useQuery({queryKey:["suggestions-scanner-v6",period,sector],queryFn:()=>fetchSuggestions({data:{period,sector}}),initialData:period==="current"&&sector==="All"&&saved.length?saved:undefined,staleTime:0,gcTime:24*60*60_000,refetchOnMount:"always",refetchOnWindowFocus:true,refetchInterval:30*60_000});
   const suggestions=q.data??saved;
   const today=new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Kolkata",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date());
   const todayTriggers=useMemo(()=>period==="current"?suggestions.filter(x=>x.triggerDate===today).sort((a,b)=>a.name.localeCompare(b.name)):[],[suggestions,today,period]);
