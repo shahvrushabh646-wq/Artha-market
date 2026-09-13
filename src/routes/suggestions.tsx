@@ -10,7 +10,7 @@ import { Panel, Section, SignalBadge, SkeletonBlock } from "@/components/widgets
 
 export const Route = createFileRoute("/suggestions")({ component: Suggestions });
 
-const STORAGE_KEY = "artha:suggestions:v2";
+const STORAGE_KEY = "artha:suggestions:v3";
 
 function readSavedSuggestions(): Quote[] {
   if (typeof window === "undefined") return [];
@@ -43,7 +43,7 @@ function StockRow({ quote, todayTrigger }: { quote: Quote; todayTrigger: boolean
           </div>
         </div>
         <div className="mt-2 flex items-center justify-between">
-          <SignalBadge signal={quote.signal75 === "BUY" ? "BUY" : "WAIT"} />
+          <SignalBadge signal="BUY" />
           {todayTrigger && <span className="text-xs font-medium text-up">Triggered today</span>}
         </div>
       </Panel>
@@ -54,7 +54,7 @@ function StockRow({ quote, todayTrigger }: { quote: Quote; todayTrigger: boolean
 function Suggestions() {
   const [saved, setSaved] = useState<Quote[]>(readSavedSuggestions);
   const q = useQuery({
-    queryKey: ["suggestions-scanner-v2"],
+    queryKey: ["suggestions-scanner-v3"],
     queryFn: () => fetchSuggestions(),
     initialData: saved.length ? saved : undefined,
     staleTime: 0,
@@ -65,7 +65,7 @@ function Suggestions() {
   });
   const suggestions = q.data ?? saved;
   const today = indiaToday();
-  const todayTriggers = useMemo(() => suggestions.filter(q => q.triggerDate === today && q.signal75 === "BUY"), [suggestions, today]);
+  const todayTriggers = useMemo(() => suggestions.filter(q => q.triggerDate === today), [suggestions, today]);
   const todaySymbols = useMemo(() => new Set(todayTriggers.map(q => q.symbol)), [todayTriggers]);
   const otherStocks = useMemo(() => suggestions.filter(q => !todaySymbols.has(q.symbol)), [suggestions, todaySymbols]);
 
@@ -80,21 +80,21 @@ function Suggestions() {
         <div>
           <p className="text-xs uppercase tracking-[0.2em] text-subtle">Artha scanner</p>
           <h1 className="mt-1 font-display text-3xl tracking-tight text-fg">Suggestions</h1>
-          <p className="mt-2 text-sm text-muted">Daily valuation triggers first, followed by all other scanned stocks.</p>
+          <p className="mt-2 text-sm text-muted">Only stocks achieving the 75% / 90% valuation rule are shown.</p>
         </div>
         <button type="button" onClick={() => void q.refetch()} className="flex h-10 items-center gap-2 rounded-lg bg-surface-2 px-3 text-xs text-muted shadow-[var(--shadow-border)]" aria-label="Refresh suggestions">
           <RefreshCw className="size-4" /> Refresh
         </button>
       </div>
 
-      <Section title="Today's triggers" hint="Stocks that crossed into the valuation trigger today">
-        {q.isLoading && suggestions.length === 0 ? <div className="space-y-2"><SkeletonBlock className="h-20" /><SkeletonBlock className="h-20" /></div> : todayTriggers.length === 0 ? <Panel><div className="flex items-center gap-3"><Lightbulb className="size-5 text-muted" /><p className="text-sm text-muted">No stocks triggered the rule today.</p></div></Panel> : <div className="space-y-2">{todayTriggers.map(quote => <StockRow key={quote.symbol} quote={quote} todayTrigger />)}</div>}
+      <Section title="Today's triggers" hint="Stocks that newly crossed into the 75% / 90% valuation rule today">
+        {q.isLoading && suggestions.length === 0 ? <div className="space-y-2"><SkeletonBlock className="h-20" /><SkeletonBlock className="h-20" /></div> : todayTriggers.length === 0 ? <Panel><div className="flex items-center gap-3"><Lightbulb className="size-5 text-muted" /><p className="text-sm text-muted">No new stocks triggered the rule today.</p></div></Panel> : <div className="space-y-2">{todayTriggers.map(quote => <StockRow key={quote.symbol} quote={quote} todayTrigger />)}</div>}
       </Section>
 
-      <Section title="All other stocks" hint={`Total scanned: ${otherStocks.length}`}>
-        {q.isError && suggestions.length === 0 ? <Panel><p className="text-sm text-muted">Suggestions are temporarily unavailable. Try Refresh.</p></Panel> : otherStocks.length === 0 ? <Panel><p className="text-sm text-muted">No other scanned stocks are available yet.</p></Panel> : <div className="space-y-2">{otherStocks.map(quote => <StockRow key={quote.symbol} quote={quote} todayTrigger={false} />)}</div>}
+      <Section title="Other stocks achieving the rule" hint={`Currently at or below the rule level: ${otherStocks.length}`}>
+        {q.isError && suggestions.length === 0 ? <Panel><p className="text-sm text-muted">Suggestions are temporarily unavailable. Try Refresh.</p></Panel> : otherStocks.length === 0 ? <Panel><p className="text-sm text-muted">No other stocks are currently achieving the rule.</p></Panel> : <div className="space-y-2">{otherStocks.map(quote => <StockRow key={quote.symbol} quote={quote} todayTrigger={false} />)}</div>}
       </Section>
-      <p className="mt-6 text-xs text-subtle">The scanner refreshes automatically every 30 minutes and reorders today's triggers to the top. Data may be delayed.</p>
+      <p className="mt-6 text-xs text-subtle">Only 75% / 90% rule achievers are listed. The scanner refreshes automatically every 30 minutes and puts today's new triggers first.</p>
     </div>
   );
 }
