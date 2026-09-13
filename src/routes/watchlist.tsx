@@ -9,6 +9,7 @@ import { Empty, Panel, SignalBadge } from "@/components/widgets";
 import { displaySymbol, normalizeSymbol } from "@/lib/market/config";
 import { customValuation, fmtCurrency, fmtNumber, lastValid, periodHighLow, rsi, sma } from "@/lib/market/math";
 import { fetchWatchPack } from "@/lib/market/server";
+import { searchStocks } from "@/lib/market/stock-search";
 import { useDesk } from "@/lib/store";
 
 export const Route = createFileRoute("/watchlist")({ component: WatchPage });
@@ -19,6 +20,13 @@ function WatchPage() {
   const removeWatch = useDesk((s) => s.removeWatch);
   const [raw, setRaw] = useState("");
   const [showDailyAlert, setShowDailyAlert] = useState(false);
+
+  const search = useQuery({
+    queryKey: ["stock-search", raw.trim().toUpperCase()],
+    queryFn: () => searchStocks({ data: { query: raw.trim().toUpperCase() } }),
+    enabled: raw.trim().length >= 3,
+    staleTime: 30_000,
+  });
 
   const pack = useQuery({ queryKey: ["watch", watchlist], queryFn: () => fetchWatchPack({ data: { symbols: watchlist } }), enabled: watchlist.length > 0, refetchInterval: 90_000 });
 
@@ -45,6 +53,12 @@ function WatchPage() {
     if (rows.some((row) => row.signal)) setShowDailyAlert(true);
   }, [pack.isLoading, watchlist.length, rows]);
 
+  const addSelected = (symbol: string) => {
+    const added = addWatch(symbol);
+    toast(added ? `Added ${displaySymbol(normalizeSymbol(symbol))}` : "Already watching");
+    setRaw("");
+  };
+
   return (
     <div>
       {showDailyAlert && triggered.length > 0 && (
@@ -61,11 +75,24 @@ function WatchPage() {
       )}
       <h1 className="font-display text-3xl tracking-tight">Watchlist</h1>
       <p className="mt-1 text-sm text-muted">Live price, 52-week range, RSI and the 25%-of-high rule.</p>
-      <form className="mt-5 flex gap-2" onSubmit={(e) => { e.preventDefault(); if (!raw.trim()) return; const added = addWatch(raw); toast(added ? `Added ${normalizeSymbol(raw)}` : "Already watching"); setRaw(""); }}>
-        <Input value={raw} onChange={(e) => setRaw(e.target.value)} placeholder="Add symbol" autoCapitalize="characters" /><Button type="submit" className="shrink-0">Add</Button>
+      <form className="mt-5 flex gap-2" onSubmit={(e) => { e.preventDefault(); if (!raw.trim()) return; const first = search.data?.[0]; addSelected(first?.symbol ?? raw); }}>
+        <div className="relative min-w-0 flex-1">
+          <Input value={raw} onChange={(e) => setRaw(e.target.value.toUpperCase())} placeholder="Search stock (type 3 letters)" autoCapitalize="characters" autoComplete="off" />
+          {raw.trim().length >= 3 && (search.data?.length ?? 0) > 0 && (
+            <div className="absolute left-0 right-0 top-full z-30 mt-1 overflow-hidden rounded-md border bg-background shadow-lg">
+              {search.data!.map((hit) => (
+                <button key={hit.symbol} type="button" className="flex w-full items-center justify-between px-3 py-2 text-left hover:bg-muted" onMouseDown={(e) => e.preventDefault()} onClick={() => addSelected(hit.symbol)}>
+                  <span><span className="font-medium text-fg">{hit.symbol.replace(/\.NS$/i, "")}</span><span className="ml-2 text-xs text-muted">{hit.name}</span></span>
+                  <span className="text-xs text-muted">NSE</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <Button type="submit" className="shrink-0">Add</Button>
       </form>
       <div className="mt-5 space-y-2">
-        {rows.length === 0 ? <Empty title="Nothing on the list" body="Add RELIANCE, TCS or any NSE name to start tracking." /> : rows.map((row) => (
+        {rows.length === 0 ? <Empty title="Nothing on the list" body="Search any NSE stock by typing at least 3 letters." /> : rows.map((row) => (
           <Panel key={row.symbol} className="p-3">
             <div className="flex items-start justify-between gap-3"><Link to="/stock" search={{ symbol: row.symbol, period: "1Y" }} className="min-w-0"><div className="font-medium text-fg">{displaySymbol(row.symbol)}</div><div className="truncate text-xs text-muted">{row.q?.name ?? row.symbol}</div></Link><div className="text-right"><div className="tabular text-fg">{fmtCurrency(row.q?.price ?? null)}</div><Signed value={row.q?.changePct ?? null} as="percent" className="text-xs" /></div></div>
             <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-muted"><span>52W H <span className="tabular text-fg">{fmtCurrency(row.hl1.high ?? row.q?.high52w ?? null)}</span></span><span>52W L <span className="tabular text-fg">{fmtCurrency(row.hl1.low ?? row.q?.low52w ?? null)}</span></span><span>RSI <span className="tabular text-fg">{fmtNumber(row.r)}</span></span><span>SMA20 <span className="tabular text-fg">{fmtCurrency(row.s20)}</span></span><span>SMA50 <span className="tabular text-fg">{fmtCurrency(row.s50)}</span></span><span>SMA200 <span className="tabular text-fg">{fmtCurrency(row.s200)}</span></span></div>
