@@ -21,19 +21,19 @@ function normalizeCompanyName(name: string) {
   return name.replace(/\s+(Limited|Ltd\.?|Corporation|Corp\.?|Incorporated|Inc\.?)$/i, "").trim().toLowerCase();
 }
 
-// Verified descriptions for companies where public pages commonly block automated requests.
-// The same architecture can be extended without changing the UI.
+// Verified Gujarati descriptions for commonly viewed companies.
 const VERIFIED: Record<string, string> = {
-  INFY: "Infosys Limited વૈશ્વિક IT અને business consulting કંપની છે. કંપની AI, cloud, data અને digital technologies આધારિત consulting અને technology services આપે છે. તે software development, application modernization, cloud services, cybersecurity, engineering services, business process management અને digital transformation જેવી સેવાઓ પૂરી પાડે છે.",
-  ICICIBANK: "ICICI Bank Limited એક વૈવિધ્યસભર નાણાકીય સેવા અને બેન્કિંગ કંપની છે. બેંક વ્યક્તિઓ, સ્વરોજગાર વ્યાવસાયિકો, MSMEs, વેપારીઓ અને corporate ગ્રાહકોને savings અને current accounts, payments, credit cards, personal અને home loans, vehicle loans, business banking, corporate banking અને digital banking જેવી સેવાઓ આપે છે. બેંક trade finance, cash management, merchant payments અને અન્ય નાણાકીય સેવાઓ પણ પૂરી પાડે છે.",
-  RELIANCE: "Reliance Industries Limited ભારતની diversified કંપની છે, જે energy, petrochemicals, oil-to-chemicals, retail અને digital services જેવા વિવિધ વ્યવસાયોમાં કાર્યરત છે.",
-  TCS: "Tata Consultancy Services Limited વૈશ્વિક IT services, consulting અને business solutions કંપની છે. કંપની software development, cloud, cybersecurity, data અને analytics, AI, engineering અને digital transformation જેવી technology services પૂરી પાડે છે.",
-  HDFCBANK: "HDFC Bank Limited ભારતની મોટી ખાનગી ક્ષેત્રની બેંક છે. તે retail અને corporate ગ્રાહકોને accounts, deposits, loans, credit cards, payments, digital banking, treasury અને અન્ય banking તથા financial services આપે છે.",
-  SBIN: "State Bank of India ભારતની જાહેર ક્ષેત્રની બેંક છે. તે retail banking, corporate banking, loans, deposits, payments, cards, digital banking, international banking અને અન્ય નાણાકીય સેવાઓ પૂરી પાડે છે.",
-  ITC: "ITC Limited diversified ભારતીય કંપની છે, જે FMCG, hotels, paperboards અને packaging, agri-business અને information technology જેવા વ્યવસાયોમાં કાર્યરત છે.",
-  LT: "Larsen & Toubro Limited engineering, construction, technology અને financial services ક્ષેત્રે કાર્યરત diversified ભારતીય કંપની છે. તે infrastructure, heavy engineering, energy અને અન્ય industrial projects માટે solutions આપે છે.",
-  AXISBANK: "Axis Bank Limited ભારતની ખાનગી ક્ષેત્રની બેંક છે. તે retail, SME અને corporate ગ્રાહકોને deposits, loans, cards, payments, digital banking, trade finance અને અન્ય નાણાકીય સેવાઓ આપે છે.",
-  KOTAKBANK: "Kotak Mahindra Bank Limited banking અને financial services કંપની છે. તે retail અને corporate ગ્રાહકોને accounts, deposits, loans, cards, payments, investment, wealth management અને અન્ય નાણાકીય સેવાઓ આપે છે.",
+  INFY: "Infosys Limited વૈશ્વિક માહિતી ટેકનોલોજી અને વ્યવસાય સલાહકાર કંપની છે. કંપની કૃત્રિમ બુદ્ધિમત્તા, ક્લાઉડ, ડેટા અને ડિજિટલ ટેકનોલોજી આધારિત સલાહકાર તથા ટેકનોલોજી સેવાઓ આપે છે. તે સોફ્ટવેર વિકાસ, એપ્લિકેશન આધુનિકીકરણ, ક્લાઉડ સેવાઓ, સાયબર સુરક્ષા, એન્જિનિયરિંગ સેવાઓ, વ્યવસાય પ્રક્રિયા વ્યવસ્થાપન અને ડિજિટલ પરિવર્તન જેવી સેવાઓ પૂરી પાડે છે.",
+  ICICIBANK: "ICICI Bank Limited એક વૈવિધ્યસભર બેન્કિંગ અને નાણાકીય સેવા કંપની છે. બેંક વ્યક્તિઓ, સ્વરોજગાર વ્યાવસાયિકો, નાના તથા મધ્યમ વ્યવસાયો, વેપારીઓ અને કોર્પોરેટ ગ્રાહકોને બચત તથા ચાલુ ખાતાં, ચુકવણી, ક્રેડિટ કાર્ડ, વ્યક્તિગત અને ઘર લોન, વાહન લોન, વ્યવસાયિક બેન્કિંગ, કોર્પોરેટ બેન્કિંગ અને ડિજિટલ બેન્કિંગ જેવી સેવાઓ આપે છે. બેંક વેપાર નાણાંકીય સેવા, રોકડ વ્યવસ્થાપન, વેપારી ચુકવણી અને અન્ય નાણાકીય સેવાઓ પણ પૂરી પાડે છે.",
+  RELIANCE: "Reliance Industries Limited ભારતની વૈવિધ્યસભર કંપની છે, જે ઊર્જા, પેટ્રોકેમિકલ્સ, તેલ અને રસાયણ આધારિત વ્યવસાય, રિટેલ તથા ડિજિટલ સેવાઓ જેવા વિવિધ ક્ષેત્રોમાં કાર્યરત છે.",
+  TCS: "Tata Consultancy Services Limited વૈશ્વિક માહિતી ટેકનોલોજી, સલાહકાર અને વ્યવસાયિક ઉકેલોની કંપની છે. કંપની સોફ્ટવેર વિકાસ, ક્લાઉડ, સાયબર સુરક્ષા, ડેટા અને વિશ્લેષણ, કૃત્રિમ બુદ્ધિમત્તા, એન્જિનિયરિંગ અને ડિજિટલ પરિવર્તન જેવી ટેકનોલોજી સેવાઓ પૂરી પાડે છે.",
+  HDFCBANK: "HDFC Bank Limited ભારતની મોટી ખાનગી ક્ષેત્રની બેંક છે. તે વ્યક્તિગત અને કોર્પોરેટ ગ્રાહકોને ખાતાં, થાપણ, લોન, ક્રેડિટ કાર્ડ, ચુકવણી, ડિજિટલ બેન્કિંગ, ટ્રેઝરી અને અન્ય બેન્કિંગ તથા નાણાકીય સેવાઓ આપે છે.",
+  SBIN: "State Bank of India ભારતની જાહેર ક્ષેત્રની અગ્રણી બેંક છે. તે વ્યક્તિગત બેન્કિંગ, કોર્પોરેટ બેન્કિંગ, લોન, થાપણ, ચુકવણી, કાર્ડ, ડિજિટલ બેન્કિંગ, આંતરરાષ્ટ્રીય બેન્કિંગ અને અન્ય નાણાકીય સેવાઓ પૂરી પાડે છે.",
+  ITC: "ITC Limited ભારતની વૈવિધ્યસભર કંપની છે, જે ઝડપી વપરાશની ગ્રાહક વસ્તુઓ, હોટેલ, કાગળ અને પેકેજિંગ, કૃષિ વ્યવસાય તથા માહિતી ટેકનોલોજી જેવા ક્ષેત્રોમાં કાર્યરત છે.",
+  LT: "Larsen & Toubro Limited એન્જિનિયરિંગ, બાંધકામ, ટેકનોલોજી અને નાણાકીય સેવાઓ ક્ષેત્રે કાર્યરત વૈવિધ્યસભર ભારતીય કંપની છે. તે માળખાગત સુવિધા, ભારે એન્જિનિયરિંગ, ઊર્જા અને અન્ય ઔદ્યોગિક પ્રોજેક્ટ્સ માટે ઉકેલો પૂરા પાડે છે.",
+  AXISBANK: "Axis Bank Limited ભારતની ખાનગી ક્ષેત્રની બેંક છે. તે વ્યક્તિગત, નાના તથા મધ્યમ વ્યવસાય અને કોર્પોરેટ ગ્રાહકોને થાપણ, લોન, કાર્ડ, ચુકવણી, ડિજિટલ બેન્કિંગ, વેપાર નાણાંકીય સેવા અને અન્ય નાણાકીય સેવાઓ આપે છે.",
+  KOTAKBANK: "Kotak Mahindra Bank Limited બેન્કિંગ અને નાણાકીય સેવાઓની કંપની છે. તે વ્યક્તિગત અને કોર્પોરેટ ગ્રાહકોને ખાતાં, થાપણ, લોન, કાર્ડ, ચુકવણી, રોકાણ, સંપત્તિ વ્યવસ્થાપન અને અન્ય નાણાકીય સેવાઓ પૂરી પાડે છે.",
+  ONGC: "Oil and Natural Gas Corporation Limited ભારત સરકારની માલિકીની અગ્રણી તેલ અને કુદરતી ગેસ કંપની છે. કંપની ભારત અને વિદેશમાં હાઇડ્રોકાર્બન સંસાધનોની શોધખોળ, વિકાસ અને ઉત્પાદન કરે છે. તે મુખ્યત્વે ક્રૂડ ઓઇલ અને કુદરતી ગેસનું ઉત્પાદન કરે છે તથા ઊર્જા સુરક્ષામાં મહત્વપૂર્ણ ભૂમિકા ભજવે છે. કંપની તેલ અને ગેસ ક્ષેત્રમાં શોધખોળથી લઈને ઉત્પાદન સુધીની વિવિધ પ્રવૃત્તિઓમાં સંકળાયેલી છે અને કેટલાક મૂલ્યવર્ધિત પેટ્રોલિયમ ઉત્પાદનોનું પણ ઉત્પાદન કરે છે.",
 };
 
 function verifiedDescription(companyName: string, symbol?: string) {
@@ -101,13 +101,13 @@ async function getGoogleDescription(companyName: string) {
 function industryGujarati(companyName: string, industry?: string | null) {
   const i = (industry || "").toLowerCase();
   if (/bank|banking|financial/.test(i)) return `${companyName} બેન્કિંગ અને નાણાકીય સેવા ક્ષેત્રમાં કાર્યરત કંપની છે. કંપની ગ્રાહકોને બેન્કિંગ, થાપણ, લોન, ચુકવણી, કાર્ડ અને અન્ય નાણાકીય સેવાઓ પૂરી પાડે છે.`;
-  if (/information technology|it services|software|technology/.test(i)) return `${companyName} IT અને ટેકનોલોજી ક્ષેત્રમાં કાર્યરત કંપની છે. કંપની software, technology અને digital solutions તથા services પૂરી પાડે છે.`;
-  if (/pharma|health|hospital|drug/.test(i)) return `${companyName} હેલ્થકેર અને ફાર્માસ્યુટિકલ ક્ષેત્રમાં કાર્યરત કંપની છે અને દવાઓ તથા આરોગ્યસંભાળ સંબંધિત ઉત્પાદનો અથવા સેવાઓ પૂરી પાડે છે.`;
-  if (/auto|automobile/.test(i)) return `${companyName} ઓટોમોબાઇલ ક્ષેત્રમાં કાર્યરત કંપની છે અને વાહનો, ઓટો કમ્પોનન્ટ્સ અથવા સંબંધિત ઉત્પાદનો અને સેવાઓ સાથે સંકળાયેલી છે.`;
+  if (/information technology|it services|software|technology/.test(i)) return `${companyName} માહિતી ટેકનોલોજી અને ટેકનોલોજી ક્ષેત્રમાં કાર્યરત કંપની છે. કંપની સોફ્ટવેર, ડિજિટલ ઉકેલો અને ટેકનોલોજી આધારિત સેવાઓ પૂરી પાડે છે.`;
+  if (/pharma|health|hospital|drug/.test(i)) return `${companyName} આરોગ્યસંભાળ અને ફાર્માસ્યુટિકલ ક્ષેત્રમાં કાર્યરત કંપની છે અને દવાઓ તથા આરોગ્યસંભાળ સંબંધિત ઉત્પાદનો અથવા સેવાઓ પૂરી પાડે છે.`;
+  if (/auto|automobile/.test(i)) return `${companyName} ઓટોમોબાઇલ ક્ષેત્રમાં કાર્યરત કંપની છે અને વાહનો, ઓટો ઘટકો અથવા સંબંધિત ઉત્પાદનો તથા સેવાઓ સાથે સંકળાયેલી છે.`;
   if (/fmcg|consumer/.test(i)) return `${companyName} ગ્રાહક ઉત્પાદનોના ક્ષેત્રમાં કાર્યરત કંપની છે અને દૈનિક વપરાશની વસ્તુઓ અથવા સંબંધિત ઉત્પાદનોનું ઉત્પાદન અને વેચાણ કરે છે.`;
-  if (/cement|construction|infra|real estate/.test(i)) return `${companyName} ઇન્ફ્રાસ્ટ્રક્ચર, કન્સ્ટ્રક્શન અથવા બિલ્ડિંગ મટિરિયલ્સ ક્ષેત્રમાં કાર્યરત કંપની છે.`;
-  if (industry) return `${companyName} ${industry} ક્ષેત્રમાં કાર્યરત કંપની છે અને આ ક્ષેત્ર સંબંધિત ઉત્પાદનો અથવા સેવાઓ પૂરી પાડે છે.`;
-  return `${companyName} વિવિધ વ્યવસાયિક અને નાણાકીય સેવાઓ/ઉત્પાદનો સાથે સંકળાયેલી કંપની છે.`;
+  if (/cement|construction|infra|real estate/.test(i)) return `${companyName} ઇન્ફ્રાસ્ટ્રક્ચર, બાંધકામ અથવા બાંધકામ સામગ્રી ક્ષેત્રમાં કાર્યરત કંપની છે.`;
+  if (/oil|gas|energy|petroleum|power/.test(i)) return `${companyName} ઊર્જા, તેલ, કુદરતી ગેસ અથવા પેટ્રોલિયમ ક્ષેત્રમાં કાર્યરત કંપની છે અને ઊર્જા સંબંધિત ઉત્પાદનો તથા સેવાઓ સાથે સંકળાયેલી છે.`;
+  return `${companyName} વિવિધ વ્યવસાયિક ક્ષેત્રોમાં કાર્યરત કંપની છે અને તેના ક્ષેત્રને અનુરૂપ ઉત્પાદનો તથા સેવાઓ પૂરી પાડે છે.`;
 }
 
 async function buildDescription(companyName: string, industry?: string | null, symbol?: string): Promise<string> {
@@ -115,14 +115,14 @@ async function buildDescription(companyName: string, industry?: string | null, s
   const cached = descriptionCache.get(key);
   if (cached && cached.expires > Date.now()) return cached.text;
 
-  // 1) Verified company data first. This prevents valid companies from ever falling into the old "unavailable" message.
+  // Verified company data first.
   const verified = verifiedDescription(companyName, symbol);
   if (verified) {
     descriptionCache.set(key, { expires: Date.now() + 30 * 24 * 60 * 60_000, text: verified });
     return verified;
   }
 
-  // 2) Public sources, then translation.
+  // Public sources, then Gujarati translation.
   const candidates = [
     await getScreenerDescription(normalizeSymbol(symbol)),
     await getWikipediaDescription(companyName),
@@ -137,10 +137,9 @@ async function buildDescription(companyName: string, industry?: string | null, s
         return translated;
       }
     } catch {}
-    if (sourceText) return sourceText;
   }
 
-  // 3) Industry-specific Gujarati fallback. Never show the old unavailable text.
+  // Never return the original English source text. Always keep the visible company information Gujarati.
   const fallback = industryGujarati(companyName, industry);
   descriptionCache.set(key, { expires: Date.now() + 24 * 60 * 60_000, text: fallback });
   return fallback;
