@@ -11,55 +11,54 @@ import { fetchDashboard } from "@/lib/market/server";
 export const Route = createFileRoute("/")({ component: Home });
 
 type MetalPrices = { gold10g: number | null; silverKg: number | null; gold5yHigh10g: number | null; gold75Price10g: number | null; gold85Price10g: number | null; gold95Price10g: number | null; goldSignal: "BUY" | "WAIT" | null; asOf: string | null; source: string };
-type GoogleFinanceResult = { price: number | null; asOf: string | null };
+type MoneycontrolResult = { price: number | null; asOf: string | null };
 type YahooChartResponse = { chart?: { result?: Array<{ timestamp?: number[]; indicators?: { quote?: Array<{ high?: Array<number | null> }> } }> } };
 const TROY_OUNCE_GRAMS = 31.1034768;
 
-function decodeGoogleText(value: string): string {
+function decodeMoneycontrolText(value: string): string {
   return value
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
     .replace(/<style[\s\S]*?<\/style>/gi, " ")
     .replace(/<[^>]+>/g, " ")
     .replace(/&nbsp;/gi, " ")
     .replace(/&amp;/gi, "&")
+    .replace(/&#8377;/g, "₹")
+    .replace(/&#x20b9;/gi, "₹")
     .replace(/\s+/g, " ")
     .trim();
 }
 
-async function getGoogleFinancePrice(ticker: string): Promise<GoogleFinanceResult> {
+async function getMoneycontrolPrice(kind: "gold" | "silver"): Promise<MoneycontrolResult> {
   try {
-    const res = await fetch(`https://www.google.com/finance/quote/${encodeURIComponent(ticker)}?hl=en`, {
-      headers: { Accept: "text/html,application/xhtml+xml" },
+    const path = kind === "gold" ? "gold-rates-today/mumbai/" : "silver-rates-today/mumbai/";
+    const res = await fetch(`https://www.moneycontrol.com/news/${path}`, {
+      headers: {
+        Accept: "text/html,application/xhtml+xml",
+        "User-Agent": "Mozilla/5.0 (compatible; ArthaMarket/1.0)",
+      },
       cache: "no-store",
     });
     if (!res.ok) return { price: null, asOf: null };
     const html = await res.text();
-    const text = decodeGoogleText(html);
+    const text = decodeMoneycontrolText(html);
 
-    // Google Finance currently renders the quote as readable page text:
-    // Gold Continuous Contract $4,521.30, Silver Continuous Contract $67.81,
-    // and USD/INR as United States Dollar / Indian Rupee 95.2108.
-    const pattern = ticker === "USD-INR"
-      ? /United States Dollar\s*\/\s*Indian Rupee\s+([0-9]{1,4}(?:\.[0-9]+)?)/i
-      : ticker === "GCW00:COMEX"
-        ? /Gold Continuous Contract\s+\$([0-9,]+(?:\.[0-9]+)?)/i
-        : /Silver Continuous Contract\s+\$([0-9,]+(?:\.[0-9]+)?)/i;
+    // Moneycontrol Mumbai pages expose the standard current retail reference:
+    // Gold = 24 Carat / 10 Gram, Silver = 1 KG.
+    const pattern = kind === "gold"
+      ? /Current Price\s*\(24 Carat\s*\/\s*10 Gram\)\s*₹?\s*([0-9,]+(?:\.[0-9]+)?)/i
+      : /Current Price\s*\(1 KG\)\s*₹?\s*([0-9,]+(?:\.[0-9]+)?)/i;
 
     const match = text.match(pattern);
     if (!match) return { price: null, asOf: null };
-
     const price = Number(match[1].replace(/,/g, ""));
     if (!Number.isFinite(price) || price <= 0) return { price: null, asOf: null };
-    if (ticker === "USD-INR" && (price < 50 || price > 200)) return { price: null, asOf: null };
+    if (kind === "gold" && (price < 50000 || price > 500000)) return { price: null, asOf: null };
+    if (kind === "silver" && (price < 50000 || price > 1000000)) return { price: null, asOf: null };
 
     return { price, asOf: new Date().toISOString() };
   } catch {
     return { price: null, asOf: null };
   }
-}
-
-async function getGoogleUsdInr(): Promise<number | null> {
-  return (await getGoogleFinancePrice("USD-INR")).price;
 }
 
 async function getGoldFiveYearHigh10g(currentGoldTozInr: number): Promise<number | null> {
@@ -80,27 +79,25 @@ async function getGoldFiveYearHigh10g(currentGoldTozInr: number): Promise<number
 }
 
 const fetchPreciousMetals = createServerFn({ method: "GET" }).handler(async (): Promise<MetalPrices> => {
-  const [goldQuote, silverQuote, usdInr] = await Promise.all([
-    getGoogleFinancePrice("GCW00:COMEX"),
-    getGoogleFinancePrice("SIW00:COMEX"),
-    getGoogleUsdInr(),
+  const [goldQuote, silverQuote] = await Promise.all([
+    getMoneycontrolPrice("gold"),
+    getMoneycontrolPrice("silver"),
   ]);
 
-  if (goldQuote.price == null || silverQuote.price == null || usdInr == null) {
-    throw new Error("Google Finance gold/silver price is temporarily unavailable");
+  if (goldQuote.price == null || silverQuote.price == null) {
+    throw new Error("Moneycontrol gold/silver price is temporarily unavailable");
   }
 
-  const goldTozInr = goldQuote.price * usdInr;
-  const silverTozInr = silverQuote.price * usdInr;
-  const gold10g = goldTozInr * 10 / TROY_OUNCE_GRAMS;
-  const silverKg = silverTozInr * 1000 / TROY_OUNCE_GRAMS;
-  const gold5yHigh10g = await getGoldFiveYearHigh10g(goldTozInr);
+  const gold10g = goldQuote.price;
+  const silverKg = silverQuote.price;
+  const currentGoldTozInr = gold10g * TROY_OUNCE_GRAMS / 10;
+  const gold5yHigh10g = await getGoldFiveYearHigh10g(currentGoldTozInr);
   const gold75Price10g = gold5yHigh10g != null ? Math.round(gold5yHigh10g * 0.25 * 100) / 100 : null;
   const gold85Price10g = gold5yHigh10g != null ? Math.round(gold5yHigh10g * 0.15 * 100) / 100 : null;
   const gold95Price10g = gold5yHigh10g != null ? Math.round(gold5yHigh10g * 0.05 * 100) / 100 : null;
   const goldSignal = gold75Price10g != null ? (gold10g <= gold75Price10g ? "BUY" : "WAIT") : null;
 
-  return { gold10g, silverKg, gold5yHigh10g, gold75Price10g, gold85Price10g, gold95Price10g, goldSignal, asOf: goldQuote.asOf, source: "Google Finance" };
+  return { gold10g, silverKg, gold5yHigh10g, gold75Price10g, gold85Price10g, gold95Price10g, goldSignal, asOf: goldQuote.asOf, source: "Moneycontrol" };
 });
 
 function Home() {
@@ -125,12 +122,12 @@ function Home() {
 }
 
 function PreciousMetals() {
-  const metals = useQuery({ queryKey: ["precious-metals-google-v3"], queryFn: () => fetchPreciousMetals(), staleTime: 30000, refetchInterval: 60000, refetchOnWindowFocus: true, retry: 2 });
+  const metals = useQuery({ queryKey: ["precious-metals-moneycontrol-v1"], queryFn: () => fetchPreciousMetals(), staleTime: 30000, refetchInterval: 60000, refetchOnWindowFocus: true, retry: 2 });
   const formatINR = (value: number) => `₹${Math.round(value).toLocaleString("en-IN")}`;
-  return <Section title="Gold & Silver" hint="Live Google Finance prices converted to Indian rupees">
+  return <Section title="Gold & Silver" hint="Live Moneycontrol prices for Mumbai">
     <div className="grid gap-3 sm:grid-cols-2">
       <Panel className="p-4">
-        <div className="flex items-start justify-between gap-3"><div><div className="text-sm font-medium text-fg">Gold</div><div className="mt-1 text-xs text-muted">Google Finance · ₹ / 10g</div></div><div className="text-xs text-muted">INR</div></div>
+        <div className="flex items-start justify-between gap-3"><div><div className="text-sm font-medium text-fg">Gold</div><div className="mt-1 text-xs text-muted">Moneycontrol · ₹ / 10g · 24K</div></div><div className="text-xs text-muted">INR</div></div>
         <div className="mt-2 text-2xl font-semibold tabular text-fg">{metals.data?.gold10g != null ? formatINR(metals.data.gold10g) : metals.isLoading ? "Loading…" : "Price unavailable"}</div>
         <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
           {[{ label: "75% discount", value: metals.data?.gold75Price10g }, { label: "85% discount", value: metals.data?.gold85Price10g }, { label: "95% discount", value: metals.data?.gold95Price10g }, { label: "Rule", value: null }].map((row) => <div key={row.label} className="rounded-lg bg-surface-2 p-2"><div className="text-xs text-muted">{row.label}</div><div className="mt-1 tabular text-sm text-fg">{row.value != null ? formatINR(row.value) : metals.data?.goldSignal ?? "—"}</div></div>)}
@@ -138,11 +135,11 @@ function PreciousMetals() {
         <div className="mt-3 text-xs text-muted">5Y high reference: {metals.data?.gold5yHigh10g != null ? formatINR(metals.data.gold5yHigh10g) : "—"} · Rule: BUY when current price ≤ 25% of 5Y high</div>
       </Panel>
       <Panel className="p-4">
-        <div className="flex items-start justify-between gap-3"><div><div className="text-sm font-medium text-fg">Silver</div><div className="mt-1 text-xs text-muted">Google Finance · ₹ / kg</div></div><div className="text-xs text-muted">INR</div></div>
+        <div className="flex items-start justify-between gap-3"><div><div className="text-sm font-medium text-fg">Silver</div><div className="mt-1 text-xs text-muted">Moneycontrol · ₹ / kg · Mumbai</div></div><div className="text-xs text-muted">INR</div></div>
         <div className="mt-2 text-2xl font-semibold tabular text-fg">{metals.data?.silverKg != null ? formatINR(metals.data.silverKg) : metals.isLoading ? "Loading…" : "Price unavailable"}</div>
-        <div className="mt-3 text-xs text-muted">Live reference price from Google Finance. Silver is shown per kilogram.</div>
+        <div className="mt-3 text-xs text-muted">Live Mumbai reference price from Moneycontrol. Silver is shown per kilogram.</div>
       </Panel>
     </div>
-    <p className="mt-2 text-[11px] text-subtle">Source: Google Finance market quotes. Gold and silver COMEX continuous contracts are converted from USD/troy oz to INR; Gold is shown per 10g and Silver per kg. Prices are reference market prices, not jewellery retail prices{metals.data?.asOf ? ` · ${metals.data.asOf}` : ""}.</p>
+    <p className="mt-2 text-[11px] text-subtle">Source: Moneycontrol Mumbai rates. Gold uses the 24-carat rate per 10g and Silver uses the standard rate per kg. Prices are reference market/retail rates and may differ from jewellery or dealer quotes{metals.data?.asOf ? ` · ${metals.data.asOf}` : ""}.</p>
   </Section>;
 }
