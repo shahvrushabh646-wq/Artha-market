@@ -15,40 +15,51 @@ type GoogleFinanceResult = { price: number | null; asOf: string | null };
 type YahooChartResponse = { chart?: { result?: Array<{ timestamp?: number[]; indicators?: { quote?: Array<{ high?: Array<number | null> }> } }> } };
 const TROY_OUNCE_GRAMS = 31.1034768;
 
+function decodeGoogleText(value: string): string {
+  return value
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 async function getGoogleFinancePrice(ticker: string): Promise<GoogleFinanceResult> {
   try {
-    const res = await fetch(`https://www.google.com/finance/quote/${encodeURIComponent(ticker)}?hl=en`, { headers: { Accept: "text/html" }, cache: "no-store" });
+    const res = await fetch(`https://www.google.com/finance/quote/${encodeURIComponent(ticker)}?hl=en`, {
+      headers: { Accept: "text/html,application/xhtml+xml" },
+      cache: "no-store",
+    });
     if (!res.ok) return { price: null, asOf: null };
     const html = await res.text();
+    const text = decodeGoogleText(html);
 
-    // Google Finance changes its markup periodically. Match the quote using the
-    // instrument's own title/label first; never use a generic "price" JSON field,
-    // because that can capture an unrelated price elsewhere on the page.
-    const patterns = ticker === "USD-INR"
-      ? [
-          /United States Dollar\s*\/\s*Indian Rupee[\s\S]{0,2500}?>([0-9]+(?:\.[0-9]+)?)<\//i,
-          /United States Dollar\s*\/\s*Indian Rupee[\s\S]{0,2500}?([0-9]+\.[0-9]+)/i,
-        ]
-      : [
-          /Gold Continuous Contract[\s\S]{0,2500}?\$([0-9,]+(?:\.[0-9]+)?)/i,
-          /Silver[\s\S]{0,1200}?\$([0-9,]+(?:\.[0-9]+)?)/i,
-        ];
+    // Google Finance currently renders the quote as readable page text:
+    // Gold Continuous Contract $4,521.30, Silver Continuous Contract $67.81,
+    // and USD/INR as United States Dollar / Indian Rupee 95.2108.
+    const pattern = ticker === "USD-INR"
+      ? /United States Dollar\s*\/\s*Indian Rupee\s+([0-9]{1,4}(?:\.[0-9]+)?)/i
+      : ticker === "GCW00:COMEX"
+        ? /Gold Continuous Contract\s+\$([0-9,]+(?:\.[0-9]+)?)/i
+        : /Silver Continuous Contract\s+\$([0-9,]+(?:\.[0-9]+)?)/i;
 
-    for (const pattern of patterns) {
-      const match = html.match(pattern);
-      if (!match) continue;
-      const price = Number(match[1].replace(/,/g, ""));
-      if (Number.isFinite(price) && price > 0) return { price, asOf: new Date().toISOString() };
-    }
-    return { price: null, asOf: null };
+    const match = text.match(pattern);
+    if (!match) return { price: null, asOf: null };
+
+    const price = Number(match[1].replace(/,/g, ""));
+    if (!Number.isFinite(price) || price <= 0) return { price: null, asOf: null };
+    if (ticker === "USD-INR" && (price < 50 || price > 200)) return { price: null, asOf: null };
+
+    return { price, asOf: new Date().toISOString() };
   } catch {
     return { price: null, asOf: null };
   }
 }
 
 async function getGoogleUsdInr(): Promise<number | null> {
-  const result = await getGoogleFinancePrice("USD-INR");
-  return result.price;
+  return (await getGoogleFinancePrice("USD-INR")).price;
 }
 
 async function getGoldFiveYearHigh10g(currentGoldTozInr: number): Promise<number | null> {
@@ -75,12 +86,10 @@ const fetchPreciousMetals = createServerFn({ method: "GET" }).handler(async (): 
     getGoogleUsdInr(),
   ]);
 
-  if (goldQuote.price == null || silverQuote.price == null || usdInr == null || usdInr <= 0 || usdInr > 200) {
+  if (goldQuote.price == null || silverQuote.price == null || usdInr == null) {
     throw new Error("Google Finance gold/silver price is temporarily unavailable");
   }
 
-  // Google Finance quotes COMEX continuous contracts in USD/troy oz.
-  // Convert to the Indian units displayed by Artha.
   const goldTozInr = goldQuote.price * usdInr;
   const silverTozInr = silverQuote.price * usdInr;
   const gold10g = goldTozInr * 10 / TROY_OUNCE_GRAMS;
@@ -116,7 +125,7 @@ function Home() {
 }
 
 function PreciousMetals() {
-  const metals = useQuery({ queryKey: ["precious-metals-google-v2"], queryFn: () => fetchPreciousMetals(), staleTime: 30000, refetchInterval: 60000, refetchOnWindowFocus: true, retry: 2 });
+  const metals = useQuery({ queryKey: ["precious-metals-google-v3"], queryFn: () => fetchPreciousMetals(), staleTime: 30000, refetchInterval: 60000, refetchOnWindowFocus: true, retry: 2 });
   const formatINR = (value: number) => `₹${Math.round(value).toLocaleString("en-IN")}`;
   return <Section title="Gold & Silver" hint="Live Google Finance prices converted to Indian rupees">
     <div className="grid gap-3 sm:grid-cols-2">
