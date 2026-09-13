@@ -15,36 +15,40 @@ type QuoteResult = { price: number | null; asOf: string | null };
 type YahooChartResponse = { chart?: { result?: Array<{ indicators?: { quote?: Array<{ high?: Array<number | null> }> } }> } };
 const TROY_OUNCE_GRAMS = 31.1034768;
 
-async function apiNinjasRequest(url: string, key: string): Promise<{ price?: number; updated?: number | string } | null> {
+async function getIbjaPrices(): Promise<{ gold10g: number; silverKg: number; asOf: string | null } | null> {
   try {
-    const res = await fetch(url, { headers: { "X-Api-Key": key, Accept: "application/json" }, cache: "no-store" });
+    const res = await fetch("https://www.ibjarates.com/index.aspx", {
+      headers: { Accept: "text/html,application/xhtml+xml" },
+      cache: "no-store",
+    });
     if (!res.ok) return null;
-    const data = await res.json() as { price?: number; updated?: number | string };
-    return typeof data.price === "number" && Number.isFinite(data.price) && data.price > 0 ? data : null;
-  } catch { return null; }
-}
+    const html = await res.text();
+    const text = html
+      .replace(/<script[\\s\\S]*?<\\/script>/gi, " ")
+      .replace(/<style[\\s\\S]*?<\\/style>/gi, " ")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&nbsp;/gi, " ")
+      .replace(/&amp;/gi, "&")
+      .replace(/\\s+/g, " ")
+      .trim();
 
-async function getApiNinjasPrice(kind: "gold999" | "silver999"): Promise<QuoteResult> {
-  const key = process.env.API_NINJAS_KEY?.trim();
-  if (!key) return { price: null, asOf: null };
-  const name = kind === "gold999" ? "gold" : "silver";
-  const unit = kind === "gold999" ? "g" : "kg";
+    // IBJA publishes Gold 999 per 10g and Silver 999 per 1kg.
+    // Prefer PM (closing) when available; otherwise use AM (opening).
+    const goldMatch = text.match(/Gold\\s*999\\s*([0-9,]+)\\s*([0-9,]+)?/i);
+    const silverMatch = text.match(/Silver\\s*999\\s*([0-9,]+)\\s*([0-9,]+)?/i);
+    const parse = (v?: string) => v ? Number(v.replace(/,/g, "")) : NaN;
+    const goldAm = parse(goldMatch?.[1]);
+    const goldPm = parse(goldMatch?.[2]);
+    const silverAm = parse(silverMatch?.[1]);
+    const silverPm = parse(silverMatch?.[2]);
+    const gold10g = Number.isFinite(goldPm) && goldPm > 0 ? goldPm : goldAm;
+    const silverKg = Number.isFinite(silverPm) && silverPm > 0 ? silverPm : silverAm;
+    if (!Number.isFinite(gold10g) || !Number.isFinite(silverKg) || gold10g <= 0 || silverKg <= 0) return null;
 
-  // Primary: Commodity Price API with INR/unit conversion, as documented by API Ninjas.
-  const converted = await apiNinjasRequest(`https://api.api-ninjas.com/v1/commodityprice?name=${name}&currency=INR&unit=${unit}`, key);
-  if (converted?.price != null) {
-    const price = kind === "gold999" ? converted.price * 10 : converted.price;
-    if (Number.isFinite(price) && price > 0) return { price, asOf: converted.updated != null ? new Date(typeof converted.updated === "number" ? converted.updated * 1000 : converted.updated).toISOString() : new Date().toISOString() };
+    return { gold10g, silverKg, asOf: new Date().toISOString() };
+  } catch {
+    return null;
   }
-
-  // Gold-only fallback: dedicated Gold Price API, also supports INR and grams.
-  if (kind === "gold999") {
-    const gold = await apiNinjasRequest("https://api.api-ninjas.com/v1/goldprice?currency=INR&unit=g", key);
-    if (gold?.price != null && Number.isFinite(gold.price) && gold.price > 0) {
-      return { price: gold.price * 10, asOf: gold.updated != null ? new Date(typeof gold.updated === "number" ? gold.updated * 1000 : gold.updated).toISOString() : new Date().toISOString() };
-    }
-  }
-  return { price: null, asOf: null };
 }
 
 async function getGoldFiveYearHigh10g(currentGoldTozInr: number): Promise<number | null> {
@@ -62,17 +66,16 @@ async function getGoldFiveYearHigh10g(currentGoldTozInr: number): Promise<number
 }
 
 const fetchPreciousMetals = createServerFn({ method: "GET" }).handler(async (): Promise<MetalPrices> => {
-  const [goldQuote, silverQuote] = await Promise.all([getApiNinjasPrice("gold999"), getApiNinjasPrice("silver999")]);
-  if (goldQuote.price == null || silverQuote.price == null) throw new Error("API Ninjas precious metal price is temporarily unavailable");
-  const gold10g = goldQuote.price;
-  const silverKg = silverQuote.price;
+  const quote = await getIbjaPrices();
+  if (!quote) throw new Error("IBJA Gold/Silver rate is temporarily unavailable");
+  const { gold10g, silverKg } = quote;
   const currentGoldTozInr = gold10g * TROY_OUNCE_GRAMS / 10;
   const gold5yHigh10g = await getGoldFiveYearHigh10g(currentGoldTozInr);
   const gold75Price10g = gold5yHigh10g != null ? Math.round(gold5yHigh10g * 0.25 * 100) / 100 : null;
   const gold85Price10g = gold5yHigh10g != null ? Math.round(gold5yHigh10g * 0.15 * 100) / 100 : null;
   const gold95Price10g = gold5yHigh10g != null ? Math.round(gold5yHigh10g * 0.05 * 100) / 100 : null;
   const goldSignal = gold75Price10g != null ? (gold10g <= gold75Price10g ? "BUY" : "WAIT") : null;
-  return { gold10g, silverKg, gold5yHigh10g, gold75Price10g, gold85Price10g, gold95Price10g, goldSignal, asOf: goldQuote.asOf ?? silverQuote.asOf, source: "API Ninjas commodity reference" };
+  return { gold10g, silverKg, gold5yHigh10g, gold75Price10g, gold85Price10g, gold95Price10g, goldSignal, asOf: quote.asOf, source: "IBJA benchmark rate" };
 });
 
 function Home() {
@@ -89,12 +92,12 @@ function Home() {
 }
 
 function PreciousMetals() {
-  const metals = useQuery({ queryKey: ["precious-metals-api-ninjas-v2"], queryFn: () => fetchPreciousMetals(), staleTime: 30000, refetchInterval: 60000, refetchOnWindowFocus: true, retry: 2 });
+  const metals = useQuery({ queryKey: ["precious-metals-ibja-v1"], queryFn: () => fetchPreciousMetals(), staleTime: 30000, refetchInterval: 60000, refetchOnWindowFocus: true, retry: 2 });
   const formatINR = (value: number) => `₹${Math.round(value).toLocaleString("en-IN")}`;
-  return <Section title="Gold & Silver" hint="API Ninjas commodity prices">
+  return <Section title="Gold & Silver" hint="IBJA benchmark bullion rates">
     <div className="grid gap-3 sm:grid-cols-2">
-      <Panel className="p-4"><div className="flex items-start justify-between gap-3"><div><div className="text-sm font-medium text-fg">Gold 999</div><div className="mt-1 text-xs text-muted">API Ninjas · ₹ / 10g · 999 fine</div></div><div className="text-xs text-muted">INR</div></div><div className="mt-2 text-2xl font-semibold tabular text-fg">{metals.data?.gold10g != null ? formatINR(metals.data.gold10g) : metals.isLoading ? "Loading…" : "Price unavailable"}</div><div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">{[{ label: "75% discount", value: metals.data?.gold75Price10g }, { label: "85% discount", value: metals.data?.gold85Price10g }, { label: "95% discount", value: metals.data?.gold95Price10g }, { label: "Rule", value: null }].map((row) => <div key={row.label} className="rounded-lg bg-surface-2 p-2"><div className="text-xs text-muted">{row.label}</div><div className="mt-1 tabular text-sm text-fg">{row.value != null ? formatINR(row.value) : metals.data?.goldSignal ?? "—"}</div></div>)}</div><div className="mt-3 text-xs text-muted">5Y high reference: {metals.data?.gold5yHigh10g != null ? formatINR(metals.data.gold5yHigh10g) : "—"} · Rule: BUY when current price ≤ 25% of 5Y high</div></Panel>
-      <Panel className="p-4"><div className="flex items-start justify-between gap-3"><div><div className="text-sm font-medium text-fg">Silver 999</div><div className="mt-1 text-xs text-muted">API Ninjas · ₹ / kg · 999 fine</div></div><div className="text-xs text-muted">INR</div></div><div className="mt-2 text-2xl font-semibold tabular text-fg">{metals.data?.silverKg != null ? formatINR(metals.data.silverKg) : metals.isLoading ? "Loading…" : "Price unavailable"}</div><div className="mt-3 text-xs text-muted">Commodity silver reference price. Silver is shown per kilogram.</div></Panel>
-    </div><p className="mt-2 text-[11px] text-subtle">Source: API Ninjas commodity reference. Prices are requested in INR; gold is displayed per 10g and silver per kg. Data is refreshed by the app every 60 seconds.</p>
+      <Panel className="p-4"><div className="flex items-start justify-between gap-3"><div><div className="text-sm font-medium text-fg">Gold 999</div><div className="mt-1 text-xs text-muted">IBJA · ₹ / 10g · 999 fine</div></div><div className="text-xs text-muted">INR</div></div><div className="mt-2 text-2xl font-semibold tabular text-fg">{metals.data?.gold10g != null ? formatINR(metals.data.gold10g) : metals.isLoading ? "Loading…" : "Price unavailable"}</div><div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">{[{ label: "75% discount", value: metals.data?.gold75Price10g }, { label: "85% discount", value: metals.data?.gold85Price10g }, { label: "95% discount", value: metals.data?.gold95Price10g }, { label: "Rule", value: null }].map((row) => <div key={row.label} className="rounded-lg bg-surface-2 p-2"><div className="text-xs text-muted">{row.label}</div><div className="mt-1 tabular text-sm text-fg">{row.value != null ? formatINR(row.value) : metals.data?.goldSignal ?? "—"}</div></div>)}</div><div className="mt-3 text-xs text-muted">5Y high reference: {metals.data?.gold5yHigh10g != null ? formatINR(metals.data.gold5yHigh10g) : "—"} · Rule: BUY when current price ≤ 25% of 5Y high</div></Panel>
+      <Panel className="p-4"><div className="flex items-start justify-between gap-3"><div><div className="text-sm font-medium text-fg">Silver 999</div><div className="mt-1 text-xs text-muted">IBJA · ₹ / kg · 999 fine</div></div><div className="text-xs text-muted">INR</div></div><div className="mt-2 text-2xl font-semibold tabular text-fg">{metals.data?.silverKg != null ? formatINR(metals.data.silverKg) : metals.isLoading ? "Loading…" : "Price unavailable"}</div><div className="mt-3 text-xs text-muted">IBJA Silver 999 benchmark price. Silver is shown per kilogram.</div></Panel>
+    </div><p className="mt-2 text-[11px] text-subtle">Source: IBJA benchmark Gold 999 and Silver 999 rates. Rates are exclusive of GST/VAT and making charges. Data is refreshed by the app every 60 seconds.</p>
   </Section>;
 }
