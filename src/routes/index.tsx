@@ -24,38 +24,58 @@ function decodeAibText(value: string): string {
     .replace(/&amp;/gi, "&")
     .replace(/&#8377;/g, "₹")
     .replace(/&#x20b9;/gi, "₹")
+    .replace(/\\u20b9/gi, "₹")
     .replace(/\s+/g, " ")
     .trim();
 }
 
 async function getAibPrice(kind: "gold999" | "silver999"): Promise<AibResult> {
-  try {
-    const url = "https://allindiabullion.com/gold-rate/maharashtra/mumbai";
-    const res = await fetch(`${url}?artha=${Date.now()}`, {
-      headers: {
-        Accept: "text/html,application/xhtml+xml",
-        "User-Agent": "Mozilla/5.0 (compatible; ArthaMarket/1.0)",
-      },
-      cache: "no-store",
-    });
-    if (!res.ok) return { price: null, asOf: null };
+  const urls = [
+    "https://allindiabullion.com/gold-rate/maharashtra/mumbai",
+    "https://allindiabullion.com/gold-rate/maharashtra/mumbai/",
+    "https://allindiabullion.com/charts",
+    "https://allindiabullion.com/",
+  ];
 
-    const text = decodeAibText(await res.text());
-    const pattern = kind === "gold999"
-      ? /RETAIL\s+999\s+GOLD\s+₹?\s*([0-9,]+(?:\.[0-9]+)?)/i
-      : /RETAIL\s+999\s+SILVER\s+₹?\s*([0-9,]+(?:\.[0-9]+)?)/i;
-    const match = text.match(pattern);
-    if (!match) return { price: null, asOf: null };
+  for (const url of urls) {
+    try {
+      const res = await fetch(url, {
+        headers: {
+          Accept: "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8",
+          "Accept-Language": "en-IN,en;q=0.9",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36",
+          Referer: "https://allindiabullion.com/",
+        },
+        cache: "no-store",
+      });
+      if (!res.ok) continue;
 
-    const price = Number(match[1].replace(/,/g, ""));
-    if (!Number.isFinite(price) || price <= 0) return { price: null, asOf: null };
-    if (kind === "gold999" && (price < 50000 || price > 500000)) return { price: null, asOf: null };
-    if (kind === "silver999" && (price < 50000 || price > 1000000)) return { price: null, asOf: null };
+      const text = decodeAibText(await res.text());
+      const patterns = kind === "gold999"
+        ? [
+            /RETAIL\s+999\s+GOLD\s+₹?\s*([0-9,]+(?:\.[0-9]+)?)/i,
+            /Mumbai\s+Gold\s+Retail\s+999\s*₹?\s*([0-9,]+(?:\.[0-9]+)?)/i,
+          ]
+        : [
+            /RETAIL\s+999\s+SILVER\s+₹?\s*([0-9,]+(?:\.[0-9]+)?)/i,
+            /Mumbai\s+Silver\s+Retail\s+999\s*₹?\s*([0-9,]+(?:\.[0-9]+)?)/i,
+          ];
 
-    return { price, asOf: new Date().toISOString() };
-  } catch {
-    return { price: null, asOf: null };
+      for (const pattern of patterns) {
+        const match = text.match(pattern);
+        if (!match) continue;
+        const price = Number(match[1].replace(/,/g, ""));
+        if (!Number.isFinite(price) || price <= 0) continue;
+        if (kind === "gold999" && (price < 50000 || price > 500000)) continue;
+        if (kind === "silver999" && (price < 50000 || price > 1000000)) continue;
+        return { price, asOf: new Date().toISOString() };
+      }
+    } catch {
+      // Try the next AIB endpoint.
+    }
   }
+
+  return { price: null, asOf: null };
 }
 
 async function getGoldFiveYearHigh10g(currentGoldTozInr: number): Promise<number | null> {
@@ -119,7 +139,7 @@ function Home() {
 }
 
 function PreciousMetals() {
-  const metals = useQuery({ queryKey: ["precious-metals-aib-999-v1"], queryFn: () => fetchPreciousMetals(), staleTime: 30000, refetchInterval: 60000, refetchOnWindowFocus: true, retry: 2 });
+  const metals = useQuery({ queryKey: ["precious-metals-aib-999-v2"], queryFn: () => fetchPreciousMetals(), staleTime: 30000, refetchInterval: 60000, refetchOnWindowFocus: true, retry: 2 });
   const formatINR = (value: number) => `₹${Math.round(value).toLocaleString("en-IN")}`;
   return <Section title="Gold & Silver" hint="Live AIB 999 bullion prices for Mumbai">
     <div className="grid gap-3 sm:grid-cols-2">
