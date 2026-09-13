@@ -29,17 +29,16 @@ function decodeAibText(value: string): string {
     .trim();
 }
 
-async function getAibPrice(kind: "gold999" | "silver999"): Promise<AibResult> {
-  const urls = [
-    "https://allindiabullion.com/gold-rate/maharashtra/mumbai",
-    "https://allindiabullion.com/gold-rate/maharashtra/mumbai/",
-    "https://allindiabullion.com/charts",
-    "https://allindiabullion.com/",
+async function fetchAibText(url: string): Promise<string | null> {
+  const candidates = [
+    url,
+    `https://r.jina.ai/http://allindiabullion.com/gold-rate/maharashtra/mumbai`,
   ];
-
-  for (const url of urls) {
+  for (const candidate of candidates) {
     try {
-      const res = await fetch(url, {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
+      const res = await fetch(candidate, {
         headers: {
           Accept: "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8",
           "Accept-Language": "en-IN,en;q=0.9",
@@ -47,32 +46,43 @@ async function getAibPrice(kind: "gold999" | "silver999"): Promise<AibResult> {
           Referer: "https://allindiabullion.com/",
         },
         cache: "no-store",
+        signal: controller.signal,
       });
+      clearTimeout(timeout);
       if (!res.ok) continue;
-
-      const text = decodeAibText(await res.text());
-      const patterns = kind === "gold999"
-        ? [
-            /RETAIL\s+999\s+GOLD\s+₹?\s*([0-9,]+(?:\.[0-9]+)?)/i,
-            /Mumbai\s+Gold\s+Retail\s+999\s*₹?\s*([0-9,]+(?:\.[0-9]+)?)/i,
-          ]
-        : [
-            /RETAIL\s+999\s+SILVER\s+₹?\s*([0-9,]+(?:\.[0-9]+)?)/i,
-            /Mumbai\s+Silver\s+Retail\s+999\s*₹?\s*([0-9,]+(?:\.[0-9]+)?)/i,
-          ];
-
-      for (const pattern of patterns) {
-        const match = text.match(pattern);
-        if (!match) continue;
-        const price = Number(match[1].replace(/,/g, ""));
-        if (!Number.isFinite(price) || price <= 0) continue;
-        if (kind === "gold999" && (price < 50000 || price > 500000)) continue;
-        if (kind === "silver999" && (price < 50000 || price > 1000000)) continue;
-        return { price, asOf: new Date().toISOString() };
-      }
+      const body = await res.text();
+      if (body.length > 200) return decodeAibText(body);
     } catch {
-      // Try the next AIB endpoint.
+      // Try the next transport.
     }
+  }
+  return null;
+}
+
+async function getAibPrice(kind: "gold999" | "silver999"): Promise<AibResult> {
+  const text = await fetchAibText("https://allindiabullion.com/gold-rate/maharashtra/mumbai");
+  if (!text) return { price: null, asOf: null };
+
+  const patterns = kind === "gold999"
+    ? [
+        /RETAIL\s+999\s+GOLD\s+₹?\s*([0-9,]+(?:\.[0-9]+)?)/i,
+        /Mumbai\s+Gold\s+Retail\s+999\s*₹?\s*([0-9,]+(?:\.[0-9]+)?)/i,
+        /Gold\s+Retail\s+999\s*₹?\s*([0-9,]+(?:\.[0-9]+)?)/i,
+      ]
+    : [
+        /RETAIL\s+999\s+SILVER\s+₹?\s*([0-9,]+(?:\.[0-9]+)?)/i,
+        /Mumbai\s+Silver\s+Retail\s+999\s*₹?\s*([0-9,]+(?:\.[0-9]+)?)/i,
+        /Silver\s+Retail\s+999\s*₹?\s*([0-9,]+(?:\.[0-9]+)?)/i,
+      ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (!match) continue;
+    const price = Number(match[1].replace(/,/g, ""));
+    if (!Number.isFinite(price) || price <= 0) continue;
+    if (kind === "gold999" && (price < 50000 || price > 500000)) continue;
+    if (kind === "silver999" && (price < 50000 || price > 1000000)) continue;
+    return { price, asOf: new Date().toISOString() };
   }
 
   return { price: null, asOf: null };
@@ -139,7 +149,7 @@ function Home() {
 }
 
 function PreciousMetals() {
-  const metals = useQuery({ queryKey: ["precious-metals-aib-999-v2"], queryFn: () => fetchPreciousMetals(), staleTime: 30000, refetchInterval: 60000, refetchOnWindowFocus: true, retry: 2 });
+  const metals = useQuery({ queryKey: ["precious-metals-aib-999-v3"], queryFn: () => fetchPreciousMetals(), staleTime: 30000, refetchInterval: 60000, refetchOnWindowFocus: true, retry: 2 });
   const formatINR = (value: number) => `₹${Math.round(value).toLocaleString("en-IN")}`;
   return <Section title="Gold & Silver" hint="Live AIB 999 bullion prices for Mumbai">
     <div className="grid gap-3 sm:grid-cols-2">
