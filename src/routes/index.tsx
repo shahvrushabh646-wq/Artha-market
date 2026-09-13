@@ -11,9 +11,20 @@ import { fetchDashboard } from "@/lib/market/server";
 export const Route = createFileRoute("/")({ component: Home });
 
 type MetalPrices = { gold10g: number | null; silverKg: number | null; gold5yHigh10g: number | null; gold75Price10g: number | null; gold85Price10g: number | null; gold95Price10g: number | null; goldSignal: "BUY" | "WAIT" | null; asOf: string | null; source: string };
-type MetalsResponse = { status?: string; timestamp?: string; error_message?: string; error?: string; metals?: Record<string, unknown> };
-type YahooChartResponse = { chart?: { result?: Array<{ timestamp?: number[]; indicators?: { quote?: Array<{ high?: Array<number | null> }> } }> } };
+type MetalsResponse = { status?: string; timestamp?: string; error_message?: string; error?: string; metals?: Record<string, unknown>; rate?: Record<string, unknown>; currency?: string; unit?: string };
+type YahooChartResponse = { chart?: { result?: Array<{ indicators?: { quote?: Array<{ high?: Array<number | null> }> } }> } };
 const TROY_OUNCE_GRAMS = 31.1034768;
+
+function metalApiKey() {
+  return (process.env.METALS_DEV_API_KEY || process.env.METALS_API_KEY || process.env.METAL || "").trim();
+}
+
+async function metalsDev(url: URL): Promise<MetalsResponse> {
+  const res = await fetch(url.toString(), { headers: { Accept: "application/json" }, cache: "no-store" });
+  const raw = await res.json().catch(() => ({})) as MetalsResponse;
+  if (!res.ok || raw.status !== "success") throw new Error(raw.error_message || raw.error || `Metals.Dev HTTP ${res.status}`);
+  return raw;
+}
 
 async function getGoldFiveYearHigh10g(currentGoldTozInr: number): Promise<number | null> {
   try {
@@ -23,36 +34,48 @@ async function getGoldFiveYearHigh10g(currentGoldTozInr: number): Promise<number
     const highs = raw.chart?.result?.[0]?.indicators?.quote?.[0]?.high ?? [];
     const validHighs = highs.filter((v): v is number => typeof v === "number" && Number.isFinite(v) && v > 0);
     if (!validHighs.length) return null;
-
-    // Metal.Dev supplies the live INR gold price. Yahoo's GC=F history is used only for the
-    // 5-year reference high, then normalized to today's INR/toz using the live Metal.Dev rate.
-    const liveYahooApprox = validHighs[validHighs.length - 1];
-    if (!Number.isFinite(liveYahooApprox) || liveYahooApprox <= 0) return null;
-    const inrPerUsdToz = currentGoldTozInr / liveYahooApprox;
     const highUsdToz = Math.max(...validHighs);
-    const highInrToz = highUsdToz * inrPerUsdToz;
-    return highInrToz * 10 / TROY_OUNCE_GRAMS;
+    // Convert the historical USD/toz reference into today's INR/toz using the current
+    // Metals.Dev INR gold quote. This is a reference high for applying Artha's rule.
+    const latestYahooHigh = validHighs[validHighs.length - 1];
+    if (!latestYahooHigh) return null;
+    const inrPerUsdToz = currentGoldTozInr / latestYahooHigh;
+    return highUsdToz * inrPerUsdToz * 10 / TROY_OUNCE_GRAMS;
   } catch {
     return null;
   }
 }
 
 const fetchPreciousMetals = createServerFn({ method: "GET" }).handler(async (): Promise<MetalPrices> => {
-  const apiKey = (process.env.METAL || "").trim();
-  if (!apiKey) throw new Error("METAL API key is not configured in Vercel");
+  const apiKey = metalApiKey();
+  if (!apiKey) throw new Error("Metals.Dev API key is not configured in Vercel");
 
-  const url = new URL("https://api.metals.dev/v1/latest");
-  url.searchParams.set("api_key", apiKey);
-  url.searchParams.set("currency", "INR");
-  url.searchParams.set("unit", "toz");
+  const base = "https://api.metals.dev/v1/metal/spot";
+  const fetchSpot = async (metal: "gold" | "silver") => {
+    const url = new URL(base);
+    url.searchParams.set("api_key", apiKey);
+    url.searchParams.set("metal", metal);
+    url.searchParams.set("currency", "INR");
+    return metalsDev(url);
+  };
 
-  const res = await fetch(url.toString(), { headers: { Accept: "application/json" }, cache: "no-store" });
-  const raw = await res.json().catch(() => ({})) as MetalsResponse;
-  if (!res.ok || raw.status !== "success") throw new Error(raw.error_message || raw.error || `Metals.Dev HTTP ${res.status}`);
+  let goldRaw: MetalsResponse;
+  let silverRaw: MetalsResponse;
+  try {
+    [goldRaw, silverRaw] = await Promise.all([fetchSpot("gold"), fetchSpot("silver")]);
+  } catch {
+    // Fallback to the documented latest endpoint if either spot request fails.
+    const url = new URL("https://api.metals.dev/v1/latest");
+    url.searchParams.set("api_key", apiKey);
+    url.searchParams.set("currency", "INR");
+    url.searchParams.set("unit", "toz");
+    const latest = await metalsDev(url);
+    goldRaw = latest;
+    silverRaw = latest;
+  }
 
-  const metals = raw.metals || {};
-  const goldToz = Number(metals.gold);
-  const silverToz = Number(metals.silver);
+  const goldToz = Number(goldRaw.rate?.price ?? goldRaw.metals?.gold);
+  const silverToz = Number(silverRaw.rate?.price ?? silverRaw.metals?.silver);
   if (!Number.isFinite(goldToz) || !Number.isFinite(silverToz) || goldToz <= 0 || silverToz <= 0) throw new Error("Metals.Dev returned invalid gold/silver rates");
 
   const gold10g = goldToz * 10 / TROY_OUNCE_GRAMS;
@@ -70,7 +93,7 @@ const fetchPreciousMetals = createServerFn({ method: "GET" }).handler(async (): 
     gold85Price10g,
     gold95Price10g,
     goldSignal,
-    asOf: raw.timestamp ?? null,
+    asOf: goldRaw.timestamp ?? silverRaw.timestamp ?? null,
     source: "Metals.Dev",
   };
 });
@@ -97,7 +120,7 @@ function Home() {
 }
 
 function PreciousMetals() {
-  const metals = useQuery({ queryKey: ["precious-metals-metalsdev-v5"], queryFn: () => fetchPreciousMetals(), staleTime: 30000, refetchInterval: 60000, refetchOnWindowFocus: true, retry: 2 });
+  const metals = useQuery({ queryKey: ["precious-metals-metalsdev-v6"], queryFn: () => fetchPreciousMetals(), staleTime: 30000, refetchInterval: 60000, refetchOnWindowFocus: true, retry: 2 });
   const formatINR = (value: number) => `₹${Math.round(value).toLocaleString("en-IN")}`;
   return <Section title="Gold & Silver" hint="Live Metals.Dev prices in Indian rupees">
     <div className="grid gap-3 sm:grid-cols-2">
