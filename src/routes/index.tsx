@@ -24,18 +24,18 @@ async function getIbjaPrices(): Promise<{ gold10g: number; silverKg: number; asO
     if (!res.ok) return null;
     const html = await res.text();
     const text = html
-      .replace(/<script[\\s\\S]*?<\\/script>/gi, " ")
-      .replace(/<style[\\s\\S]*?<\\/style>/gi, " ")
+      .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style[\s\S]*?<\/style>/gi, " ")
       .replace(/<[^>]+>/g, " ")
       .replace(/&nbsp;/gi, " ")
       .replace(/&amp;/gi, "&")
-      .replace(/\\s+/g, " ")
+      .replace(/\s+/g, " ")
       .trim();
 
     // IBJA publishes Gold 999 per 10g and Silver 999 per 1kg.
     // Prefer PM (closing) when available; otherwise use AM (opening).
-    const goldMatch = text.match(/Gold\\s*999\\s*([0-9,]+)\\s*([0-9,]+)?/i);
-    const silverMatch = text.match(/Silver\\s*999\\s*([0-9,]+)\\s*([0-9,]+)?/i);
+    const goldMatch = text.match(/Gold\s*999\s*([0-9,]+)\s*([0-9,]+)?/i);
+    const silverMatch = text.match(/Silver\s*999\s*([0-9,]+)\s*([0-9,]+)?/i);
     const parse = (v?: string) => v ? Number(v.replace(/,/g, "")) : NaN;
     const goldAm = parse(goldMatch?.[1]);
     const goldPm = parse(goldMatch?.[2]);
