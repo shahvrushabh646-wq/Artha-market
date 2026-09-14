@@ -26,7 +26,12 @@ export function AppShell({ children }: { children: ReactNode }) {
       <WatchlistRuleNotifications />
       <header className="sticky top-0 z-30 border-b border-border bg-bg/92 pt-[env(safe-area-inset-top)] backdrop-blur-md">
         <div className="mx-auto flex h-14 max-w-5xl items-center justify-between gap-3 px-4">
-          <Link to="/" className="flex min-w-0 items-baseline gap-2">
+          <Link to="/" className="flex min-w-0 items-center gap-2.5">
+            <img
+              src="/nem-logo.svg"
+              alt="NEM"
+              className="size-10 shrink-0 rounded-xl object-cover ring-1 ring-border shadow-sm"
+            />
             <span className="font-display text-xl tracking-tight text-fg">{APP_NAME}</span>
             <span className="hidden text-[11px] uppercase tracking-[0.18em] text-subtle sm:inline">Desk</span>
           </Link>
