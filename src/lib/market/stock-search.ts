@@ -12,7 +12,7 @@ export const searchStocks = createServerFn({ method: "GET" })
     if (q.length < 3) return [];
 
     try {
-      const res = await fetch(`https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(q)}&quotesCount=12&newsCount=0`, {
+      const res = await fetch(`https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(q)}&quotesCount=20&newsCount=0`, {
         headers: { "User-Agent": UA, Accept: "application/json,text/plain,*/*" },
         cache: "no-store",
       });
@@ -20,18 +20,23 @@ export const searchStocks = createServerFn({ method: "GET" })
       const json = await res.json() as { quotes?: Array<Record<string, unknown>> };
       return (json.quotes ?? [])
         .filter((x) => {
-          const symbol = String(x.symbol ?? "");
-          const exchange = String(x.exchange ?? "");
-          return symbol.endsWith(".NS") || exchange === "NSI" || exchange === "NSE";
+          const symbol = String(x.symbol ?? "").toUpperCase();
+          const exchange = String(x.exchange ?? "").toUpperCase();
+          return symbol.endsWith(".NS") || symbol.endsWith(".BO") || exchange === "NSI" || exchange === "NSE" || exchange === "BSE" || exchange === "BOM";
         })
-        .map((x) => ({
-          symbol: String(x.symbol ?? "").replace(/\.NS$/i, "").toUpperCase() + ".NS",
-          name: String(x.longname ?? x.shortname ?? x.symbol ?? ""),
-          exchange: "NSE",
-        }))
-        .filter((x) => x.symbol !== ".NS" && x.name)
+        .map((x) => {
+          const rawSymbol = String(x.symbol ?? "").toUpperCase();
+          const isBse = rawSymbol.endsWith(".BO") || ["BSE", "BOM"].includes(String(x.exchange ?? "").toUpperCase());
+          const baseSymbol = rawSymbol.replace(/\.(NS|BO)$/i, "");
+          return {
+            symbol: baseSymbol + (isBse ? ".BO" : ".NS"),
+            name: String(x.longname ?? x.shortname ?? x.symbol ?? ""),
+            exchange: isBse ? "BSE" : "NSE",
+          };
+        })
+        .filter((x) => x.symbol !== ".NS" && x.symbol !== ".BO" && x.name)
         .filter((x, i, a) => a.findIndex((y) => y.symbol === x.symbol) === i)
-        .slice(0, 8);
+        .slice(0, 12);
     } catch {
       return [];
     }
