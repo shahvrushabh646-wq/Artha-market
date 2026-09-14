@@ -15,6 +15,8 @@ import { useDesk } from "@/lib/store";
 
 export const Route = createFileRoute("/watchlist")({ component: WatchPage });
 
+type WatchFilter = "all" | "normal" | "penny";
+
 function WatchPage() {
   const watchlist = useDesk((s) => s.watchlist);
   const addWatch = useDesk((s) => s.addWatch);
@@ -23,6 +25,7 @@ function WatchPage() {
   const [searchQ, setSearchQ] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [showDailyAlert, setShowDailyAlert] = useState(false);
+  const [watchFilter, setWatchFilter] = useState<WatchFilter>("all");
   const searchBox = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -58,9 +61,18 @@ function WatchPage() {
       const s20 = lastValid(sma(closes,20)); const s50 = lastValid(sma(closes,50)); const s200 = lastValid(sma(closes,200));
       const r = lastValid(rsi(closes,14)); const hl1 = periodHighLow(h?.bars1y ?? []); const hl5 = periodHighLow(h?.bars5y ?? []);
       const val = customValuation(hl5.high, q?.price ?? null);
-      return { symbol, q, s20, s50, s200, r, hl1, signal: val?.signal ?? null };
+      const price = q?.price ?? null;
+      const high5y = hl5.high;
+      const dropFrom5y = price != null && high5y != null && high5y > 0 ? ((high5y - price) / high5y) * 100 : null;
+      return { symbol, q, s20, s50, s200, r, hl1, hl5, val, dropFrom5y, signal: val?.signal ?? null };
     });
   }, [pack.data, watchlist]);
+
+  const filteredRows = useMemo(() => {
+    if (watchFilter === "all") return rows;
+    const requiredDrop = watchFilter === "normal" ? 75 : 90;
+    return rows.filter((row) => row.dropFrom5y != null && row.dropFrom5y >= requiredDrop);
+  }, [rows, watchFilter]);
 
   const triggered = rows.filter((row) => row.signal);
 
@@ -95,8 +107,22 @@ function WatchPage() {
           </Panel>
         </div>
       )}
-      <h1 className="font-display text-3xl tracking-tight">Watchlist</h1>
-      <p className="mt-1 text-sm text-muted">Live price, 52-week range, RSI and the 25%-of-high rule.</p>
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="font-display text-3xl tracking-tight">Watchlist</h1>
+          <p className="mt-1 text-sm text-muted">Live price, 52-week range, RSI and the 25%-of-high rule.</p>
+        </div>
+        <select
+          value={watchFilter}
+          onChange={(e) => setWatchFilter(e.target.value as WatchFilter)}
+          className="h-10 shrink-0 rounded-md border border-border bg-surface-2 px-3 text-sm text-fg outline-none"
+          aria-label="Watchlist stock type"
+        >
+          <option value="all">All Stocks</option>
+          <option value="normal">Normal Stock · 75% Rule</option>
+          <option value="penny">Penny Stock · 90% Rule</option>
+        </select>
+      </div>
       <div ref={searchBox} className="relative mt-5">
         <form className="flex gap-2" onSubmit={(e) => {
           e.preventDefault();
@@ -135,7 +161,7 @@ function WatchPage() {
         )}
       </div>
       <div className="mt-5 space-y-2">
-        {rows.length === 0 ? <Empty title="Nothing on the list" body="Search any NSE stock by typing at least 3 letters." /> : rows.map((row) => (
+        {filteredRows.length === 0 ? <Empty title={rows.length === 0 ? "Nothing on the list" : "No stocks match this rule"} body={rows.length === 0 ? "Search any NSE stock by typing at least 3 letters." : watchFilter === "normal" ? "No watchlist stock is currently 75% or more below its 5-year high." : "No watchlist stock is currently 90% or more below its 5-year high."} /> : filteredRows.map((row) => (
           <Panel key={row.symbol} className="p-3">
             <div className="flex items-start justify-between gap-3"><Link to="/stock" search={{ symbol: row.symbol, period: "1Y" }} className="min-w-0"><div className="font-medium text-fg">{displaySymbol(row.symbol)}</div><div className="truncate text-xs text-muted">{row.q?.name ?? row.symbol}</div></Link><div className="text-right"><div className="tabular text-fg">{fmtCurrency(row.q?.price ?? null)}</div><Signed value={row.q?.changePct ?? null} as="percent" className="text-xs" /></div></div>
             <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-muted"><span>52W H <span className="tabular text-fg">{fmtCurrency(row.hl1.high ?? row.q?.high52w ?? null)}</span></span><span>52W L <span className="tabular text-fg">{fmtCurrency(row.hl1.low ?? row.q?.low52w ?? null)}</span></span><span>RSI <span className="tabular text-fg">{fmtNumber(row.r)}</span></span><span>SMA20 <span className="tabular text-fg">{fmtCurrency(row.s20)}</span></span><span>SMA50 <span className="tabular text-fg">{fmtCurrency(row.s50)}</span></span><span>SMA200 <span className="tabular text-fg">{fmtCurrency(row.s200)}</span></span></div>
