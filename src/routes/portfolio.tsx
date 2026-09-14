@@ -1,264 +1,70 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { RefreshCw, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Empty, Panel, Section, Stat } from "@/components/widgets";
 import { Signed } from "@/components/price";
-import { displaySymbol, normalizeSymbol } from "@/lib/market/config";
-import { fmtCurrency, fmtPercent } from "@/lib/market/math";
+import { displaySymbol } from "@/lib/market/config";
+import { fmtCurrency } from "@/lib/market/math";
 import { fetchQuotes } from "@/lib/market/server";
-import { useDesk, type Holding } from "@/lib/store";
+import { getAngelStatus, getPortfolioTransactions, importPortfolioTransactions, syncAngelPortfolio } from "@/lib/market/angel-portfolio";
 
 export const Route = createFileRoute("/portfolio")({ component: PortfolioPage });
 
+type Tx = { id:string; broker:string; brokerTradeId:string|null; symbol:string; exchange:string; company:string; side:"BUY"|"SELL"; quantity:number; price:number; tradeDate:string; charges:number; source:string };
+type HoldingRow = { symbol:string; exchange:string; qty:number; avg:number; invested:number; soldQty:number; boughtQty:number; realized:number };
+
 function PortfolioPage() {
-  const holdings = useDesk((s) => s.holdings);
-  const addHolding = useDesk((s) => s.addHolding);
-  const updateHolding = useDesk((s) => s.updateHolding);
-  const deleteHolding = useDesk((s) => s.deleteHolding);
-  const symbols = holdings.map((h) => h.symbol);
-  const quotes = useQuery({
-    queryKey: ["quotes", symbols],
-    queryFn: () => fetchQuotes({ data: { symbols } }),
-    enabled: symbols.length > 0,
-    refetchInterval: 60_000,
-  });
-  const bySym = new Map((quotes.data ?? []).map((q) => [q.symbol, q]));
+  const qc=useQueryClient();
+  const [tab,setTab]=useState<"holdings"|"sold"|"history">("holdings");
+  const [syncing,setSyncing]=useState(false);
+  const fileRef=useRef<HTMLInputElement>(null);
+  const status=useQuery({queryKey:["angel-status"],queryFn:()=>getAngelStatus({data:undefined}),staleTime:60000});
+  const txQuery=useQuery({queryKey:["portfolio-transactions"],queryFn:()=>getPortfolioTransactions({data:undefined}),refetchInterval:60000});
+  const transactions=(txQuery.data??[]) as Tx[];
+  const symbols=[...new Set(transactions.map(t=>t.symbol))];
+  const quotes=useQuery({queryKey:["portfolio-quotes",symbols],queryFn:()=>fetchQuotes({data:{symbols}}),enabled:symbols.length>0,refetchInterval:60000});
+  const quoteMap=new Map((quotes.data??[]).map(q=>[q.symbol,q]));
+  const holdings=useMemo(()=>buildHoldings(transactions),[transactions]);
+  const holdingRows=holdings.filter(h=>h.qty>0.000001);
+  const sold=transactions.filter(t=>t.side==="SELL");
+  const totalInvested=holdingRows.reduce((s,h)=>s+h.invested,0);
+  const currentValue=holdingRows.reduce((s,h)=>s+h.qty*(quoteMap.get(h.symbol)?.price??h.avg),0);
+  const unrealized=currentValue-totalInvested;
+  const realized=holdings.reduce((s,h)=>s+h.realized,0);
+  const totalPl=unrealized+realized;
+  const returnPct=totalInvested?(totalPl/totalInvested)*100:null;
 
-  const rows = holdings.map((h) => {
-    const q = bySym.get(h.symbol);
-    const invested = h.quantity * h.buyPrice;
-    const price = q?.price ?? null;
-    const current = price != null ? h.quantity * price : null;
-    const pl = current != null ? current - invested : null;
-    const plPct = pl != null && invested ? (pl / invested) * 100 : null;
-    return { h, invested, price, current, pl, plPct, name: q?.name ?? h.company };
-  });
+  async function sync(){
+    setSyncing(true);
+    try{const result=await syncAngelPortfolio({data:undefined});toast(`Angel One synced · ${result.inserted} new trades`);await qc.invalidateQueries({queryKey:["portfolio-transactions"]});}
+    catch(err){toast(err instanceof Error?err.message:"Angel One sync failed");}
+    finally{setSyncing(false);}
+  }
+  async function importCsv(file:File){
+    const parsed=parseCsv(await file.text());
+    if(!parsed.length){toast("No BUY/SELL rows found. Use Angel One trade-history CSV.");return;}
+    try{const result=await importPortfolioTransactions({data:{transactions:parsed}});toast(`Imported ${result.inserted} historical trades`);await qc.invalidateQueries({queryKey:["portfolio-transactions"]});}
+    catch(err){toast(err instanceof Error?err.message:"Import failed");}
+  }
 
-  const totals = rows.reduce(
-    (acc, r) => {
-      acc.invested += r.invested;
-      if (r.current != null) acc.current += r.current;
-      return acc;
-    },
-    { invested: 0, current: 0 },
-  );
-  const totalPl = rows.some((r) => r.current != null) ? totals.current - totals.invested : null;
-  const totalPct = totalPl != null && totals.invested ? (totalPl / totals.invested) * 100 : null;
-  const ranked = rows.filter((r) => r.plPct != null);
-  const best = ranked.reduce<(typeof rows)[0] | null>((a, r) => (!a || (r.plPct ?? 0) > (a.plPct ?? 0) ? r : a), null);
-  const worst = ranked.reduce<(typeof rows)[0] | null>((a, r) => (!a || (r.plPct ?? 0) < (a.plPct ?? 0) ? r : a), null);
+  return <div>
+    <div className="flex items-start justify-between gap-3"><div><h1 className="font-display text-3xl tracking-tight">Portfolio</h1><p className="mt-1 text-sm text-muted">Holdings, sold shares and complete transaction history.</p></div><Button variant="secondary" size="sm" className="h-10" onClick={sync} disabled={syncing||!status.data?.configured} title={!status.data?.configured?"Configure Angel One server credentials first":"Sync Angel One"}><RefreshCw className={`mr-2 size-4 ${syncing?"animate-spin":""}`}/>Sync</Button></div>
+    <div className="mt-4 grid grid-cols-2 gap-2"><Stat label="Invested" value={fmtCurrency(totalInvested)}/><Stat label="Current" value={fmtCurrency(currentValue)}/><Stat label="Total P/L" value={<Signed value={totalPl} as="currency" className="text-base"/>}/><Stat label="Return" value={<Signed value={returnPct} as="percent" className="text-base"/>}/></div>
+    <div className="mt-4 grid grid-cols-3 gap-1 rounded-xl bg-surface-2 p-1">{([['holdings',`Holdings (${holdingRows.length})`],['sold',`Sold (${sold.length})`],['history',`History (${transactions.length})`]] as const).map(([value,label])=><button key={value} type="button" onClick={()=>setTab(value)} className={`rounded-lg px-2 py-2.5 text-xs font-medium ${tab===value?"bg-bg text-fg shadow-sm":"text-muted"}`}>{label}</button>)}</div>
 
-  const [open, setOpen] = useState(false);
-  const [edit, setEdit] = useState<Holding | null>(null);
+    {tab==="holdings"?<Section title="Current Holdings" hint="Calculated from BUY minus SELL transactions">{holdingRows.length===0?<Empty title="No holdings yet" body="Connect Angel One or import your trade-history CSV."/>:<div className="space-y-2">{holdingRows.map(h=>{const current=quoteMap.get(h.symbol)?.price??h.avg;const value=h.qty*current;const pl=value-h.invested;return <Panel key={`${h.exchange}:${h.symbol}`} className="p-3"><div className="flex items-start justify-between gap-3"><Link to="/stock" search={{symbol:h.symbol,period:"1Y"}} className="min-w-0"><div className="font-medium">{displaySymbol(h.symbol)}</div><div className="text-xs text-muted">{h.exchange}</div></Link><Signed value={h.invested?(pl/h.invested)*100:null} as="percent"/></div><div className="mt-3 grid grid-cols-2 gap-2 text-xs text-muted sm:grid-cols-4"><span>Qty <b className="tabular text-fg">{trim(h.qty)}</b></span><span>Avg <b className="tabular text-fg">{fmtCurrency(h.avg)}</b></span><span>Current <b className="tabular text-fg">{fmtCurrency(current)}</b></span><span>P/L <Signed value={pl} as="currency" className="text-xs"/></span></div></Panel>})}</div>}</Section>:null}
+    {tab==="sold"?<Section title="Sold" hint="Actual SELL trades, newest first">{sold.length===0?<Empty title="No sold shares yet" body="Your Angel One SELL trades will appear here after sync."/>:<div className="space-y-2">{sold.map(t=><TransactionCard key={t.id} tx={t}/>)}</div>}</Section>:null}
+    {tab==="history"?<Section title="Transaction History" hint="BUY + SELL, date-wise">{transactions.length===0?<Empty title="No transactions" body="Sync Angel One or import history."/>:<div className="space-y-2">{transactions.map(t=><TransactionCard key={t.id} tx={t}/>)}</div>}</Section>:null}
 
-  return (
-    <div>
-      <h1 className="font-display text-3xl tracking-tight">Portfolio</h1>
-      <p className="mt-1 text-sm text-muted">Holdings stay on this phone. Nothing is uploaded.</p>
-
-      <div className="mt-5 grid grid-cols-2 gap-2">
-        <Stat label="Invested" value={fmtCurrency(totals.invested)} />
-        <Stat label="Current" value={fmtCurrency(rows.length ? totals.current : null)} />
-        <Stat label="P/L" value={<Signed value={totalPl} as="currency" className="text-base" />} />
-        <Stat label="Return" value={<Signed value={totalPct} as="percent" className="text-base" />} />
-      </div>
-
-      <div className="mt-4">
-        <Button className="w-full" onClick={() => setOpen((v) => !v)}>
-          {open ? "Close form" : "Add holding"}
-        </Button>
-      </div>
-      {open ? (
-        <HoldingForm
-          onSubmit={(h) => {
-            try {
-              addHolding(h);
-              setOpen(false);
-              toast(`Added ${displaySymbol(h.symbol)}`);
-            } catch (err) {
-              toast(err instanceof Error ? err.message : "Could not add");
-            }
-          }}
-        />
-      ) : null}
-
-      <Section title="Holdings">
-        {rows.length === 0 ? (
-          <Empty title="No holdings yet" body="Add a buy — quantity and price must both be greater than zero." />
-        ) : (
-          <div className="space-y-2">
-            {rows.map((r) => (
-              <Panel key={r.h.id} className="p-3">
-                <div className="flex items-start justify-between gap-3">
-                  <Link
-                    to="/stock"
-                    search={{ symbol: r.h.symbol, period: "1Y" }}
-                    className="min-w-0"
-                  >
-                    <div className="font-medium text-fg">{displaySymbol(r.h.symbol)}</div>
-                    <div className="truncate text-xs text-muted">{r.name}</div>
-                  </Link>
-                  <Signed value={r.plPct} as="percent" />
-                </div>
-                <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-muted sm:grid-cols-4">
-                  <span>
-                    Qty <span className="tabular text-fg">{r.h.quantity}</span>
-                  </span>
-                  <span>
-                    Avg <span className="tabular text-fg">{fmtCurrency(r.h.buyPrice)}</span>
-                  </span>
-                  <span>
-                    Last <span className="tabular text-fg">{fmtCurrency(r.price)}</span>
-                  </span>
-                  <span>
-                    P/L <Signed value={r.pl} as="currency" className="text-xs" />
-                  </span>
-                </div>
-                <div className="mt-3 flex gap-2">
-                  <Button variant="secondary" size="sm" className="h-10 flex-1" onClick={() => setEdit(r.h)}>
-                    Edit
-                  </Button>
-                  <Button
-                    variant="danger"
-                    size="sm"
-                    className="h-10 flex-1"
-                    onClick={() => {
-                      deleteHolding(r.h.id);
-                      toast("Holding removed");
-                    }}
-                  >
-                    Delete
-                  </Button>
-                </div>
-              </Panel>
-            ))}
-          </div>
-        )}
-      </Section>
-
-      {best && worst && best.h.id !== worst.h.id ? (
-        <div className="mt-4 grid gap-2 sm:grid-cols-2">
-          <Panel>
-            <div className="text-[11px] uppercase tracking-[0.14em] text-up">Best</div>
-            <div className="mt-1 text-sm text-fg">
-              {displaySymbol(best.h.symbol)} · <Signed value={best.plPct} as="percent" />
-            </div>
-          </Panel>
-          <Panel>
-            <div className="text-[11px] uppercase tracking-[0.14em] text-down">Worst</div>
-            <div className="mt-1 text-sm text-fg">
-              {displaySymbol(worst.h.symbol)} · <Signed value={worst.plPct} as="percent" />
-            </div>
-          </Panel>
-        </div>
-      ) : null}
-
-      {rows.length > 0 ? (
-        <Section title="Allocation" hint="By amount invested">
-          <Panel className="space-y-3">
-            {rows.map((r) => {
-              const pct = totals.invested ? (r.invested / totals.invested) * 100 : 0;
-              return (
-                <div key={r.h.id}>
-                  <div className="mb-1 flex justify-between text-xs">
-                    <span className="text-fg">{displaySymbol(r.h.symbol)}</span>
-                    <span className="tabular text-muted">{pct.toFixed(1)}%</span>
-                  </div>
-                  <div className="h-1.5 overflow-hidden rounded-full bg-surface-2">
-                    <div className="h-full rounded-full bg-accent" style={{ width: `${pct}%` }} />
-                  </div>
-                </div>
-              );
-            })}
-          </Panel>
-        </Section>
-      ) : null}
-
-      {edit ? (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-bg/70 p-4 sm:items-center">
-          <Panel className="w-full max-w-md p-4">
-            <h2 className="font-display text-xl">Edit {displaySymbol(edit.symbol)}</h2>
-            <HoldingForm
-              initial={edit}
-              submitLabel="Save"
-              onSubmit={(h) => {
-                try {
-                  updateHolding(edit.id, {
-                    quantity: h.quantity,
-                    buyPrice: h.buyPrice,
-                    buyDate: h.buyDate,
-                    notes: h.notes,
-                    company: h.company,
-                  });
-                  setEdit(null);
-                  toast("Holding updated");
-                } catch (err) {
-                  toast(err instanceof Error ? err.message : "Could not save");
-                }
-              }}
-            />
-            <Button variant="ghost" className="mt-2 w-full" onClick={() => setEdit(null)}>
-              Cancel
-            </Button>
-          </Panel>
-        </div>
-      ) : null}
-    </div>
-  );
+    <Panel className="mt-4 p-4"><div className="flex items-start justify-between gap-3"><div><div className="font-medium">Angel One</div><div className="mt-1 text-xs text-muted">{status.data?.configured?"Read-only sync is ready.":"Add Angel One SmartAPI server secrets to enable sync."}</div></div><span className={`rounded-full px-2 py-1 text-[11px] ${status.data?.configured?"bg-up/15 text-up":"bg-surface-2 text-muted"}`}>{status.data?.configured?"Ready":"Not connected"}</span></div><input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden" onChange={e=>{const f=e.target.files?.[0];if(f)void importCsv(f);e.currentTarget.value=""}}/><Button variant="secondary" className="mt-3 w-full" onClick={()=>fileRef.current?.click()}><Upload className="mr-2 size-4"/>Import Angel One history CSV</Button></Panel>
+    <p className="mt-3 text-center text-[11px] text-subtle">Artha does not place BUY/SELL orders. It only reads portfolio data and stores your transaction history.</p>
+  </div>;
 }
 
-function HoldingForm({
-  initial,
-  submitLabel = "Add holding",
-  onSubmit,
-}: {
-  initial?: Holding;
-  submitLabel?: string;
-  onSubmit: (h: Omit<Holding, "id">) => void;
-}) {
-  const [symbol, setSymbol] = useState(initial ? displaySymbol(initial.symbol) : "");
-  const [company, setCompany] = useState(initial?.company ?? "");
-  const [qty, setQty] = useState(initial ? String(initial.quantity) : "");
-  const [price, setPrice] = useState(initial ? String(initial.buyPrice) : "");
-  const [date, setDate] = useState(initial?.buyDate ?? new Date().toISOString().slice(0, 10));
-  const [notes, setNotes] = useState(initial?.notes ?? "");
-
-  return (
-    <form
-      className="mt-3 space-y-2"
-      onSubmit={(e) => {
-        e.preventDefault();
-        onSubmit({
-          symbol: normalizeSymbol(symbol),
-          company: company || normalizeSymbol(symbol),
-          quantity: Number(qty),
-          buyPrice: Number(price),
-          buyDate: date,
-          notes,
-        });
-      }}
-    >
-      <Input
-        value={symbol}
-        onChange={(e) => setSymbol(e.target.value)}
-        placeholder="Symbol (RELIANCE)"
-        required
-        disabled={!!initial}
-        autoCapitalize="characters"
-      />
-      <Input value={company} onChange={(e) => setCompany(e.target.value)} placeholder="Company (optional)" />
-      <div className="grid grid-cols-2 gap-2">
-        <Input inputMode="decimal" value={qty} onChange={(e) => setQty(e.target.value)} placeholder="Quantity" required />
-        <Input inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="Buy price" required />
-      </div>
-      <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} max={new Date().toISOString().slice(0, 10)} />
-      <Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Notes (optional)" />
-      <Button type="submit" className="w-full">
-        {submitLabel}
-      </Button>
-    </form>
-  );
-}
+function TransactionCard({tx}:{tx:Tx}){return <Panel className="p-3"><div className="flex items-start justify-between gap-3"><div><div className="font-medium">{displaySymbol(tx.symbol)}</div><div className="text-xs text-muted">{tx.exchange} · {tx.tradeDate}</div></div><span className={`rounded-full px-2 py-1 text-[11px] font-medium ${tx.side==="BUY"?"bg-up/15 text-up":"bg-down/15 text-down"}`}>{tx.side}</span></div><div className="mt-3 grid grid-cols-3 gap-2 text-xs text-muted"><span>Qty <b className="tabular text-fg">{trim(tx.quantity)}</b></span><span>Price <b className="tabular text-fg">{fmtCurrency(tx.price)}</b></span><span>Value <b className="tabular text-fg">{fmtCurrency(tx.quantity*tx.price)}</b></span></div></Panel>}
+function trim(n:number){return Number.isInteger(n)?String(n):n.toFixed(4).replace(/0+$/," ").trim().replace(/\.$/,"")}
+function buildHoldings(txs:Tx[]):HoldingRow[]{const map=new Map<string,HoldingRow>();for(const t of [...txs].sort((a,b)=>a.tradeDate.localeCompare(b.tradeDate)||a.id.localeCompare(b.id))){const key=`${t.exchange}:${t.symbol}`;const row=map.get(key)??{symbol:t.symbol,exchange:t.exchange,qty:0,avg:0,invested:0,soldQty:0,boughtQty:0,realized:0};if(t.side==="BUY"){const newQty=row.qty+t.quantity;row.avg=newQty?(row.avg*row.qty+t.price*t.quantity)/newQty:t.price;row.qty=newQty;row.invested=row.qty*row.avg;row.boughtQty+=t.quantity;}else{const cost=row.avg*t.quantity;row.realized+=t.price*t.quantity-cost-t.charges;row.qty=Math.max(0,row.qty-t.quantity);row.invested=row.qty*row.avg;row.soldQty+=t.quantity;}map.set(key,row);}return [...map.values()].sort((a,b)=>a.symbol.localeCompare(b.symbol));}
+function parseCsv(text:string):Tx[]{const lines=text.split(/\r?\n/).filter(x=>x.trim());if(lines.length<2)return[];const parse=(line:string)=>line.split(/,(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)/).map(x=>x.trim().replace(/^\"|\"$/g,""));const headers=parse(lines[0]).map(x=>x.toLowerCase().replace(/[^a-z0-9]/g,""));const find=(...names:string[])=>headers.findIndex(h=>names.includes(h));const dateI=find("tradedate","tradedatetime","date","transactiondate","orderdate");const symbolI=find("tradingsymbol","symbol","scrip","stock");const exchangeI=find("exchange","exchangename");const sideI=find("transactiontype","type","buysell","side");const qtyI=find("quantity","qty","filledquantity","fillshares","shares");const priceI=find("averageprice","price","tradeprice","fillprice","executedprice");if(dateI<0||symbolI<0||sideI<0||qtyI<0||priceI<0)return[];const out:Tx[]=[];for(let i=1;i<lines.length;i++){const c=parse(lines[i]);const rawSide=String(c[sideI]??"").toUpperCase();const side:Tx["side"]|null=rawSide.includes("BUY")?"BUY":rawSide.includes("SELL")?"SELL":null;const quantity=Number(String(c[qtyI]??"").replace(/,/g,""));const price=Number(String(c[priceI]??"").replace(/[₹,]/g,""));const symbol=String(c[symbolI]??"").trim();if(!side||!symbol||!Number.isFinite(quantity)||quantity<=0||!Number.isFinite(price))continue;const rawDate=String(c[dateI]??"").trim();const d=new Date(rawDate);const tradeDate=Number.isNaN(d.getTime())?rawDate.slice(0,10):d.toISOString().slice(0,10);const exchange=String(c[exchangeI]??"NSE").trim().toUpperCase()||"NSE";out.push({id:`import-${i}-${symbol}-${tradeDate}-${side}`,broker:"manual-import",brokerTradeId:null,symbol:symbol.replace(/-EQ$/i,""),exchange,company:symbol,side,quantity,price,tradeDate,charges:0,source:"angel-csv"});}return out;}
