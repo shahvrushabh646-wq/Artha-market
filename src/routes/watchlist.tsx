@@ -9,8 +9,8 @@ import { Input } from "@/components/ui/input";
 import { Empty, Panel, SignalBadge } from "@/components/widgets";
 import { displaySymbol, normalizeSymbol } from "@/lib/market/config";
 import { customValuation, fmtCurrency, fmtNumber, lastValid, periodHighLow, rsi, sma } from "@/lib/market/math";
-import { fetchWatchPack } from "@/lib/market/server";
 import { searchStocks } from "@/lib/market/stock-search";
+import { fetchWatchlistLive } from "@/lib/market/watchlist-live";
 import { getCloudWatchlist, saveCloudWatchlist } from "@/lib/market/watchlist-cloud";
 import { useDesk } from "@/lib/store";
 
@@ -25,9 +25,8 @@ function WatchPage() {
   useEffect(()=>{const t=window.setTimeout(()=>setSearchQ(raw.trim()),100);return()=>window.clearTimeout(t)},[raw]);
   useEffect(()=>{const onDoc=(e:MouseEvent)=>{if(!searchBox.current?.contains(e.target as Node))setSearchOpen(false)};document.addEventListener("mousedown",onDoc);return()=>document.removeEventListener("mousedown",onDoc)},[]);
   const search=useQuery({queryKey:["watchlist-stock-search",searchQ.toUpperCase()],queryFn:()=>searchStocks({data:{query:searchQ.toUpperCase()}}),enabled:searchQ.length>=3,staleTime:30000,gcTime:5*60000,refetchOnWindowFocus:false,retry:false});
-  const pack=useQuery({queryKey:["watch",watchlist],queryFn:()=>fetchWatchPack({data:{symbols:watchlist}}),enabled:watchlist.length>0,refetchInterval:90000});
+  const pack=useQuery({queryKey:["watch",watchlist],queryFn:()=>fetchWatchlistLive({data:{symbols:watchlist}}),enabled:watchlist.length>0,refetchInterval:90000,retry:2});
   const rows=useMemo(()=>{const quotes=new Map((pack.data?.quotes??[]).map(q=>[q.symbol,q]));const hist=new Map((pack.data?.packs??[]).map(p=>[p.symbol,p]));return [...watchlist].sort((a,b)=>displaySymbol(a).localeCompare(displaySymbol(b),undefined,{sensitivity:"base"})).map(symbol=>{const q=quotes.get(symbol);const h=hist.get(symbol);const closes=(h?.bars1y??[]).map(b=>b.c);const s20=lastValid(sma(closes,20));const s50=lastValid(sma(closes,50));const s200=lastValid(sma(closes,200));const r=lastValid(rsi(closes,14));const hl1=periodHighLow(h?.bars1y??[]);const hl5=periodHighLow(h?.bars5y??[]);const val=customValuation(hl5.high,q?.price??null);const price=q?.price??null;const high5y=hl5.high;const buyPrice75=high5y!=null?high5y*0.25:null;const buyPrice90=high5y!=null?high5y*0.10:null;const trigger75=price!=null&&buyPrice75!=null&&price<=buyPrice75;const trigger90=price!=null&&buyPrice90!=null&&price<=buyPrice90;return{symbol,q,s20,s50,s200,r,hl1,hl5,val,buyPrice75,buyPrice90,trigger75,trigger90,signal:val?.signal??null}})},[pack.data,watchlist]);
-  // 75% Rule = Normal stocks: only stocks priced ABOVE ₹20. 90% Rule = Penny stocks: only stocks priced BELOW ₹20.
   const filteredRows=watchFilter==="normal"?rows.filter(row=>(row.q?.price??0)>20):watchFilter==="penny"?rows.filter(row=>(row.q?.price??Infinity)<20):rows;
   const triggered=rows.filter(row=>row.signal);
   useEffect(()=>{if(pack.isLoading||watchlist.length===0)return;const today=new Date().toLocaleDateString("en-CA");const key="artha_watchlist_alert_date";if(localStorage.getItem(key)===today)return;localStorage.setItem(key,today);if(rows.some(row=>row.signal))setShowDailyAlert(true)},[pack.isLoading,watchlist.length,rows]);
