@@ -2,7 +2,9 @@ import { createServerFn } from "@tanstack/react-start";
 import type { Quote } from "./types";
 
 const UA = "Mozilla/5.0";
-const cache = { exp: 0, symbols: [] as string[], sectors: new Map<string, string>(), data: [] as Quote[] };
+const cache = { exp: 0, symbols: [] as string[], sectors: new Map<string, string>(), results: new Map<string, { exp: number; data: Quote[] }>() };
+const RESULT_TTL = 5 * 60_000;
+const UNIVERSE_TTL = 24 * 60 * 60_000;
 const BSE_GROUPS = ["A", "B", "E", "F", "FC", "GC", "I", "IF", "IP", "M", "MS", "MT", "P", "R", "T", "TS", "W", "X", "XD", "XT", "Y", "Z", "ZP", "ZY"];
 type Chart = { chart?: { result?: Array<{ meta?: Record<string, unknown>; timestamp?: number[]; indicators?: { quote?: Array<{ high?: Array<number | null>; close?: Array<number | null> }> } }> } };
 type Period = "current" | "1d" | "1w" | "1m" | "3m" | "6m";
@@ -10,145 +12,14 @@ type Suggestion = Quote & { triggerDates: string[]; sector: string | null };
 function num(v: unknown) { return typeof v === "number" && Number.isFinite(v) ? v : null; }
 function indiaDate(ts: number) { return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(ts * 1000)); }
 function clean(s: string) { return s.trim().replace(/^\"|\"$/g, ""); }
-function classifyText(value: string) {
-  const v = value.toLowerCase();
-  if (["healthcare", "pharma", "pharmaceutical", "biotechnology", "medical", "drug", "diagnostic"].some(x => v.includes(x))) return "Medicine / Pharma";
-  if (["information technology", "technology", "software", "semiconductor", "it services"].some(x => v.includes(x))) return "IT";
-  if (["consumer defensive", "consumer staples", "packaged food", "household", "personal product", "beverage", "food product", "tobacco"].some(x => v.includes(x))) return "FMCG";
-  if (v.includes("bank")) return "Banking";
-  if (["financial services", "credit services", "capital markets", "insurance", "mortgage", "asset management"].some(x => v.includes(x))) return "Finance";
-  if (["auto manufacturer", "automobile", "auto parts", "vehicle"].some(x => v.includes(x))) return "Automobile";
-  if (["chemical", "specialty chemical"].some(x => v.includes(x))) return "Chemicals";
-  if (["real estate", "reit", "property development"].some(x => v.includes(x))) return "Real Estate";
-  if (["oil & gas", "oil gas", "energy", "petroleum"].some(x => v.includes(x))) return "Energy";
-  if (["utilities", "electric utilities", "gas utilities"].some(x => v.includes(x))) return "Utilities";
-  if (["communication services", "telecom", "internet content"].some(x => v.includes(x))) return "Communication Services";
-  if (["industrials", "industrial product", "aerospace", "engineering", "construction", "machinery", "infrastructure"].some(x => v.includes(x))) return "Industrials";
-  return null;
-}
-async function nseUniverse(): Promise<string[]> {
-  try {
-    const res = await fetch("https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv", { headers: { "User-Agent": UA, Accept: "text/csv,*/*" }, cache: "no-store" });
-    if (!res.ok) return [];
-    const lines = (await res.text()).split(/\r?\n/).filter(Boolean);
-    const h = lines.shift()?.split(",").map(clean).map(x => x.toUpperCase()) ?? [];
-    const si = h.indexOf("SYMBOL"), se = h.indexOf("SERIES");
-    if (si < 0) return [];
-    return lines.map(x => x.split(",").map(clean)).filter(c => se < 0 || c[se] === "EQ").map(c => c[si]).filter(Boolean).map(s => `${s}.NS`);
-  } catch { return []; }
-}
-async function bseUniverse(): Promise<string[]> {
-  const out = new Set<string>();
-  for (const group of BSE_GROUPS) {
-    try {
-      const u = new URL("https://api.bseindia.com/BseIndiaAPI/api/ListofScripData/w");
-      u.searchParams.set("scripcode", ""); u.searchParams.set("Group", group); u.searchParams.set("industry", ""); u.searchParams.set("segment", "Equity"); u.searchParams.set("status", "Active");
-      const res = await fetch(u, { headers: { "User-Agent": UA, Accept: "application/json, text/plain, */*", Referer: "https://www.bseindia.com/" }, cache: "no-store" });
-      if (!res.ok) continue;
-      const raw = await res.json() as unknown;
-      const rows = Array.isArray(raw) ? raw : raw && typeof raw === "object" && Array.isArray((raw as { Data?: unknown }).Data) ? (raw as { Data: unknown[] }).Data : [];
-      for (const item of rows) {
-        if (!item || typeof item !== "object") continue;
-        const r = item as Record<string, unknown>;
-        const code = String(r.scripcode ?? r.SCRIPCODE ?? r.scripCode ?? "").trim();
-        if (!/^\d{6}$/.test(code)) continue;
-        out.add(`${code}.BO`);
-        const rawSector = String(r.Industry ?? r.industry ?? r.IndustryName ?? r.industryName ?? r.Sector ?? r.sector ?? "").trim();
-        const mapped = classifyText(rawSector);
-        if (mapped) cache.sectors.set(`${code}.BO`, mapped);
-      }
-    } catch {}
-  }
-  return [...out];
-}
-async function universe(): Promise<string[]> {
-  if (cache.symbols.length) return cache.symbols;
-  const [nse, bse] = await Promise.all([nseUniverse(), bseUniverse()]);
-  const all = [...new Set([...nse, ...bse])];
-  if (all.length) cache.symbols = all;
-  return cache.symbols;
-}
-async function history(symbol: string) {
-  for (const host of ["query1.finance.yahoo.com", "query2.finance.yahoo.com"]) {
-    try {
-      const u = new URL(`https://${host}/v8/finance/chart/${encodeURIComponent(symbol)}`); u.searchParams.set("range", "5y"); u.searchParams.set("interval", "1d");
-      const res = await fetch(u, { headers: { "User-Agent": UA, Accept: "application/json" }, cache: "no-store" });
-      if (!res.ok) continue;
-      const raw = await res.json() as Chart; const row = raw.chart?.result?.[0];
-      const highs = row?.indicators?.quote?.[0]?.high ?? []; const closes = row?.indicators?.quote?.[0]?.close ?? []; const timestamps = row?.timestamp ?? [];
-      const validHighs = highs.map(num).filter((x): x is number => x !== null);
-      const price = num(row?.meta?.regularMarketPrice) ?? [...closes].reverse().map(num).find((x): x is number => x !== null) ?? null;
-      if (price === null || !validHighs.length) continue;
-      const high5y = Math.max(...validHighs);
-      const thresholdFor = (p: number) => p < 20 ? high5y * 0.10 : high5y * 0.25;
-      const triggerDates: string[] = [];
-      for (let i = 1; i < closes.length; i++) {
-        const prev = num(closes[i - 1]), cur = num(closes[i]);
-        if (prev !== null && cur !== null && timestamps[i] != null && prev > thresholdFor(prev) && cur <= thresholdFor(cur)) triggerDates.push(indiaDate(timestamps[i]));
-      }
-      return { price, high5y, threshold: thresholdFor(price), triggerDates };
-    } catch {}
-  }
-  return null;
-}
-async function yahooProfile(symbol: string) {
-  if (cache.sectors.has(symbol)) return cache.sectors.get(symbol) ?? null;
-  for (const host of ["query1.finance.yahoo.com", "query2.finance.yahoo.com"]) {
-    try {
-      const u = new URL(`https://${host}/v10/finance/quoteSummary/${encodeURIComponent(symbol)}`); u.searchParams.set("modules", "assetProfile");
-      const res = await fetch(u, { headers: { "User-Agent": UA, Accept: "application/json" }, cache: "no-store" });
-      if (!res.ok) continue;
-      const raw = await res.json() as { quoteSummary?: { result?: Array<{ assetProfile?: { sector?: string; industry?: string } }> } };
-      const p = raw.quoteSummary?.result?.[0]?.assetProfile; const mapped = p ? classifyText(`${p.sector ?? ""} ${p.industry ?? ""}`) : null;
-      if (mapped) { cache.sectors.set(symbol, mapped); return mapped; }
-    } catch {}
-  }
-  return null;
-}
-function exactSector(symbol: string) {
-  const s = symbol.replace(/\.(ns|bo)$/i, "").toUpperCase();
-  const exact: Record<string, string> = {
-    RELIANCE:"Energy", ONGC:"Energy", IOC:"Energy", BPCL:"Energy", HINDPETRO:"Energy", TATAMOTORS:"Automobile", MARUTI:"Automobile", EICHERMOT:"Automobile", "BAJAJ-AUTO":"Automobile", HEROMOTOCO:"Automobile",
-    HDFCBANK:"Banking", ICICIBANK:"Banking", SBIN:"Banking", KOTAKBANK:"Banking", AXISBANK:"Banking", INDUSINDBK:"Banking", FEDERALBNK:"Banking", IDFCFIRSTB:"Banking",
-    ITC:"FMCG", HINDUNILVR:"FMCG", NESTLEIND:"FMCG", BRITANNIA:"FMCG", DABUR:"FMCG", MARICO:"FMCG", COLPAL:"FMCG", TATACONSUM:"FMCG",
-    SUNPHARMA:"Medicine / Pharma", DRREDDY:"Medicine / Pharma", CIPLA:"Medicine / Pharma", DIVISLAB:"Medicine / Pharma", AUROPHARMA:"Medicine / Pharma", LUPIN:"Medicine / Pharma", ZYDUSLIFE:"Medicine / Pharma", TORNTPHARM:"Medicine / Pharma",
-    TECHM:"IT", TCS:"IT", INFY:"IT", WIPRO:"IT", HCLTECH:"IT", LTIM:"IT", MPHASIS:"IT", COFORGE:"IT", PERSISTENT:"IT"
-  };
-  return exact[s] ?? null;
-}
-async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
-  const out: R[] = new Array(items.length); let next = 0;
-  async function worker() { while (true) { const i = next++; if (i >= items.length) return; try { out[i] = await fn(items[i]); } catch { out[i] = undefined as R; } } }
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, () => worker())); return out;
-}
-function periodStart(period: Period) { const d = new Date(); if (period === "1d") d.setDate(d.getDate() - 1); if (period === "1w") d.setDate(d.getDate() - 7); if (period === "1m") d.setMonth(d.getMonth() - 1); if (period === "3m") d.setMonth(d.getMonth() - 3); if (period === "6m") d.setMonth(d.getMonth() - 6); return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(d); }
-
-async function getSuggestions(period: Period = "current", sector = "All"): Promise<Quote[]> {
-  try {
-    const symbols = await universe(); if (!symbols.length) return [];
-    const rows = await mapLimit(symbols, 32, async symbol => ({ symbol, data: await history(symbol) }));
-    const start = periodStart(period);
-    // Build the complete qualifying trigger pool first. Sector is deliberately applied AFTER this step,
-    // so it never only filters today's rows.
-    const candidates = rows.filter((r): r is { symbol: string; data: NonNullable<Awaited<ReturnType<typeof history>>> } => !!r?.data && (period === "current" ? r.data.price <= r.data.threshold : r.data.triggerDates.some(d => d >= start)));
-    const enriched = await mapLimit(candidates, 24, async r => ({ ...r, sector: exactSector(r.symbol) ?? await yahooProfile(r.symbol) }));
-    let result: Suggestion[] = enriched.map(({ symbol, data, sector: resolvedSector }) => ({
-      symbol, name: symbol.replace(/\.NS$|\.BO$/i, ""), price: data.price, previousClose: null, change: null, changePct: null, currency: "INR", exchange: symbol.endsWith(".BO") ? "BSE" : "NSE",
-      high52w: null, low52w: null, high5y: data.high5y, low5y: null, price75: Math.round(data.threshold * 100) / 100, signal75: data.price <= data.threshold ? "BUY" : "WAIT", volume: null, dayHigh: null, dayLow: null, ok: true,
-      triggerDate: data.triggerDates.at(-1) ?? null, triggerDates: data.triggerDates, sector: resolvedSector ?? null
-    }));
-    if (sector !== "All") result = result.filter(q => q.sector === sector);
-    const byCompany = new Map<string, Suggestion>();
-    for (const q of result) { const key = q.name.replace(/[^A-Z0-9]/gi, "").toUpperCase(); const old = byCompany.get(key); if (!old || (q.exchange === "NSE" && old.exchange === "BSE")) byCompany.set(key, q); }
-    const all = [...byCompany.values()];
-    if (period === "current") {
-      const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
-      const todayRows = all.filter(q => q.triggerDate === today).sort((a, b) => a.name.localeCompare(b.name));
-      const other = all.filter(q => q.triggerDate !== today).sort((a, b) => a.name.localeCompare(b.name));
-      return [...todayRows, ...other];
-    }
-    return all.map(q => ({ ...q, triggerDate: [...q.triggerDates].filter(d => d >= start).sort().at(-1) ?? null })).sort((a, b) => (b.triggerDate ?? "").localeCompare(a.triggerDate ?? ""));
-  } catch { return []; }
-}
-
-export const fetchSuggestions = createServerFn({ method: "POST" }).handler(async ({ data }: { data?: { period?: Period; sector?: string } }) => getSuggestions(data?.period ?? "current", data?.sector ?? "All"));
+function classifyText(value: string) { const v = value.toLowerCase(); if (["healthcare","pharma","pharmaceutical","biotechnology","medical","drug","diagnostic"].some(x=>v.includes(x))) return "Medicine / Pharma"; if (["information technology","technology","software","semiconductor","it services"].some(x=>v.includes(x))) return "IT"; if (["consumer defensive","consumer staples","packaged food","household","personal product","beverage","food product","tobacco"].some(x=>v.includes(x))) return "FMCG"; if (v.includes("bank")) return "Banking"; if (["financial services","credit services","capital markets","insurance","mortgage","asset management"].some(x=>v.includes(x))) return "Finance"; if (["auto manufacturer","automobile","auto parts","vehicle"].some(x=>v.includes(x))) return "Automobile"; if (["chemical","specialty chemical"].some(x=>v.includes(x))) return "Chemicals"; if (["real estate","reit","property development"].some(x=>v.includes(x))) return "Real Estate"; if (["oil & gas","oil gas","energy","petroleum"].some(x=>v.includes(x))) return "Energy"; if (["utilities","electric utilities","gas utilities"].some(x=>v.includes(x))) return "Utilities"; if (["communication services","telecom","internet content"].some(x=>v.includes(x))) return "Communication Services"; if (["industrials","industrial product","aerospace","engineering","construction","machinery","infrastructure"].some(x=>v.includes(x))) return "Industrials"; return null; }
+async function nseUniverse(): Promise<string[]> { try { const res=await fetch("https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv",{headers:{"User-Agent":UA,Accept:"text/csv,*/*"},cache:"no-store"}); if(!res.ok)return[]; const lines=(await res.text()).split(/\r?\n/).filter(Boolean); const h=lines.shift()?.split(",").map(clean).map(x=>x.toUpperCase())??[]; const si=h.indexOf("SYMBOL"),se=h.indexOf("SERIES"); if(si<0)return[]; return lines.map(x=>x.split(",").map(clean)).filter(c=>se<0||c[se]==="EQ").map(c=>c[si]).filter(Boolean).map(s=>`${s}.NS`); }catch{return[];} }
+async function bseUniverse(): Promise<string[]> { const out=new Set<string>(); await Promise.all(BSE_GROUPS.map(async group=>{try{const u=new URL("https://api.bseindia.com/BseIndiaAPI/api/ListofScripData/w"); u.searchParams.set("scripcode","");u.searchParams.set("Group",group);u.searchParams.set("industry","");u.searchParams.set("segment","Equity");u.searchParams.set("status","Active"); const res=await fetch(u,{headers:{"User-Agent":UA,Accept:"application/json, text/plain, */*",Referer:"https://www.bseindia.com/"},cache:"no-store"});if(!res.ok)return;const raw=await res.json() as unknown;const rows=Array.isArray(raw)?raw:raw&&typeof raw==="object"&&Array.isArray((raw as {Data?:unknown}).Data)?(raw as {Data:unknown[]}).Data:[];for(const item of rows){if(!item||typeof item!=="object")continue;const r=item as Record<string,unknown>;const code=String(r.scripcode??r.SCRIPCODE??r.scripCode??"").trim();if(/^\d{6}$/.test(code))out.add(`${code}.BO`);}}catch{}}));return[...out]; }
+async function universe(): Promise<string[]> { if(cache.symbols.length&&Date.now()<cache.exp)return cache.symbols; const [nse,bse]=await Promise.all([nseUniverse(),bseUniverse()]); const all=[...new Set([...nse,...bse])]; if(all.length){cache.symbols=all;cache.exp=Date.now()+UNIVERSE_TTL;} return cache.symbols; }
+async function history(symbol: string) { for(const host of ["query1.finance.yahoo.com","query2.finance.yahoo.com"]){try{const u=new URL(`https://${host}/v8/finance/chart/${encodeURIComponent(symbol)}`);u.searchParams.set("range","5y");u.searchParams.set("interval","1d");const res=await fetch(u,{headers:{"User-Agent":UA,Accept:"application/json"},cache:"no-store"});if(!res.ok)continue;const raw=await res.json() as Chart;const row=raw.chart?.result?.[0];const highs=row?.indicators?.quote?.[0]?.high??[];const closes=row?.indicators?.quote?.[0]?.close??[];const timestamps=row?.timestamp??[];const validHighs=highs.map(num).filter((x):x is number=>x!==null);const price=num(row?.meta?.regularMarketPrice)??[...closes].reverse().map(num).find((x):x is number=>x!==null)??null;if(price===null||!validHighs.length)continue;const high5y=Math.max(...validHighs);const thresholdFor=(p:number)=>p<20?high5y*.10:high5y*.25;const triggerDates:string[]=[];for(let i=1;i<closes.length;i++){const prev=num(closes[i-1]),cur=num(closes[i]);if(prev!==null&&cur!==null&&timestamps[i]!=null&&prev>thresholdFor(prev)&&cur<=thresholdFor(cur))triggerDates.push(indiaDate(timestamps[i]));}return{price,high5y,threshold:thresholdFor(price),triggerDates};}catch{}}return null; }
+async function yahooProfile(symbol:string){if(cache.sectors.has(symbol))return cache.sectors.get(symbol)??null;for(const host of ["query1.finance.yahoo.com","query2.finance.yahoo.com"]){try{const u=new URL(`https://${host}/v10/finance/quoteSummary/${encodeURIComponent(symbol)}`);u.searchParams.set("modules","assetProfile");const res=await fetch(u,{headers:{"User-Agent":UA,Accept:"application/json"},cache:"no-store"});if(!res.ok)continue;const raw=await res.json() as {quoteSummary?:{result?:Array<{assetProfile?:{sector?:string;industry?:string}}>} };const p=raw.quoteSummary?.result?.[0]?.assetProfile;const mapped=p?classifyText(`${p.sector??""} ${p.industry??""}`):null;if(mapped){cache.sectors.set(symbol,mapped);return mapped;}}catch{}}return null;}
+function exactSector(symbol:string){const s=symbol.replace(/\.(ns|bo)$/i,"").toUpperCase();const exact:Record<string,string>={RELIANCE:"Energy",ONGC:"Energy",IOC:"Energy",BPCL:"Energy",HINDPETRO:"Energy",TATAMOTORS:"Automobile",MARUTI:"Automobile",EICHERMOT:"Automobile","BAJAJ-AUTO":"Automobile",HEROMOTOCO:"Automobile",HDFCBANK:"Banking",ICICIBANK:"Banking",SBIN:"Banking",KOTAKBANK:"Banking",AXISBANK:"Banking",INDUSINDBK:"Banking",FEDERALBNK:"Banking",IDFCFIRSTB:"Banking",ITC:"FMCG",HINDUNILVR:"FMCG",NESTLEIND:"FMCG",BRITANNIA:"FMCG",DABUR:"FMCG",MARICO:"FMCG",COLPAL:"FMCG",TATACONSUM:"FMCG",SUNPHARMA:"Medicine / Pharma",DRREDDY:"Medicine / Pharma",CIPLA:"Medicine / Pharma",DIVISLAB:"Medicine / Pharma",AUROPHARMA:"Medicine / Pharma",LUPIN:"Medicine / Pharma",ZYDUSLIFE:"Medicine / Pharma",TORNTPHARM:"Medicine / Pharma",TECHM:"IT",TCS:"IT",INFY:"IT",WIPRO:"IT",HCLTECH:"IT",LTIM:"IT",MPHASIS:"IT",COFORGE:"IT",PERSISTENT:"IT"};return exact[s]??null;}
+async function mapLimit<T,R>(items:T[],limit:number,fn:(item:T)=>Promise<R>):Promise<R[]>{const out:R[]=new Array(items.length);let next=0;async function worker(){while(true){const i=next++;if(i>=items.length)return;try{out[i]=await fn(items[i]);}catch{out[i]=undefined as R;}}}await Promise.all(Array.from({length:Math.min(limit,items.length)},()=>worker()));return out;}
+function periodStart(period:Period){const d=new Date();if(period==="1d")d.setDate(d.getDate()-1);if(period==="1w")d.setDate(d.getDate()-7);if(period==="1m")d.setMonth(d.getMonth()-1);if(period==="3m")d.setMonth(d.getMonth()-3);if(period==="6m")d.setMonth(d.getMonth()-6);return new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Kolkata",year:"numeric",month:"2-digit",day:"2-digit"}).format(d);}
+async function getSuggestions(period:Period="current",sector="All"):Promise<Quote[]>{const key=`${period}:${sector}`;const hit=cache.results.get(key);if(hit&&Date.now()<hit.exp)return hit.data;try{const symbols=await universe();if(!symbols.length)return[];const rows=await mapLimit(symbols,64,async symbol=>({symbol,data:await history(symbol)}));const start=periodStart(period);const candidates=rows.filter((r):r is {symbol:string;data:NonNullable<Awaited<ReturnType<typeof history>>>}=>!!r?.data&&(period==="current"?r.data.price<=r.data.threshold:r.data.triggerDates.some(d=>d>=start)));const enriched=await mapLimit(candidates,48,async r=>({ ...r,sector:exactSector(r.symbol)??await yahooProfile(r.symbol)}));let result:Suggestion[]=enriched.map(({symbol,data,sector:resolvedSector})=>({symbol,name:symbol.replace(/\.NS$|\.BO$/i,""),price:data.price,previousClose:null,change:null,changePct:null,currency:"INR",exchange:symbol.endsWith(".BO")?"BSE":"NSE",high52w:null,low52w:null,high5y:data.high5y,low5y:null,price75:Math.round(data.threshold*100)/100,signal75:data.price<=data.threshold?"BUY":"WAIT",volume:null,dayHigh:null,dayLow:null,ok:true,triggerDate:data.triggerDates.at(-1)??null,triggerDates:data.triggerDates,sector:resolvedSector??null}));if(sector!=="All")result=result.filter(q=>q.sector===sector);const byCompany=new Map<string,Suggestion>();for(const q of result){const key=q.name.replace(/[^A-Z0-9]/gi,"").toUpperCase();const old=byCompany.get(key);if(!old||(q.exchange==="NSE"&&old.exchange==="BSE"))byCompany.set(key,q);}const all=[...byCompany.values()];if(period==="current"){const today=new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Kolkata",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date());const todayRows=all.filter(q=>q.triggerDate===today).sort((a,b)=>a.name.localeCompare(b.name));const todaySet=new Set(todayRows.map(x=>x.symbol));const other=all.filter(q=>!todaySet.has(q.symbol)).sort((a,b)=>a.name.localeCompare(b.name));result=[...todayRows,...other];}else result=all.map(q=>({...q,triggerDate:[...q.triggerDates].filter(d=>d>=start).sort().at(-1)??null})).sort((a,b)=>(b.triggerDate??"").localeCompare(a.triggerDate??""));cache.results.set(key,{exp:Date.now()+RESULT_TTL,data:result});return result;}catch{return[];}}
+export const fetchSuggestions=createServerFn({method:"POST"}).handler(async({data}:{data?:{period?:Period;sector?:string}})=>getSuggestions(data?.period??"current",data?.sector??"All"));
