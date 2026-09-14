@@ -18,16 +18,16 @@ type AngelHolding={symbol:string;exchange:string;company:string;quantity:number;
 
 function PortfolioPage(){
  const qc=useQueryClient();const [tab,setTab]=useState<"holdings"|"sold"|"history">("holdings");const [syncing,setSyncing]=useState(false);const fileRef=useRef<HTMLInputElement>(null);
- const status=useQuery({queryKey:["angel-status"],queryFn:()=>getAngelStatus({data:undefined}),staleTime:60000});
- const txQuery=useQuery({queryKey:["portfolio-transactions"],queryFn:()=>getPortfolioTransactions({data:undefined}),refetchInterval:60000});
- const angelHoldingsQuery=useQuery({queryKey:["angel-holdings"],queryFn:()=>getAngelHoldings({data:undefined}),refetchInterval:60000});
+ const status=useQuery({queryKey:["angel-status"],queryFn:()=>getAngelStatus(),staleTime:60000});
+ const txQuery=useQuery({queryKey:["portfolio-transactions"],queryFn:()=>getPortfolioTransactions(),refetchInterval:60000});
+ const angelHoldingsQuery=useQuery({queryKey:["angel-holdings"],queryFn:()=>getAngelHoldings(),refetchInterval:60000});
  const transactions=(txQuery.data??[]) as Tx[];const angelHoldings=(angelHoldingsQuery.data??[]) as AngelHolding[];
  const symbols=[...new Set([...transactions.map(t=>t.symbol),...angelHoldings.map(h=>h.symbol)])];
  const quotes=useQuery({queryKey:["portfolio-quotes",symbols],queryFn:()=>fetchQuotes({data:{symbols}}),enabled:symbols.length>0,refetchInterval:60000});const quoteMap=new Map((quotes.data??[]).map(q=>[q.symbol,q]));
  const calculated=useMemo(()=>buildHoldings(transactions),[transactions]);
  const holdingRows=angelHoldings.length?angelHoldings.filter(h=>h.quantity>0.000001).map(h=>({symbol:h.symbol,exchange:h.exchange,qty:h.quantity,avg:h.averagePrice,invested:h.quantity*h.averagePrice,soldQty:0,boughtQty:h.quantity,realized:0})):calculated.filter(h=>h.qty>0.000001);
  const sold=transactions.filter(t=>t.side==="SELL");const totalInvested=holdingRows.reduce((s,h)=>s+h.invested,0);const currentValue=holdingRows.reduce((s,h)=>s+h.qty*(quoteMap.get(h.symbol)?.price??h.avg),0);const unrealized=currentValue-totalInvested;const realized=calculated.reduce((s,h)=>s+h.realized,0);const totalPl=unrealized+realized;const returnPct=totalInvested?(totalPl/totalInvested)*100:null;
- async function sync(){setSyncing(true);try{const result=await syncAngelPortfolio({data:undefined});toast(`Angel One synced · ${result.inserted} new trades`);await Promise.all([qc.invalidateQueries({queryKey:["portfolio-transactions"]}),qc.invalidateQueries({queryKey:["angel-holdings"]})]);}catch(err){toast(err instanceof Error?err.message:"Angel One sync failed");}finally{setSyncing(false);}}
+ async function sync(){setSyncing(true);try{const result=await syncAngelPortfolio({data:{}});toast(`Angel One synced · ${result.inserted} new trades`);await Promise.all([qc.invalidateQueries({queryKey:["portfolio-transactions"]}),qc.invalidateQueries({queryKey:["angel-holdings"]})]);}catch(err){toast(err instanceof Error?err.message:"Angel One sync failed");}finally{setSyncing(false);}}
  async function importCsv(file:File){const parsed=parseCsv(await file.text());if(!parsed.length){toast("No BUY/SELL rows found. Use Angel One trade-history CSV.");return;}try{const result=await importPortfolioTransactions({data:{transactions:parsed}});toast(`Imported ${result.inserted} historical trades`);await qc.invalidateQueries({queryKey:["portfolio-transactions"]});}catch(err){toast(err instanceof Error?err.message:"Import failed");}}
  return <div>
   <div className="flex items-start justify-between gap-3"><div><h1 className="font-display text-3xl tracking-tight">Portfolio</h1><p className="mt-1 text-sm text-muted">Holdings, sold shares and complete transaction history.</p></div><Button variant="secondary" size="sm" className="h-10" onClick={sync} disabled={syncing||!status.data?.configured} title={!status.data?.configured?"Configure Angel One server credentials first":"Sync Angel One"}><RefreshCw className={`mr-2 size-4 ${syncing?"animate-spin":""}`}/>Sync</Button></div>
