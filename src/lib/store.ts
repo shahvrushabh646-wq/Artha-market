@@ -121,8 +121,9 @@ export const useDesk = create<DeskState>()(
       setLastSymbol: (symbol) => set({ lastSymbol: normalizeSymbol(symbol) }),
     }),
     {
+      // Watchlist is browser-persistent data. Deploying a new Vercel build must never replace it with DEFAULT_WATCHLIST.
       name: "artha-desk",
-      version: 3,
+      version: 4,
       storage: createJSONStorage(() => localStorage),
       merge: (persistedState, currentState) => {
         const persisted = persistedState as Partial<DeskState> | undefined;
@@ -130,11 +131,12 @@ export const useDesk = create<DeskState>()(
           ...currentState,
           ...persisted,
           watchlist: Array.isArray(persisted?.watchlist)
-            ? persisted.watchlist.map(normalizeSymbol).filter(Boolean)
+            ? Array.from(new Set(persisted.watchlist.map(normalizeSymbol).filter(Boolean)))
             : currentState.watchlist,
           ruleAlerts: Array.isArray(persisted?.ruleAlerts) ? persisted.ruleAlerts : [],
         };
       },
+      // Preserve the user's existing watchlist across app versions/deployments. Never reset it during migration.
       migrate: (persistedState) => persistedState as DeskState,
     },
   ),
