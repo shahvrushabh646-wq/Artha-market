@@ -16,7 +16,8 @@ function StockRow({quote,todayTrigger}:{quote:Quote;todayTrigger:boolean}){const
 function Suggestions(){
   const [saved,setSaved]=useState<Quote[]>(readSavedSuggestions);
   const [period,setPeriod]=useState<"current"|"1d"|"1w"|"1m"|"3m"|"6m">("current");
-  const q=useQuery({queryKey:["suggestions-scanner-v12",period],queryFn:()=>fetchSuggestions({data:{period,sector:"All"}}),initialData:period==="current"&&saved.length?saved:undefined,placeholderData:(previousData)=>previousData,staleTime:5*60_000,gcTime:24*60*60_000,refetchOnMount:"always",refetchOnWindowFocus:false,refetchInterval:30*60_000,retry:1});
+  const hasSavedCurrent=saved.length>0;
+  const q=useQuery({queryKey:["suggestions-scanner-v12",period],queryFn:()=>fetchSuggestions({data:{period,sector:"All"}}),initialData:period==="current"&&hasSavedCurrent?saved:undefined,placeholderData:(previousData)=>previousData,staleTime:5*60_000,gcTime:24*60*60_000,refetchOnMount:hasSavedCurrent?false:"always",refetchOnWindowFocus:false,refetchInterval:30*60_000,retry:1});
   const suggestions=q.data??saved;
   const today=new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Kolkata",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date());
   const ordered=useMemo(()=>{
