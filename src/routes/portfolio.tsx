@@ -10,6 +10,7 @@ import { displaySymbol } from "@/lib/market/config";
 import { fmtCurrency } from "@/lib/market/math";
 import { fetchQuotes } from "@/lib/market/server";
 import { addPortfolioAccount, addPortfolioTransaction, deletePortfolioTransaction, getPortfolioAccounts, getPortfolioTransactions, renamePortfolioAccount } from "@/lib/market/angel-portfolio";
+import { useDesk } from "@/lib/store";
 
 export const Route = createFileRoute("/portfolio")({ component: PortfolioPage });
 
@@ -40,6 +41,7 @@ function PortfolioPage() {
   const [newAccount, setNewAccount] = useState("");
   const [showTx, setShowTx] = useState(false);
   const [tx, setTx] = useState({ symbol: "", exchange: "NSE", side: "BUY" as "BUY" | "SELL", quantity: "", price: "", tradeDate: new Date().toISOString().slice(0, 10), charges: "0" });
+  const legacyHoldings = useDesk((s) => s.holdings);
 
   const accountsQuery = useQuery({ queryKey: ["portfolio-accounts"], queryFn: () => getPortfolioAccounts(), staleTime: 300000 });
   const accounts = (accountsQuery.data || []) as Account[];
@@ -56,7 +58,36 @@ function PortfolioPage() {
       return [...unique.values()].sort((a, b) => `${b.tradeDate}-${b.id}`.localeCompare(`${a.tradeDate}-${a.id}`));
     }
   });
-  const transactions = (txQuery.data || []) as Tx[];
+
+  const storedTransactions = (txQuery.data || []) as Tx[];
+
+  // Stocks added with the existing "Book" button on the stock page are stored in
+  // the Zustand desk store. Treat those entries as BUY transactions for the
+  // default portfolio so they immediately appear in Equity as well.
+  const legacyTransactions = useMemo<Tx[]>(() => {
+    if (!accountId || accountId !== "account-1") return [];
+    return legacyHoldings.map(h => ({
+      id: `legacy-${h.id}`,
+      broker: "manual",
+      brokerTradeId: null,
+      symbol: h.symbol,
+      exchange: "NSE",
+      company: h.company || h.symbol,
+      side: "BUY" as const,
+      quantity: Number(h.quantity),
+      price: Number(h.buyPrice),
+      tradeDate: h.buyDate,
+      charges: 0,
+      source: "stock-book"
+    }));
+  }, [legacyHoldings, accountId]);
+
+  const transactions = useMemo(() => {
+    const map = new Map<string, Tx>();
+    [...storedTransactions, ...legacyTransactions].forEach(item => map.set(item.id, item));
+    return [...map.values()].sort((a, b) => `${b.tradeDate}-${b.id}`.localeCompare(`${a.tradeDate}-${a.id}`));
+  }, [storedTransactions, legacyTransactions]);
+
   const symbols = [...new Set(transactions.map(t => t.symbol))];
   const quotesQuery = useQuery({ queryKey: ["portfolio-quotes", symbols], enabled: symbols.length > 0, refetchInterval: 60000, queryFn: () => fetchQuotes({ data: { symbols } }) });
   const quotes = new Map<string, Quote>((quotesQuery.data || []).map(q => [q.symbol, q as Quote]));
@@ -129,6 +160,10 @@ function PortfolioPage() {
   async function removeTransaction(id: string) {
     if (!confirm("Delete this transaction?")) return;
     try {
+      if (id.startsWith("legacy-")) {
+        toast("This holding is managed from the stock page");
+        return;
+      }
       await deletePortfolioTransaction({ data: { accountId, id } });
       writeLocal(accountId, readLocal(accountId).filter(x => x.id !== id));
       await qc.invalidateQueries({ queryKey: ["portfolio-transactions", accountId] }); toast("Transaction deleted");
