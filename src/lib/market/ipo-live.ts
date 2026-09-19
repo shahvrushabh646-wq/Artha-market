@@ -101,6 +101,27 @@ function findRows(root:unknown,predicate:(row:any)=>boolean):any[]{
 function infoRowsFromDetail(root:unknown):any[]{
   return findRows(root,row=>row&&typeof row==="object"&&("title" in row)&&("value" in row));
 }
+function documentUrlsFromDetail(root:unknown):string[]{
+  const found:string[]=[];
+  const seen=new Set<any>();
+  const walk=(value:unknown)=>{
+    if(value==null||typeof value!=="object"||seen.has(value as any))return;
+    seen.add(value as any);
+    if(Array.isArray(value)){for(const item of value)walk(item);return;}
+    for(const [key,val] of Object.entries(value as Record<string,unknown>)){
+      if(typeof val==="string"&&/^https?:\\/\\//i.test(val)){
+        const k=key.toLowerCase();
+        const u=val.trim();
+        if(/rhp|red.?herring|prospectus|offer.?document|offer.?doc|issue.?document|abridged/i.test(k+" "+u))found.push(u);
+      }else walk(val);
+    }
+  };
+  walk(root);
+  return [...new Set(found)].sort((a,b)=>{
+    const score=(u:string)=>/rhp|red.?herring/i.test(u)?0:/prospectus/i.test(u)?1:/offer/i.test(u)?2:3;
+    return score(a)-score(b);
+  });
+}
 function categoryRowsFromDetail(root:unknown):any[]{
   return findRows(root,row=>row&&typeof row==="object"&&(
     "category" in row||"Category" in row
@@ -191,6 +212,85 @@ function parseGmp(text:string,company:string){
     if(rs!=null)return rs;
   }
   return null;
+}
+function textAround(text:string,patterns:RegExp[],max=1800){
+  const t=text.replace(/\\r/g,"");
+  for(const p of patterns){
+    const m=p.exec(t);
+    if(m?.index!=null)return clean(t.slice(m.index,Math.min(t.length,m.index+max)));
+  }
+  return null;
+}
+function parseBusiness(text:string){
+  const section=textAround(text,[/\\bOUR BUSINESS\\b/i,/\\bBUSINESS OVERVIEW\\b/i,/\\bOUR BUSINESS OVERVIEW\\b/i,/\\bABOUT THE COMPANY\\b/i],2200);
+  if(!section)return null;
+  return section.replace(/^(?:OUR BUSINESS|BUSINESS OVERVIEW|OUR BUSINESS OVERVIEW|ABOUT THE COMPANY)\\s*/i,"").slice(0,1800).trim()||null;
+}
+function parseGeography(text:string){
+  const section=textAround(text,[/geographical presence/i,/geographic(?:al)? presence/i,/countries in which we operate/i,/countries where we operate/i,/geographies/i],2400);
+  if(!section)return {business:null,countries:[] as {country:string;business:string;salesPct:number|null}[]};
+  const countries:{country:string;business:string;salesPct:number|null}[]=[];
+  const rx=/\\b(India|United States(?: of America)?|USA|United Kingdom|UK|UAE|United Arab Emirates|Germany|France|Italy|Singapore|Australia|Canada|Japan|Saudi Arabia|Qatar|Oman|Nepal|Bangladesh)\\b[^\\n%]{0,100}?(\\d+(?:\\.\\d+)?)\\s*%/gi;
+  let m:RegExpExecArray|null;
+  while((m=rx.exec(section))){countries.push({country:m[1],business:"",salesPct:Number(m[2])});if(countries.length>=12)break;}
+  return {business:section.slice(0,1800),countries};
+}
+function parseFinancials(text:string){
+  const t=text.replace(/\\r/g,"");
+  const out:{year:string;value:number|null}[]=[];
+  const years=[...t.matchAll(/\\b(20\\d{2})\\b/g)].map(m=>m[1]);
+  const uniqueYears=[...new Set(years)].slice(-6);
+  const pick=(patterns:RegExp[])=>{
+    for(const p of patterns){
+      const m=p.exec(t); if(!m?.index==null)continue;
+      const s=t.slice(m.index,Math.min(t.length,m.index+1200));
+      const nums=[...s.matchAll(/(?:₹|Rs\\.?\\s*)?([\\d,]+(?:\\.\\d+)?)\\s*(?:crore|lakhs?|million)?/gi)].map(z=>Number(z[1].replace(/,/g,""))).filter(Number.isFinite);
+      if(nums.length>=3)return nums.slice(0,3);
+    }
+    return [] as number[];
+  };
+  const rev=pick([/revenue from operations/i,/revenue\\s+from\\s+operations/i,/total income/i]);
+  const profit=pick([/profit\\s+(?:\\/\\s*\\(|for the year|after tax)/i,/profit\\s+after\\s+tax/i,/profit for the period/i]);
+  const eps=pick([/earnings per share/i,/basic earnings per share/i,/diluted earnings per share/i]);
+  const selected=uniqueYears.slice(-3).reverse();
+  if(!selected.length)return {revenues:[],profits:[],eps:[]};
+  const mk=(vals:number[])=>selected.map((year,i)=>({year,value:vals[i]??null}));
+  return {revenues:mk(rev),profits:mk(profit),eps:mk(eps)};
+}
+async function fetchOfferDocumentText(url:string){
+  try{
+    const controller=new AbortController();
+    const timer=setTimeout(()=>controller.abort(),7000);
+    const reader="https://r.jina.ai/"+url;
+    const r=await fetch(reader,{signal:controller.signal,headers:{"User-Agent":HEADERS["User-Agent"],Accept:"text/plain"},cache:"no-store"});
+    clearTimeout(timer);
+    if(!r.ok)return null;
+    const text=await r.text();
+    return text.length>500000?text.slice(0,500000):text;
+  }catch{return null;}
+}
+async function enrichOfferDocument(ipo:Ipo,detail:unknown){
+  try{
+    const urls=documentUrlsFromDetail(detail);
+    for(const url of urls.slice(0,3)){
+      const text=await fetchOfferDocumentText(url);
+      if(!text)continue;
+      const business=parseBusiness(text);
+      const geo=parseGeography(text);
+      const fin=parseFinancials(text);
+      if(business)ipo.business=business;
+      if(geo.countries.length)ipo.countries=geo.countries;
+      if(fin.revenues.length)ipo.revenues=fin.revenues;
+      if(fin.profits.length)ipo.profits=fin.profits;
+      if(fin.eps.length)ipo.eps=fin.eps;
+      ipo.sourceUrls=[...new Set([...ipo.sourceUrls,url])];
+      ipo.detailSource="NSE India issue-information + Red Herring Prospectus";
+      ipo.verifiedSources=[...new Set([...ipo.verifiedSources,"NSE Red Herring Prospectus"])];
+      ipo.verifiedAt=new Date().toISOString();
+      if(business||geo.countries.length||fin.revenues.length||fin.profits.length||fin.eps.length)break;
+    }
+  }catch{}
+  return ipo;
 }
 async function enrichGmp(ipo:Ipo){
   const upperBand=upper(ipo.priceBand);
