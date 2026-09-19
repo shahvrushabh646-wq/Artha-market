@@ -146,7 +146,8 @@ async function loadNse(){
   const rows=[...rowsFromNse(current),...rowsFromNse(upcoming)];
   for(const r of rows){
     if(!r?.companyName && !r?.symbol && !r?.company)continue;
-    if(!r.companyName && r.company) r.companyName=r.company;\n    const ipo=baseNse(r);
+    if(!r.companyName && r.company) r.companyName=r.company;
+    const ipo=baseNse(r);
     if(ipo.closeDate&&ipo.closeDate<today)continue;
     const previous=map.get(ipo.id);
     if(!previous||r.status==="Active")map.set(ipo.id,ipo);
