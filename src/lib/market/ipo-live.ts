@@ -122,11 +122,44 @@ const GMP_SOURCES=[
   {name:"IPO Central",url:"https://ipocentral.in/ipo-grey-market-premium/"},
   {name:"GMPWatch",url:"https://www.gmpwatch.in/"}
 ];
+function gmpUrls(ipo:Ipo,source:string){
+  const special=normName(ipo.name).includes("national stock exchange");
+  if(special){
+    if(source==="InvestorGain")return ["https://www.investorgain.com/gmp/nse-ipo/2305/","https://investorgain.in/"];
+    if(source==="IPO Watch")return ["https://ipowatch.in/nse-ipo-gmp-grey-market-premium/","https://ipowatch.in/ipo-grey-market-premium-latest-ipo-gmp/"];
+    if(source==="IPO Central")return ["https://ipocentral.in/nse-ipo-gmp/"];
+    if(source==="GMPWatch")return ["https://www.gmpwatch.in/nse-ipo-gmp-today-grey-market-premium/"];
+  }
+  const slug=slugId(ipo.name);
+  if(source==="InvestorGain")return ["https://investorgain.in/"];
+  if(source==="IPO Watch")return [`https://ipowatch.in/${slug}-ipo-gmp-grey-market-premium/`,"https://ipowatch.in/ipo-grey-market-premium-latest-ipo-gmp/"];
+  if(source==="IPO Central")return [`https://ipocentral.in/${slug}-ipo-gmp-price-allotment/`];
+  if(source==="GMPWatch")return [`https://www.gmpwatch.in/${slug}-ipo-gmp-today-grey-market-premium/`];
+  return [];
+}
+function aliasesFor(company:string){
+  const n=normName(company);
+  const a=[company,n];
+  if(n.includes("national stock exchange"))a.push("NSE");
+  const words=n.split(" ").filter(x=>x.length>=4);
+  if(words.length>=2)a.push(words.slice(0,3).join(" "));
+  return [...new Set(a)];
+}
+function parseGmp(text:string,company:string){
+  for(const alias of aliasesFor(company)){
+    const rs=parseGmpFromText(text,alias);
+    if(rs!=null)return rs;
+  }
+  return null;
+}
 async function enrichGmp(ipo:Ipo){
   const upperBand=upper(ipo.priceBand);
   const results=await Promise.all(GMP_SOURCES.map(async s=>{
-    const text=await fetchSourceText(s.url);
-    const rs=text?parseGmpFromText(text,ipo.name):null;
+    let rs:number|null=null;
+    for(const url of gmpUrls(ipo,s.name)){
+      const text=await fetchSourceText(url);
+      if(text){rs=parseGmp(text,ipo.name);if(rs!=null)break;}
+    }
     const pct=rs!=null&&upperBand?Number(((rs/upperBand)*100).toFixed(2)):null;
     return {source:s.name,pct,rs,asOf:new Date().toISOString()};
   }));
@@ -137,12 +170,11 @@ async function enrichGmp(ipo:Ipo){
     const sorted=valid.map(x=>x.rs).sort((a,b)=>a-b);
     const mid=Math.floor(sorted.length/2);
     const median=sorted.length%2?sorted[mid]:(sorted[mid-1]+sorted[mid])/2;
-    const rounded=Math.round(median);
-    ipo.gmpRs=rounded;
-    ipo.gmpPct=upperBand?Number(((rounded/upperBand)*100).toFixed(2)):null;
+    ipo.gmpRs=Math.round(median);
+    ipo.gmpPct=upperBand?Number(((ipo.gmpRs/upperBand)*100).toFixed(2)):null;
   }else{
-    ipo.gmpRs=null;
-    ipo.gmpPct=null;
+    ipo.gmpRs=valid.length===1?valid[0].rs:null;
+    ipo.gmpPct=valid.length===1?valid[0].pct:null;
   }
   return ipo;
 }
