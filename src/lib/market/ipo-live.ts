@@ -214,7 +214,7 @@ function parseGmp(text:string,company:string){
   return null;
 }
 function textAround(text:string,patterns:RegExp[],max=1800){
-  const t=text.replace(/\\r/g,"");
+  const t=text.replace(/\r/g,"");
   for(const p of patterns){
     const m=p.exec(t);
     if(m?.index!=null)return clean(t.slice(m.index,Math.min(t.length,m.index+max)));
@@ -222,15 +222,15 @@ function textAround(text:string,patterns:RegExp[],max=1800){
   return null;
 }
 function parseBusiness(text:string){
-  const section=textAround(text,[/\\bOUR BUSINESS\\b/i,/\\bBUSINESS OVERVIEW\\b/i,/\\bOUR BUSINESS OVERVIEW\\b/i,/\\bABOUT THE COMPANY\\b/i],2200);
+  const section=textAround(text,[/\bOUR BUSINESS\b/i,/\bBUSINESS OVERVIEW\b/i,/\bOUR BUSINESS OVERVIEW\b/i,/\bABOUT THE COMPANY\b/i],2200);
   if(!section)return null;
-  return section.replace(/^(?:OUR BUSINESS|BUSINESS OVERVIEW|OUR BUSINESS OVERVIEW|ABOUT THE COMPANY)\\s*/i,"").slice(0,1800).trim()||null;
+  return section.replace(/^(?:OUR BUSINESS|BUSINESS OVERVIEW|OUR BUSINESS OVERVIEW|ABOUT THE COMPANY)\s*/i,"").slice(0,1800).trim()||null;
 }
 function parseObjectsAndRisks(text:string){
   const take=(patterns:RegExp[],max=2600)=>{
     const s=textAround(text,patterns,max);
     if(!s)return [] as string[];
-    return s.split(/\\n|•|(?=\\d+\\.\\s)/).map(clean).filter(x=>x.length>25).slice(0,8);
+    return s.split(/\n|•|(?=\d+\\.\s)/).map(clean).filter(x=>x.length>25).slice(0,8);
   };
   return {
     objects:take([/objects of the issue/i,/objects of issue/i,/objects of the offer/i],3200),
@@ -241,36 +241,36 @@ function parseOffice(text:string){
   const s=textAround(text,[/registered office/i,/corporate office/i],900);
   if(!s)return {city:null as string|null,state:null as string|null};
   const states=["Maharashtra","Gujarat","Delhi","Karnataka","Tamil Nadu","Telangana","Rajasthan","Uttar Pradesh","West Bengal","Haryana","Punjab","Kerala","Madhya Pradesh","Andhra Pradesh","Odisha","Bihar","Jharkhand","Chhattisgarh","Goa","Uttarakhand","Assam"];
-  const state=states.find(v=>new RegExp("\\\\b"+v+"\\\\b","i").test(s))??null;
+  const state=states.find(v=>new RegExp("\\\b"+v+"\\\b","i").test(s))??null;
   const cities=["Mumbai","Thane","Pune","Navi Mumbai","Ahmedabad","Vadodara","Surat","Delhi","Bengaluru","Bangalore","Chennai","Hyderabad","Jaipur","Kolkata","Noida","Gurugram","Gurgaon","Indore","Lucknow","Kochi","Rajkot","Nagpur","Nashik"];
-  const city=cities.find(v=>new RegExp("\\\\b"+v+"\\\\b","i").test(s))??null;
+  const city=cities.find(v=>new RegExp("\\\b"+v+"\\\b","i").test(s))??null;
   return {city,state};
 }
 function parseGeography(text:string){
   const section=textAround(text,[/geographical presence/i,/geographic(?:al)? presence/i,/countries in which we operate/i,/countries where we operate/i,/geographies/i],2400);
   if(!section)return {business:null,countries:[] as {country:string;business:string;salesPct:number|null}[]};
   const countries:{country:string;business:string;salesPct:number|null}[]=[];
-  const rx=/\\b(India|United States(?: of America)?|USA|United Kingdom|UK|UAE|United Arab Emirates|Germany|France|Italy|Singapore|Australia|Canada|Japan|Saudi Arabia|Qatar|Oman|Nepal|Bangladesh)\\b[^\\n%]{0,100}?(\\d+(?:\\.\\d+)?)\\s*%/gi;
+  const rx=/\b(India|United States(?: of America)?|USA|United Kingdom|UK|UAE|United Arab Emirates|Germany|France|Italy|Singapore|Australia|Canada|Japan|Saudi Arabia|Qatar|Oman|Nepal|Bangladesh)\b[^\n%]{0,100}?(\d+(?:\\.\d+)?)\s*%/gi;
   let m:RegExpExecArray|null;
   while((m=rx.exec(section))){countries.push({country:m[1],business:"",salesPct:Number(m[2])});if(countries.length>=12)break;}
   return {business:section.slice(0,1800),countries};
 }
 function parseFinancials(text:string){
-  const t=text.replace(/\\r/g,"");
+  const t=text.replace(/\r/g,"");
   const out:{year:string;value:number|null}[]=[];
-  const years=[...t.matchAll(/\\b(20\\d{2})\\b/g)].map(m=>m[1]);
+  const years=[...t.matchAll(/\b(20\d{2})\b/g)].map(m=>m[1]);
   const uniqueYears=[...new Set(years)].slice(-6);
   const pick=(patterns:RegExp[])=>{
     for(const p of patterns){
       const m=p.exec(t); if(m?.index==null)continue;
       const s=t.slice(m.index,Math.min(t.length,m.index+1200));
-      const nums=[...s.matchAll(/(?:₹|Rs\\.?\\s*)?([\\d,]+(?:\\.\\d+)?)\\s*(?:crore|lakhs?|million)?/gi)].map(z=>Number(z[1].replace(/,/g,""))).filter(Number.isFinite);
+      const nums=[...s.matchAll(/(?:₹|Rs\\.?\s*)?([\d,]+(?:\\.\d+)?)\s*(?:crore|lakhs?|million)?/gi)].map(z=>Number(z[1].replace(/,/g,""))).filter(Number.isFinite);
       if(nums.length>=3)return nums.slice(0,3);
     }
     return [] as number[];
   };
-  const rev=pick([/revenue from operations/i,/revenue\\s+from\\s+operations/i,/total income/i]);
-  const profit=pick([/profit\\s+(?:\\/\\s*\\(|for the year|after tax)/i,/profit\\s+after\\s+tax/i,/profit for the period/i]);
+  const rev=pick([/revenue from operations/i,/revenue\s+from\s+operations/i,/total income/i]);
+  const profit=pick([/profit\s+(?:\\/\s*\\(|for the year|after tax)/i,/profit\s+after\s+tax/i,/profit for the period/i]);
   const eps=pick([/earnings per share/i,/basic earnings per share/i,/diluted earnings per share/i]);
   const selected=uniqueYears.slice(-3).reverse();
   if(!selected.length)return {revenues:[],profits:[],eps:[]};
@@ -297,12 +297,12 @@ async function enrichOfferDocument(ipo:Ipo,detail:unknown){
       if(!text)continue;
       const business=parseBusiness(text);
       const geo=parseGeography(text);
-      const fin=parseFinancials(text);
+      const fin=parseFinancials(text);\n      const use=parseObjectsAndRisks(text);\n      const office=parseOffice(text);
       if(business)ipo.business=business;
       if(geo.countries.length)ipo.countries=geo.countries;
       if(fin.revenues.length)ipo.revenues=fin.revenues;
       if(fin.profits.length)ipo.profits=fin.profits;
-      if(fin.eps.length)ipo.eps=fin.eps;
+      if(fin.eps.length)ipo.eps=fin.eps;\n      if(use.objects.length)ipo.objects=use.objects;\n      if(use.risks.length)ipo.risks=use.risks;\n      if(office.city)ipo.city=office.city;\n      if(office.state)ipo.state=office.state;
       ipo.sourceUrls=[...new Set([...ipo.sourceUrls,url])];
       ipo.detailSource="NSE India issue-information + Red Herring Prospectus";
       ipo.verifiedSources=[...new Set([...ipo.verifiedSources,"NSE Red Herring Prospectus"])];
