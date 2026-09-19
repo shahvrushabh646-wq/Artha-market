@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-type Ipo={symbol?:string;id:string;name:string;type:"Mainboard"|"SME";openDate:string|null;closeDate:string|null;listingDate:string|null;issueSize:number|null;minSubscription:number|null;subscription:number|null;subscriptionSource:string|null;subscriptionCategories:{category:string;value:number|null}[];gmpPct:number|null;gmpSources:{source:string;pct:number|null}[];city:string|null;state:string|null;business:string|null;countries:{country:string;business:string;salesPct:number|null}[];revenues:{year:string;value:number|null}[];profits:{year:string;value:number|null}[];eps:{year:string;value:number|null}[];priceBand:string|null;lotSize:number|null;faceValue:number|null;sharesOffered:number|null;offeredToPublic:number|null;retailShares:number|null;qibShares:number|null;niiShares:number|null;freshIssue:number|null;offerForSale:number|null;issueType:string|null;objects:string[];risks:string[];promoterHolding:number|null;postIssuePromoterHolding:number|null;moneycontrolUrl:string|null;detailSource:string|null;verifiedSources:string[];sourceUrls:string[];verifiedAt:string};
+type Ipo={symbol?:string;id:string;name:string;type:"Mainboard"|"SME";openDate:string|null;closeDate:string|null;listingDate:string|null;issueSize:number|null;minSubscription:number|null;subscription:number|null;subscriptionSource:string|null;subscriptionCategories:{category:string;value:number|null}[];gmpPct:number|null;gmpRs:number|null;gmpSources:{source:string;pct:number|null;rs:number|null;asOf:string|null}[];gmpVerifiedSources:string[];city:string|null;state:string|null;business:string|null;countries:{country:string;business:string;salesPct:number|null}[];revenues:{year:string;value:number|null}[];profits:{year:string;value:number|null}[];eps:{year:string;value:number|null}[];priceBand:string|null;lotSize:number|null;faceValue:number|null;sharesOffered:number|null;offeredToPublic:number|null;retailShares:number|null;qibShares:number|null;niiShares:number|null;freshIssue:number|null;offerForSale:number|null;issueType:string|null;objects:string[];risks:string[];promoterHolding:number|null;postIssuePromoterHolding:number|null;moneycontrolUrl:string|null;detailSource:string|null;verifiedSources:string[];sourceUrls:string[];verifiedAt:string};
 type SamcoIpo={id:string;slug:string;company_name:string;type:string;company_profile:string;issue_type:string;issue_open:string;issue_close:string;listed_date:string;face_value:string;price_band:string;bid_lot:string;minimum_order:string;listing:string;issue_size:string;fresh_issue:string;ofs:string;obj_issue:string;key_strengths:string;risks:string;RHP_url:string;knowledge_center_url:string};
 
 const NSE = "https://www.nseindia.com";
@@ -77,6 +77,72 @@ function issueSizeCr(v:string|null|undefined){
   const u=m[2].toLowerCase();
   return u.startsWith("million")?x/10:u.startsWith("lakh")?x/100:x;
 }
+
+function normName(v:string){
+  return clean(v).toLowerCase()
+    .replace(/\b(limited|ltd|india|private|pvt|company|corporation|corporate|inc)\b/g," ")
+    .replace(/[^a-z0-9]+/g," ")
+    .trim();
+}
+function parseGmpFromText(text:string,company:string){
+  const t=clean(text);
+  const key=normName(company);
+  if(!key)return null;
+  const compact=t.toLowerCase();
+  const parts=key.split(" ").filter(Boolean);
+  let idx=compact.indexOf(key);
+  if(idx<0){
+    const first=parts.slice(0,3).join(" ");
+    idx=compact.indexOf(first);
+  }
+  if(idx<0)return null;
+  const window=t.slice(idx,idx+900);
+  const m=window.match(/(?:GMP|grey market premium|live gmp)[^₹0-9\-]{0,80}(?:₹\s*)?(-?\d[\d,]*(?:\.\d+)?)/i);
+  if(!m)return null;
+  const value=Number(m[1].replace(/,/g,""));
+  return Number.isFinite(value)?value:null;
+}
+async function fetchSourceText(url:string){
+  try{
+    const r=await fetch(url,{headers:{
+      "User-Agent":HEADERS["User-Agent"],
+      Accept:"text/html,application/xhtml+xml,application/json,text/plain,*/*"
+    },cache:"no-store"});
+    if(!r.ok)return null;
+    return await r.text();
+  }catch{return null;}
+}
+const GMP_SOURCES=[
+  {name:"InvestorGain",url:"https://www.investorgain.com/"},
+  {name:"IPO Watch",url:"https://ipowatch.in/ipo-grey-market-premium-latest-ipo-gmp/"},
+  {name:"IPO Central",url:"https://ipocentral.in/ipo-grey-market-premium/"},
+  {name:"GMPWatch",url:"https://www.gmpwatch.in/"}
+];
+async function enrichGmp(ipo:Ipo){
+  const upperBand=upper(ipo.priceBand);
+  const results=await Promise.all(GMP_SOURCES.map(async s=>{
+    const text=await fetchSourceText(s.url);
+    const rs=text?parseGmpFromText(text,ipo.name):null;
+    const pct=rs!=null&&upperBand?Number(((rs/upperBand)*100).toFixed(2)):null;
+    return {source:s.name,pct,rs,asOf:new Date().toISOString()};
+  }));
+  const valid=results.filter(x=>x.rs!=null) as Array<{source:string;pct:number|null;rs:number;asOf:string}>;
+  ipo.gmpSources=results;
+  ipo.gmpVerifiedSources=valid.map(x=>x.source);
+  if(valid.length>=2){
+    const sorted=valid.map(x=>x.rs).sort((a,b)=>a-b);
+    const mid=Math.floor(sorted.length/2);
+    const median=sorted.length%2?sorted[mid]:(sorted[mid-1]+sorted[mid])/2;
+    const rounded=Math.round(median);
+    ipo.gmpRs=rounded;
+    ipo.gmpPct=upperBand?Number(((rounded/upperBand)*100).toFixed(2)):null;
+  }else{
+    ipo.gmpRs=null;
+    ipo.gmpPct=null;
+  }
+  return ipo;
+}
+
 function baseNse(r:any):Ipo{
   return {
     symbol:r.symbol??undefined,id:slugId(r.companyName||r.symbol||"ipo"),
@@ -84,7 +150,7 @@ function baseNse(r:any):Ipo{
     type:r.series==="SME"?"SME":"Mainboard",
     openDate:date(r.issueStartDate),closeDate:date(r.issueEndDate),listingDate:null,
     issueSize:null,minSubscription:null,subscription:n(r.noOfTime),subscriptionSource:"NSE India",
-    subscriptionCategories:[],gmpPct:null,gmpSources:[],
+    subscriptionCategories:[],gmpPct:null,gmpRs:null,gmpSources:[],gmpVerifiedSources:[],
     city:null,state:null,business:null,countries:[],revenues:[],profits:[],eps:[],
     priceBand:band(r.issuePrice),lotSize:null,faceValue:null,
     sharesOffered:n(r.noOfSharesOffered),offeredToPublic:null,retailShares:null,qibShares:null,niiShares:null,
@@ -154,7 +220,7 @@ async function loadNse(){
   }
   const result:Ipo[]=[];
   for(const ipo of map.values()){
-    result.push(await enrichNse(ipo,cookie));
+    result.push(await enrichGmp(await enrichNse(ipo,cookie)));
   }
   return result
     .filter(x=>!!x.closeDate&&x.closeDate>=today)
