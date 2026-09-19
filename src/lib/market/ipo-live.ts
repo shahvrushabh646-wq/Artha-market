@@ -78,6 +78,36 @@ function rowsFromCategory(raw:unknown):any[]{
   if(x&&x.data&&Array.isArray(x.data.data)) return x.data.data;
   return [];
 }
+function findRows(root:unknown,predicate:(row:any)=>boolean):any[]{
+  const seen=new Set<any>();
+  const walk=(value:unknown):any[]=>{
+    if(value==null||typeof value!=="object"||seen.has(value as any))return [];
+    seen.add(value as any);
+    if(Array.isArray(value)){
+      const direct=value.filter(predicate);
+      if(direct.length)return direct;
+      for(const item of value){const found=walk(item);if(found.length)return found;}
+      return [];
+    }
+    const obj=value as Record<string,unknown>;
+    for(const key of Object.keys(obj)){
+      const found=walk(obj[key]);
+      if(found.length)return found;
+    }
+    return [];
+  };
+  return walk(root);
+}
+function infoRowsFromDetail(root:unknown):any[]{
+  return findRows(root,row=>row&&typeof row==="object"&&("title" in row)&&("value" in row));
+}
+function categoryRowsFromDetail(root:unknown):any[]{
+  return findRows(root,row=>row&&typeof row==="object"&&(
+    "category" in row||"Category" in row
+  )&&(
+    "noOfTotalMeant" in row||"noOfSharesBid" in row||"noOfsharesBid" in row||"noOfTime" in row
+  ));
+}
 
 function issueSizeCr(v:string|null|undefined){
   const s=clean(v);
@@ -220,14 +250,15 @@ async function enrichNse(ipo:Ipo,cookie:string){
     const symbol=String(ipo.symbol??"");
     if(!symbol)return ipo;
     const d=await fetchNse("/api/ipo-detail?symbol="+encodeURIComponent(symbol)+"&series="+series,cookie);
-    const info=parseInfo(d?.issueInfo?.dataList??[]);
-    const period=info["Issue Period"]?.match(/(\d{2}-\w{3}-\d{4})\s*to\s*(\d{2}-\w{3}-\d{4})/i);
+    const info=parseInfo(infoRowsFromDetail(d));
+    const period=(info["Issue Period"]??info["Issue period"])?.match(/(\d{2}-\w{3}-\d{4})\s*to\s*(\d{2}-\w{3}-\d{4})/i);
     if(period){ipo.openDate=date(period[1]);ipo.closeDate=date(period[2]);}
-    ipo.priceBand=band(info["Price Range"])||ipo.priceBand;
-    const lot=info["Bid Lot"]?.match(/([\d,]+)\s*Equity Shares/i);
+    ipo.priceBand=band(info["Price Range"]??info["Price range"])||ipo.priceBand;
+    const lotText=info["Bid Lot"]??info["Bid lot"]??info["Minimum Order Quantity"]??info["Minimum order quantity"];
+    const lot=clean(lotText).match(/([\d,]+)\s*(?:Equity Shares|shares?)/i);
     ipo.lotSize=n(lot?.[1])??ipo.lotSize;
-    ipo.faceValue=n(info["Face Value"]?.match(/[\d,.]+/)?.[0])??ipo.faceValue;
-    ipo.issueSize=issueSizeCr(info["Issue Size"])??ipo.issueSize;
+    ipo.faceValue=n((info["Face Value"]??info["Face value"])?.match(/[\d,.]+/)?.[0])??ipo.faceValue;
+    ipo.issueSize=issueSizeCr(info["Issue Size"]??info["Issue size"])??ipo.issueSize;
     const high=upper(info["Price Range"]);
     const low=clean(info["Price Range"]).match(/(?:Rs\.?|₹)?\s*([\d,.]+)\s*(?:-|to|–)/i);
     const lowPrice=n(low?.[1]);
@@ -238,12 +269,15 @@ async function enrichNse(ipo:Ipo,cookie:string){
       const minimumLots=ipo.type==="SME"?Math.max(2,Math.ceil(200000/lotValue)):1;
       ipo.minSubscription=ipo.lotSize*minimumLots*applicationPrice;
     }
-    const cats=rowsFromCategory(d?.activeCat);
+    const cats=categoryRowsFromDetail(d);
     const mapped:{category:string;value:number|null}[]=[];
+    let totalBidShares=0;
     for(const row of cats){
       if(!row||row.srNo==="Sr.No.")continue;
       const label=clean(row.category??row.Category??row.investorCategory??row.name).toLowerCase();
       const value=n(row.noOfTotalMeant??row.noOfTime??row.subscription??row.noOfTimes);
+      const bid=n(row.noOfsharesBid??row.noOfSharesBid??row.sharesBid);
+      if(bid!=null)totalBidShares+=bid;
       if(label.includes("qualified")||label.includes("qib")||String(row.srNo)==="1")mapped.push({category:"QIB",value});
       else if(label.includes("non institutional")||label.includes("nii")||label.includes("hni")||String(row.srNo)==="2")mapped.push({category:"NII",value});
       else if(label.includes("retail")||label.includes("individual")||String(row.srNo)==="3")mapped.push({category:"Retail",value});
@@ -254,20 +288,14 @@ async function enrichNse(ipo:Ipo,cookie:string){
       const vals=mapped.map(x=>x.value).filter((x):x is number=>x!=null);
       if(vals.length)ipo.subscription=Math.max(...vals);
     }
-    // Some NSE responses expose only the total multiple outside activeCat.
-    if(ipo.subscription==null){
-      const totalRows=rowsFromCategory(d?.subscriptionData??d?.subscription??d?.data);
-      for(const row of totalRows){
-        const label=clean(row?.category??row?.name).toLowerCase();
-        if(label.includes("total")){
-          const value=n(row?.noOfTime??row?.subscription??row?.noOfTimes);
-          if(value!=null){ipo.subscription=value;break;}
-        }
-      }
+    if(ipo.subscription==null&&ipo.sharesOffered&&totalBidShares>0){
+      ipo.subscription=Number((totalBidShares/ipo.sharesOffered).toFixed(4));
     }
-    const bidRows=rowsFromNse(d?.bidDetails??d?.subscriptionData??d?.biddingData);
-    const bidShares=bidRows.reduce((sum,row)=>sum+(n(row?.noOfsharesBid??row?.noOfSharesBid??row?.sharesBid)??0),0);
-    ipo.subscriptionAmount=bidShares>0&&high?Number((bidShares*high/10000000).toFixed(2)):ipo.issueSize!=null&&ipo.subscription!=null?Number((ipo.issueSize*ipo.subscription).toFixed(2)):null;
+    if(ipo.subscription==null&&mapped.length){
+      const vals=mapped.map(x=>x.value).filter((x):x is number=>x!=null);
+      if(vals.length)ipo.subscription=Math.max(...vals);
+    }
+    ipo.subscriptionAmount=totalBidShares>0&&high?Number((totalBidShares*high/10000000).toFixed(2)):ipo.issueSize!=null&&ipo.subscription!=null?Number((ipo.issueSize*ipo.subscription).toFixed(2)):ipo.subscriptionAmount;
     ipo.subscriptionSource="NSE India";
     ipo.detailSource="NSE India official issue-information";
     ipo.verifiedSources=["NSE India","NSE India issue-information"];
