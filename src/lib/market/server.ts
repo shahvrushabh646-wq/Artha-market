@@ -198,7 +198,7 @@ async function motilalQuote(symbol: string): Promise<Quote | null> {
     const scripCode=map[displaySymbol(symbol)] ?? map[symbol];
     if(!scripCode) return null;
     const exchange=/\\.BO$/i.test(symbol) ? "BSE" : "NSE";
-    const r=await fetch("https://openapi.motilaloswal.com/rest/report/v1/getltpdata",{
+    const r=await fetch("https://openapi.motilaloswal.com/rest/report/v3/getltpdata",{
       method:"POST",headers:{Authorization:token?`Bearer ${token}`:"",apikey:apiKey,"Content-Type":"application/json",Accept:"application/json"},
       body:JSON.stringify({exchange,scripcode:String(scripCode)}),cache:"no-store"
     });
@@ -206,7 +206,7 @@ async function motilalQuote(symbol: string): Promise<Quote | null> {
     const root=record(await r.json()), rows=Array.isArray(root?.data) ? root.data : Array.isArray(root?.result) ? root.result : [];
     const row=record(rows[0]);
     if(!row) return null;
-    const normalized={...row,last_price:number(row?.ltp) ?? number(row?.LTP),previous_close:number(row?.close) ?? number(row?.Close),volume:number(row?.volume) ?? number(row?.Volume),high:number(row?.high) ?? number(row?.High),low:number(row?.low) ?? number(row?.Low)};
+    const normalized={...row,last_price:(number(row?.ltp) ?? number(row?.LTP)) != null ? (number(row?.ltp) ?? number(row?.LTP))! / 100 : null,previous_close:(number(row?.close) ?? number(row?.Close)) != null ? (number(row?.close) ?? number(row?.Close))! / 100 : null,volume:number(row?.volume) ?? number(row?.Volume),high:(number(row?.high) ?? number(row?.High)) != null ? (number(row?.high) ?? number(row?.High))! / 100 : null,low:(number(row?.low) ?? number(row?.Low)) != null ? (number(row?.low) ?? number(row?.Low))! / 100 : null};
     return quoteFromPayload(symbol,normalized,exchange,displaySymbol(symbol));
   }catch{return null;}
 }
