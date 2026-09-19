@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 export const Route=createFileRoute("/ipo")({validateSearch:(s:Record<string,unknown>)=>({id:typeof s.id==="string"?s.id:undefined}),component:IpoPage});
 function money(v:number|null){return v==null?"ચકાસણી હેઠળ":`₹${v.toLocaleString("en-IN",{maximumFractionDigits:2})}`}
 function date(v:string|null){return v?new Date(`${v}T00:00:00`).toLocaleDateString("gu-IN",{day:"2-digit",month:"short",year:"numeric"}):"માહિતી ઉપલબ્ધ નથી"}
-const CORE_SOURCES=["NSE India official IPO data","NSE India issue-information","Moneycontrol IPO database"];
+const CORE_SOURCES=["NSE India official IPO data","NSE India issue-information"];
 function typeGujarati(v:string){return v==="Mainboard"?"મેઇનબોર્ડ":v==="SME"?"એસએમઈ":v}
 function isOpenIpo(ipo:{openDate:string|null;closeDate:string|null}){const today=new Date().toISOString().slice(0,10);return !!ipo.openDate&&ipo.openDate<=today&&!!ipo.closeDate&&ipo.closeDate>=today}
 function issueTypeGujarati(v:string|null){if(!v)return null;const x=v.toLowerCase();if(x.includes("offer for sale")||x.includes("ofs"))return "ઓફર ફોર સેલ (OFS)";if(x.includes("fresh"))return "ફ્રેશ ઇશ્યૂ";if(x.includes("book"))return "બુક બિલ્ડિંગ જાહેર ઇશ્યૂ";return v}
