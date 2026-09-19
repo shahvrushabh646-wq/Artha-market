@@ -211,7 +211,10 @@ async function enrichNse(ipo:Ipo,cookie:string){
     ipo.faceValue=n(info["Face Value"]?.match(/[\d,.]+/)?.[0])??ipo.faceValue;
     ipo.issueSize=issueSizeCr(info["Issue Size"])??ipo.issueSize;
     const high=upper(info["Price Range"]);
-    const low=clean(info["Price Range"]).match(/(?:Rs\.?|₹)?\s*([\d,.]+)\s*(?:-|to|–)/i);\n    const lowPrice=n(low?.[1]);\n    if(ipo.lotSize&&lowPrice)ipo.minSubscription=ipo.lotSize*lowPrice;\n    else if(ipo.lotSize&&high)ipo.minSubscription=ipo.lotSize*high;
+    const low=clean(info["Price Range"]).match(/(?:Rs\.?|₹)?\s*([\d,.]+)\s*(?:-|to|–)/i);
+    const lowPrice=n(low?.[1]);
+    if(ipo.lotSize&&lowPrice)ipo.minSubscription=ipo.lotSize*lowPrice;
+    else if(ipo.lotSize&&high)ipo.minSubscription=ipo.lotSize*high;
     const cats=d?.activeCat?.dataList??[];
     const mapped:{category:string;value:number|null}[]=[];
     for(const row of cats){
@@ -228,7 +231,8 @@ async function enrichNse(ipo:Ipo,cookie:string){
       const vals=mapped.map(x=>x.value).filter((x):x is number=>x!=null);
       if(vals.length)ipo.subscription=Math.max(...vals);
     }
-    ipo.subscriptionAmount=ipo.issueSize!=null&&ipo.subscription!=null?Number((ipo.issueSize*ipo.subscription).toFixed(2)):null;\n    ipo.subscriptionSource="NSE India";
+    ipo.subscriptionAmount=ipo.issueSize!=null&&ipo.subscription!=null?Number((ipo.issueSize*ipo.subscription).toFixed(2)):null;
+    ipo.subscriptionSource="NSE India";
     ipo.detailSource="NSE India official issue-information";
     ipo.verifiedSources=["NSE India","NSE India issue-information"];
     ipo.verifiedAt=new Date().toISOString();
