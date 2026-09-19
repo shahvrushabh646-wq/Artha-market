@@ -58,7 +58,7 @@ function baseNse(r:any):Ipo{
 async function enrichNse(ipo:Ipo,cookie:string){
   try{
     const series=ipo.type==="SME"?"SME":"EQ";
-    const symbol=ipo.symbol;
+    const symbol=String(ipo.symbol??"");
     if(!symbol)return ipo;
     const d=await fetchNse("/api/ipo-detail?symbol="+encodeURIComponent(symbol)+"&series="+series,cookie);
     const info=parseInfo(d?.issueInfo?.dataList??[]);
