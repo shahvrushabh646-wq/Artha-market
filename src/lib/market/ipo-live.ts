@@ -3,26 +3,134 @@ import { applyVerifiedIpoOverrides } from "./ipo-overrides";
 
 type Ipo={id:string;name:string;type:"Mainboard"|"SME";openDate:string|null;closeDate:string|null;listingDate:string|null;issueSize:number|null;minSubscription:number|null;subscription:number|null;subscriptionSource:string|null;subscriptionCategories:{category:string;value:number|null}[];gmpPct:number|null;gmpSources:{source:string;pct:number|null}[];city:string|null;state:string|null;business:string|null;countries:{country:string;business:string;salesPct:number|null}[];revenues:{year:string;value:number|null}[];profits:{year:string;value:number|null}[];eps:{year:string;value:number|null}[];priceBand:string|null;lotSize:number|null;faceValue:number|null;sharesOffered:number|null;offeredToPublic:number|null;retailShares:number|null;qibShares:number|null;niiShares:number|null;freshIssue:number|null;offerForSale:number|null;issueType:string|null;objects:string[];risks:string[];promoterHolding:number|null;postIssuePromoterHolding:number|null;moneycontrolUrl:string|null;detailSource:string|null;verifiedSources:string[];sourceUrls:string[];verifiedAt:string};
 type SamcoIpo={id:string;slug:string;company_name:string;type:string;company_profile:string;issue_type:string;issue_open:string;issue_close:string;listed_date:string;face_value:string;price_band:string;bid_lot:string;minimum_order:string;listing:string;issue_size:string;fresh_issue:string;ofs:string;obj_issue:string;key_strengths:string;risks:string;RHP_url:string;knowledge_center_url:string};
-const ENDPOINT="https://www.samco.in/ipo/get_upcoming_data/";
-const cache=new Map<string,{expires:number;value:Ipo[]}>();
-function n(v:unknown){const x=Number(String(v??"").replace(/,/g,""));return Number.isFinite(x)?x:null}
-function clean(v:string){return String(v??"").replace(/<[^>]+>/g," ").replace(/\\r|\\n/g," ").replace(/&nbsp;/gi," ").replace(/&amp;/gi,"&").replace(/\\\//g,"/").replace(/\\"/g,'"').replace(/\\s+/g," ").trim()}
-function date(v:string|null){return v&&/^\\d{4}-\\d{2}-\\d{2}/.test(v)?v.slice(0,10):null}
-function band(v:string){const m=String(v??"").match(/(?:Rs|₹)\\s*([\\d,.]+)\\s*(?:to|-|–)\\s*(?:Rs|₹)?\\s*([\\d,.]+)/i);if(m)return `₹${n(m[1])?.toLocaleString("en-IN")} – ₹${n(m[2])?.toLocaleString("en-IN")}`;const one=String(v??"").match(/(?:Rs|₹)\\s*([\\d,.]+)/i);return one?`₹${n(one[1])?.toLocaleString("en-IN")}`:null}
-function upper(v:string){const range=String(v??"").match(/(?:Rs|₹)\\s*[\\d,.]+\\s*(?:to|-|–)\\s*(?:Rs|₹)?\\s*([\\d,.]+)/i);if(range)return n(range[1]);const one=String(v??"").match(/(?:Rs|₹)\\s*([\\d,.]+)/i);return n(one?.[1])}
-function slugId(v:string){return String(v).toLowerCase().replace(/limited|ltd\\.?|private|pvt\\.?|ipo/g,"").replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"")}
-function blank(x:SamcoIpo):Ipo{const p=clean(x.company_profile);const cityMatch=p.match(/\\b(Mumbai|Surat|Ahmedabad|Pune|Bengaluru|Bangalore|Chennai|Delhi|Hyderabad|Kolkata|Vadodara|Rajkot|Jaipur|Noida|Gurugram|Indore)\\b/i);const stateMatch=p.match(/\\b(Maharashtra|Gujarat|Karnataka|Tamil Nadu|Delhi|Telangana|West Bengal|Rajasthan|Haryana|Uttar Pradesh|Madhya Pradesh)\\b/i);const lot=n(x.bid_lot),price=band(x.price_band),up=upper(x.price_band);return{id:slugId(x.company_name||x.slug),name:x.company_name,type:/SME/i.test(x.type)||/SME/i.test(x.listing)?"SME":"Mainboard",openDate:date(x.issue_open),closeDate:date(x.issue_close),listingDate:date(x.listed_date),issueSize:n(String(x.issue_size).replace(/Crores?/i,"")),minSubscription:lot!==null&&up!==null?lot*up:null,subscription:null,subscriptionSource:null,subscriptionCategories:[],gmpPct:null,gmpSources:[],city:cityMatch?.[1]??null,state:stateMatch?.[1]??null,business:p.slice(0,2200)||null,countries:[],revenues:[],profits:[],eps:[],priceBand:price,lotSize:lot,faceValue:n(String(x.face_value).match(/[\\d,.]+/)?.[0]),sharesOffered:null,offeredToPublic:null,retailShares:null,qibShares:null,niiShares:null,freshIssue:n(String(x.fresh_issue).replace(/Crores?/i,"")),offerForSale:n(String(x.ofs).replace(/Crores?/i,"")),issueType:x.issue_type||null,objects:x.obj_issue?[clean(x.obj_issue)]:[],risks:x.risks?[clean(x.risks)]:[],promoterHolding:null,postIssuePromoterHolding:null,moneycontrolUrl:null,detailSource:"Samco/Zerodha live IPO feed",verifiedSources:["Samco","Zerodha"],sourceUrls:["https://www.samco.in/ipo","https://zerodha.com/ipo/"],verifiedAt:new Date().toISOString()}}
-function seed(name:string,type:"Mainboard"|"SME",openDate:string,closeDate:string,listingDate:string,priceBand:string,lotSize:number,issueSize:number,faceValue:number,issueType:string="Book Built"):Ipo{return{id:slugId(name),name,type,openDate,closeDate,listingDate,issueSize,minSubscription:(upper(priceBand)??0)*lotSize,subscription:null,subscriptionSource:null,subscriptionCategories:[],gmpPct:null,gmpSources:[],city:null,state:null,business:null,countries:[],revenues:[],profits:[],eps:[],priceBand,lotSize,faceValue,sharesOffered:null,offeredToPublic:null,retailShares:null,qibShares:null,niiShares:null,freshIssue:null,offerForSale:null,issueType,objects:[],risks:[],promoterHolding:null,postIssuePromoterHolding:null,moneycontrolUrl:null,detailSource:"Zerodha current IPO calendar",verifiedSources:["Zerodha","Muthoot Securities"],sourceUrls:["https://zerodha.com/ipo/","https://www.muthootsecurities.com/IPO/Open-Issues"],verifiedAt:new Date().toISOString()}}
-function currentFallback():Ipo[]{return [
- seed("Veegaland Developers","Mainboard","2026-09-10","2026-09-15","2026-09-18","₹130 – ₹140",107,210,10),
- seed("Panchatv Bharat","SME","2026-09-10","2026-09-15","2026-09-18","₹140",2000,24.58,10,"Fixed Price"),
- seed("Raksan Transformers","SME","2026-09-10","2026-09-15","2026-09-18","₹258 – ₹273",800,150.5,10),
- seed("Om Galaxy","SME","2026-09-10","2026-09-15","2026-09-18","₹85 – ₹90",3200,105,5),
- seed("Maharaja & Speedex India","SME","2026-09-10","2026-09-15","2026-09-18","₹177 – ₹186",1200,80.13,10),
- seed("Manika Plastech","Mainboard","2026-09-11","2026-09-16","2026-09-21","₹40 – ₹43",0,125.5,2),
- seed("Century Business Media","SME","2026-09-11","2026-09-16","2026-09-21","₹70 – ₹74",3200,17.11,10),
- seed("Injecto Polymers","SME","2026-09-11","2026-09-16","2026-09-21","₹98 – ₹100",2400,56.12,10),
-].filter(x=>x.closeDate!>=new Date().toISOString().slice(0,10))}
-async function getJson(url:string){const c=new AbortController(),t=setTimeout(()=>c.abort(),7000);try{const r=await fetch(url,{headers:{"User-Agent":"Mozilla/5.0 (compatible; Artha-market/3.0)",Accept:"application/json,text/plain,*/*"},cache:"no-store",signal:c.signal});if(!r.ok)throw new Error(String(r.status));return await r.json()}finally{clearTimeout(t)}}
-async function loadSamco(){const fallback=currentFallback();const pages=await Promise.all(Array.from({length:16},(_,i)=>getJson(`${ENDPOINT}${i+1}`).catch(()=>null)));const all:SamcoIpo[]=[];for(const p of pages){const rows=p?.data?.upcoming_ipo;if(Array.isArray(rows))all.push(...rows)}const today=new Date().toISOString().slice(0,10);const map=new Map<string,SamcoIpo>();for(const x of all){if(!x?.company_name||!x.issue_close||x.issue_close<today)continue;map.set(slugId(x.company_name),x)}const live=Array.from(map.values()).map(blank);const merged=new Map<string,Ipo>();for(const x of fallback)merged.set(x.id,x);for(const x of live)merged.set(x.id,x);return applyVerifiedIpoOverrides([...merged.values()].filter(x=>!!x.closeDate&&x.closeDate>=today).sort((a,b)=>(a.closeDate??"").localeCompare(b.closeDate??"")))}
-export const fetchOpenIposLive=createServerFn({method:"GET"}).handler(async()=>{const hit=cache.get("live");if(hit&&hit.expires>Date.now())return hit.value;const data=await loadSamco();cache.set("live",{expires:Date.now()+60000,value:data});return data});
+
+const NSE = "https://www.nseindia.com";
+const NSE_PAGE = "https://www.nseindia.com/market-data/all-upcoming-issues-ipo";
+const cache=new Map<string,{expires:number;value<Ipo[]>()}>();
+const HEADERS={
+  "User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36",
+  Accept:"application/json, text/plain, */*",
+  "Accept-Language":"en-US,en;q=0.9",
+  Referer:NSE_PAGE
+};
+
+async function nseSession(){
+  const r=await fetch(NSE,{headers:HEADERS,cache:"no-store"});
+  const h=r.headers as Headers & {getSetCookie?:()=>string[]};
+  const cookies=h.getSetCookie?.()??[];
+  return cookies.map(x=>x.split(";")[0]).join("; ");
+}
+async function fetchNse(path:string,cookie:string){
+  const r=await fetch(NSE+path,{headers:{...HEADERS,Cookie:cookie},cache:"no-store"});
+  if(!r.ok) throw new Error("NSE HTTP "+r.status);
+  return await r.json();
+}
+function parseInfo(rows:unknown[]){
+  const out:Record<string,string>={};
+  for(const row of rows as Array<{title?:string;value?:unknown}>){
+    if(row?.title) out[clean(row.title)]=clean(row.value);
+  }
+  return out;
+}
+function issueSizeCr(v:string|null|undefined){
+  const s=clean(v);
+  const m=s.match(/(?:Rs\\.?|₹)\\s*([\\d,.]+)\\s*(million|crore|cr\\b|lakh)/i);
+  if(!m)return null;
+  const x=n(m[1]); if(x==null)return null;
+  const u=m[2].toLowerCase();
+  return u.startsWith("million")?x/10:u.startsWith("lakh")?x/100:x;
+}
+function baseNse(r:any):Ipo{
+  return {
+    id:slugId(r.companyName||r.symbol||"ipo"),
+    name:clean(r.companyName||r.symbol||"IPO"),
+    type:r.series==="SME"?"SME":"Mainboard",
+    openDate:date(r.issueStartDate),closeDate:date(r.issueEndDate),listingDate:null,
+    issueSize:null,minSubscription:null,subscription:n(r.noOfTime),subscriptionSource:"NSE India",
+    subscriptionCategories:[],gmpPct:null,gmpSources:[],
+    city:null,state:null,business:null,countries:[],revenues:[],profits:[],eps:[],
+    priceBand:band(r.issuePrice),lotSize:null,faceValue:null,
+    sharesOffered:n(r.noOfSharesOffered),offeredToPublic:null,retailShares:null,qibShares:null,niiShares:null,
+    freshIssue:null,offerForSale:null,issueType:null,objects:[],risks:[],
+    promoterHolding:null,postIssuePromoterHolding:null,moneycontrolUrl:null,
+    detailSource:"NSE India official IPO data",verifiedSources:["NSE India"],sourceUrls:[NSE_PAGE],
+    verifiedAt:new Date().toISOString()
+  };
+}
+async function enrichNse(ipo:Ipo,cookie:string){
+  try{
+    const series=ipo.type==="SME"?"SME":"EQ";
+    const symbol=ipo.name.replace(/\\s+(Limited|Ltd\\.?|Private|Pvt\\.?)$/i,"").trim();
+    const d=await fetchNse("/api/ipo-detail?symbol="+encodeURIComponent(symbol)+"&series="+series,cookie);
+    const info=parseInfo(d?.issueInfo?.dataList??[]);
+    const period=info["Issue Period"]?.match(/(\\d{2}-\\w{3}-\\d{4})\\s*to\\s*(\\d{2}-\\w{3}-\\d{4})/i);
+    if(period){ipo.openDate=date(period[1]);ipo.closeDate=date(period[2]);}
+    ipo.priceBand=band(info["Price Range"])||ipo.priceBand;
+    const lot=info["Bid Lot"]?.match(/([\\d,]+)\\s*Equity Shares/i);
+    ipo.lotSize=n(lot?.[1])??ipo.lotSize;
+    ipo.faceValue=n(info["Face Value"]?.match(/[\\d,.]+/)?.[0])??ipo.faceValue;
+    ipo.issueSize=issueSizeCr(info["Issue Size"])??ipo.issueSize;
+    const high=upper(info["Price Range"]);
+    if(ipo.lotSize&&high)ipo.minSubscription=ipo.lotSize*high;
+    const cats=d?.activeCat?.dataList??[];
+    const mapped:{category:string;value:number|null}[]=[];
+    for(const row of cats){
+      if(!row||row.srNo==="Sr.No.")continue;
+      const label=clean(row.category).toLowerCase();
+      const value=n(row.noOfTotalMeant);
+      if(label.includes("qualified")||String(row.srNo)==="1")mapped.push({category:"QIB",value});
+      else if(label.includes("non institutional")||String(row.srNo)==="2")mapped.push({category:"NII",value});
+      else if(label.includes("retail")||String(row.srNo)==="3")mapped.push({category:"Retail",value});
+      else if(label==="total")ipo.subscription=value;
+    }
+    ipo.subscriptionCategories=mapped;
+    if(ipo.subscription==null&&mapped.length){
+      const vals=mapped.map(x=>x.value).filter((x):x is number=>x!=null);
+      if(vals.length)ipo.subscription=Math.max(...vals);
+    }
+    ipo.subscriptionSource="NSE India";
+    ipo.detailSource="NSE India official issue-information";
+    ipo.verifiedSources=["NSE India","NSE India issue-information"];
+    ipo.verifiedAt=new Date().toISOString();
+  }catch{
+    // Never substitute third-party suggestions or hard-coded IPO values.
+  }
+  return ipo;
+}
+async function loadNse(){
+  const cookie=await nseSession();
+  const [current,upcoming]=await Promise.all([
+    fetchNse("/api/ipo-current-issue",cookie),
+    fetchNse("/api/all-upcoming-issues?category=ipo",cookie)
+  ]);
+  const today=new Date().toISOString().slice(0,10);
+  const map=new Map<string,Ipo>();
+  const rows=[...(Array.isArray(current)?current:[]),...(Array.isArray(upcoming)?upcoming:[])];
+  for(const r of rows){
+    if(!r?.companyName)continue;
+    const ipo=baseNse(r);
+    if(ipo.closeDate&&ipo.closeDate<today)continue;
+    const previous=map.get(ipo.id);
+    if(!previous||r.status==="Active")map.set(ipo.id,ipo);
+  }
+  const result:Ipo[]=[];
+  for(const ipo of map.values()){
+    result.push(await enrichNse(ipo,cookie));
+  }
+  return result
+    .filter(x=>!!x.closeDate&&x.closeDate>=today)
+    .sort((a,b)=>(a.openDate??"").localeCompare(b.openDate??"")||a.name.localeCompare(b.name));
+}
+export const fetchOpenIposLive=createServerFn({method:"GET"}).handler(async()=>{
+  const hit=cache.get("nse");
+  if(hit&&hit.expires>Date.now())return hit.value;
+  try{
+    const value=await loadNse();
+    cache.set("nse",{expires:Date.now()+60000,value});
+    return value;
+  }catch{
+    const empty:Ipo[]=[];
+    cache.set("nse",{expires:Date.now()+15000,value:empty});
+    return empty;
+  }
+});
