@@ -134,13 +134,100 @@ async function nseQuote(symbol: string): Promise<Quote | null> {
   } catch { return null; }
 }
 
+
+// Optional broker data providers. Credentials stay server-side in Vercel Environment Variables.
+// These providers are used only when configured; otherwise NSE/BSE official endpoints remain primary.
+function env(name: string): string { return typeof process !== "undefined" ? process.env[name] ?? "" : ""; }
+
+function quoteFromPayload(symbol: string, payload: Record<string, unknown>, exchange: string, name?: string): Quote | null {
+  const price = number(payload.last_price ?? payload.ltp ?? payload.lastPrice ?? payload.LTP ?? payload.LASTTRADEPRICE);
+  if (price == null) return null;
+  const previous = number(payload.close ?? payload.previous_close ?? payload.previousClose ?? payload.PREVIOUSCLOSE);
+  const change = number(payload.day_change ?? payload.change ?? payload.netChange ?? payload.Change) ?? (previous != null ? price - previous : null);
+  const changePct = number(payload.day_change_perc ?? payload.changePct ?? payload.percentChange ?? payload.PercentChange) ?? (change != null && previous ? change / previous * 100 : null);
+  return {
+    symbol, name: name ?? symbol.replace(/\\.(NS|BO)$/i, ""), price,
+    previousClose: previous, change: change != null ? Math.round(change * 100) / 100 : null,
+    changePct: changePct != null ? Math.round(changePct * 100) / 100 : null,
+    currency: "INR", exchange, high52w: number(payload.fifty_two_week_high ?? payload.high52w ?? payload["52WeekHigh"]),
+    low52w: number(payload.fifty_two_week_low ?? payload.low52w ?? payload["52WeekLow"]),
+    high5y: null, low5y: null, price75: null, signal75: null,
+    volume: number(payload.volume ?? payload.trade_volume ?? payload.NoOfSharesTraded),
+    dayHigh: number(payload.high ?? payload.dayHigh ?? payload.High), dayLow: number(payload.low ?? payload.dayLow ?? payload.Low), ok: true
+  };
+}
+
+async function growwQuote(symbol: string): Promise<Quote | null> {
+  const token=env("GROWW_ACCESS_TOKEN");
+  if(!token || symbol.startsWith("^")) return null;
+  const exchange=/\\.BO$/i.test(symbol) ? "BSE" : "NSE";
+  const tradingSymbol=displaySymbol(symbol);
+  try {
+    const url=`https://api.groww.in/v1/live-data/quote?exchange=${exchange}&segment=CASH&trading_symbol=${encodeURIComponent(tradingSymbol)}`;
+    const r=await fetch(url,{headers:{Accept:"application/json",Authorization:`Bearer ${token}`,"X-API-VERSION":"1.0"},cache:"no-store"});
+    if(!r.ok) return null;
+    const root=record(await r.json()), p=record(root?.payload);
+    return p ? quoteFromPayload(symbol,p,exchange,string(p?.trading_symbol) ?? tradingSymbol) : null;
+  }catch{return null;}
+}
+
+async function angelQuote(symbol: string): Promise<Quote | null> {
+  const apiKey=env("ANGEL_API_KEY"), jwt=env("ANGEL_JWT_TOKEN"), mapRaw=env("ANGEL_TOKEN_MAP");
+  if(!apiKey || !jwt || symbol.startsWith("^")) return null;
+  try {
+    const map=mapRaw ? JSON.parse(mapRaw) as Record<string,string> : {};
+    const token=map[displaySymbol(symbol)] ?? map[symbol];
+    if(!token) return null;
+    const exchange=/\\.BO$/i.test(symbol) ? "BSE" : "NSE";
+    const r=await fetch("https://apiconnect.angelone.in/rest/secure/angelbroking/market/v1/quote/",{
+      method:"POST",headers:{Authorization:`Bearer ${jwt}`,"X-PrivateKey":apiKey,"Content-Type":"application/json",Accept:"application/json"},
+      body:JSON.stringify({mode:"FULL",exchangeTokens:{[exchange]:[token]}}),cache:"no-store"
+    });
+    if(!r.ok) return null;
+    const root=record(await r.json()), data=record(root?.data);
+    const row=data ? record((Array.isArray(data?.fetched) ? data.fetched : [])[0]) : null;
+    return row ? quoteFromPayload(symbol,row,exchange,string(row?.tradingSymbol) ?? displaySymbol(symbol)) : null;
+  }catch{return null;}
+}
+
+async function motilalQuote(symbol: string): Promise<Quote | null> {
+  const token=env("MO_ACCESS_TOKEN"), apiKey=env("MO_API_KEY"), codeMapRaw=env("MO_SCRIPCODE_MAP");
+  if((!token && !apiKey) || symbol.startsWith("^")) return null;
+  try {
+    const map=codeMapRaw ? JSON.parse(codeMapRaw) as Record<string,string> : {};
+    const scripCode=map[displaySymbol(symbol)] ?? map[symbol];
+    if(!scripCode) return null;
+    const exchange=/\\.BO$/i.test(symbol) ? "BSE" : "NSE";
+    const r=await fetch("https://openapi.motilaloswal.com/rest/report/v1/getltpdata",{
+      method:"POST",headers:{Authorization:token?`Bearer ${token}`:"",apikey:apiKey,"Content-Type":"application/json",Accept:"application/json"},
+      body:JSON.stringify({exchange,scripcode:String(scripCode)}),cache:"no-store"
+    });
+    if(!r.ok) return null;
+    const root=record(await r.json()), rows=Array.isArray(root?.data) ? root.data : Array.isArray(root?.result) ? root.result : [];
+    const row=record(rows[0]);
+    if(!row) return null;
+    const normalized={...row,last_price:number(row?.ltp) ?? number(row?.LTP),previous_close:number(row?.close) ?? number(row?.Close),volume:number(row?.volume) ?? number(row?.Volume),high:number(row?.high) ?? number(row?.High),low:number(row?.low) ?? number(row?.Low)};
+    return quoteFromPayload(symbol,normalized,exchange,displaySymbol(symbol));
+  }catch{return null;}
+}
+
+// Moneycontrol is intentionally a reference/cross-check source, not treated as a private API.
+// Its public quote pages can be used for manual verification, while live app data comes from exchange/broker APIs.
+
 async function latestQuote(symbol: string): Promise<Quote> {
-  // Use the exchange matching the requested symbol first. Fall back to the other Indian exchange, then Yahoo history.
+  // Priority: exchange-verified NSE/BSE, then configured broker APIs, then Yahoo historical fallback.
   const prefersBse=/\.BO$/i.test(symbol);
-  const first= prefersBse ? await bseQuote(symbol) : await nseQuote(symbol);
-  if(first?.ok) return first;
-  const second= prefersBse ? await nseQuote(symbol) : await bseQuote(symbol);
-  if(second?.ok) return second;
+  const exchangeFirst = prefersBse ? await bseQuote(symbol) : await nseQuote(symbol);
+  if(exchangeFirst?.ok) return exchangeFirst;
+
+  const exchangeSecond = prefersBse ? await nseQuote(symbol) : await bseQuote(symbol);
+  if(exchangeSecond?.ok) return exchangeSecond;
+
+  const [angel,groww,mo] = await Promise.all([angelQuote(symbol),growwQuote(symbol),motilalQuote(symbol)]);
+  if(angel?.ok) return angel;
+  if(groww?.ok) return groww;
+  if(mo?.ok) return mo;
+
   for (const [range, interval] of [["1d", "1m"], ["5d", "1d"], ["1mo", "1d"]] as const) {
     try { const parsed = parseYahoo(await yahooChart(symbol, range, interval)); if (parsed.bars.length) return quoteFromParsed(parsed, symbol); } catch {}
   }
