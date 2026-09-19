@@ -22,8 +22,11 @@ async function nseSession(){
   try{
     const r=await fetch(NSE,{headers:HEADERS,cache:"no-store"});
     const h=r.headers as Headers & {getSetCookie?:()=>string[]};
-    const cookies=h.getSetCookie?.()??[];
-    return cookies.map(x=>x.split(";")[0]).join("; ");
+    const direct=h.getSetCookie?.()??[];
+    if(direct.length) return direct.map(x=>x.split(";")[0]).join("; ");
+    const raw=h.get("set-cookie")??"";
+    if(raw) return raw.split(/,(?=[^;=]+=)/).map(x=>x.split(";")[0]).filter(Boolean).join("; ");
+    return "";
   }catch{return "";}
 }
 async function parseProxyJson(text:string){
