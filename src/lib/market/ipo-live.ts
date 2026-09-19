@@ -308,7 +308,8 @@ async function fetchOfferDocumentText(url:string){
 }
 async function enrichOfferDocument(ipo:Ipo,detail:unknown){
   try{
-    const pageRhp=await fetchRhpUrlFromIssuePage(ipo);\n    const urls=[...new Set([...(pageRhp?[pageRhp]:[]),...documentUrlsFromDetail(detail)])];
+    const pageRhp=await fetchRhpUrlFromIssuePage(ipo);
+    const urls=[...new Set([...(pageRhp?[pageRhp]:[]),...documentUrlsFromDetail(detail)])];
     for(const url of urls.slice(0,3)){
       const text=await fetchOfferDocumentText(url);
       if(!text)continue;
