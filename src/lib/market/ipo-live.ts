@@ -19,15 +19,36 @@ const HEADERS={
 };
 
 async function nseSession(){
-  const r=await fetch(NSE,{headers:HEADERS,cache:"no-store"});
-  const h=r.headers as Headers & {getSetCookie?:()=>string[]};
-  const cookies=h.getSetCookie?.()??[];
-  return cookies.map(x=>x.split(";")[0]).join("; ");
+  try{
+    const r=await fetch(NSE,{headers:HEADERS,cache:"no-store"});
+    const h=r.headers as Headers & {getSetCookie?:()=>string[]};
+    const cookies=h.getSetCookie?.()??[];
+    return cookies.map(x=>x.split(";")[0]).join("; ");
+  }catch{return "";}
+}
+async function parseProxyJson(text:string){
+  const s=text.trim();
+  try{return JSON.parse(s);}
+  catch{}
+  const a=s.indexOf("["); const o=s.indexOf("{");
+  const start=a>=0&&(o<0||a<o)?a:o;
+  if(start>=0){
+    const end=Math.max(s.lastIndexOf("]"),s.lastIndexOf("}"));
+    if(end>start){try{return JSON.parse(s.slice(start,end+1));}catch{}}
+  }
+  throw new Error("NSE proxy returned non-JSON");
 }
 async function fetchNse(path:string,cookie:string){
-  const r=await fetch(NSE+path,{headers:{...HEADERS,Cookie:cookie},cache:"no-store"});
-  if(!r.ok) throw new Error("NSE HTTP "+r.status);
-  return await r.json();
+  try{
+    const r=await fetch(NSE+path,{headers:{...HEADERS,Cookie:cookie},cache:"no-store"});
+    if(!r.ok) throw new Error("NSE HTTP "+r.status);
+    return await r.json();
+  }catch{
+    const proxy="https://r.jina.ai/http://www.nseindia.com"+path;
+    const r=await fetch(proxy,{headers:{"User-Agent":HEADERS["User-Agent"],Accept:"application/json,text/plain,*/*"},cache:"no-store"});
+    if(!r.ok) throw new Error("NSE proxy HTTP "+r.status);
+    return parseProxyJson(await r.text());
+  }
 }
 function parseInfo(rows:unknown[]){
   const out:Record<string,string>={};
