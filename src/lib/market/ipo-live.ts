@@ -104,12 +104,16 @@ function parseGmpFromText(text:string,company:string){
 }
 async function fetchSourceText(url:string){
   try{
-    const r=await fetch(url,{headers:{
+    const controller=new AbortController();
+    const timer=setTimeout(()=>controller.abort(),2500);
+    const r=await fetch(url,{signal:controller.signal,headers:{
       "User-Agent":HEADERS["User-Agent"],
       Accept:"text/html,application/xhtml+xml,application/json,text/plain,*/*"
     },cache:"no-store"});
-    if(!r.ok)return null;
-    return await r.text();
+    if(!r.ok){clearTimeout(timer);return null;}
+    const text=await r.text();
+    clearTimeout(timer);
+    return text;
   }catch{return null;}
 }
 const GMP_SOURCES=[
@@ -220,7 +224,8 @@ async function loadNse(){
   }
   const result:Ipo[]=[];
   for(const ipo of map.values()){
-    result.push(await enrichGmp(await enrichNse(ipo,cookie)));
+    const enriched=await enrichNse(ipo,cookie);
+    try{ result.push(await enrichGmp(enriched)); }catch{ result.push(enriched); }
   }
   return result
     .filter(x=>!!x.closeDate&&x.closeDate>=today)
