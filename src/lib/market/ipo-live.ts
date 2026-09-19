@@ -53,6 +53,15 @@ async function fetchNse(path:string,cookie:string){
     return parseProxyJson(await r.text());
   }
 }
+
+function rowsFromNse(raw:unknown): any[]{
+  if(Array.isArray(raw)) return raw;
+  const root=raw as any;
+  if(root && Array.isArray(root.data)) return root.data;
+  if(root && Array.isArray(root.records)) return root.records;
+  if(root && root.data && Array.isArray(root.data.data)) return root.data.data;
+  return [];
+}
 function parseInfo(rows:unknown[]){
   const out:Record<string,string>={};
   for(const row of rows as Array<{title?:string;value?:unknown}>){
@@ -134,10 +143,10 @@ async function loadNse(){
   ]);
   const today=new Date().toISOString().slice(0,10);
   const map=new Map<string,Ipo>();
-  const rows=[...(Array.isArray(current)?current:[]),...(Array.isArray(upcoming)?upcoming:[])];
+  const rows=[...rowsFromNse(current),...rowsFromNse(upcoming)];
   for(const r of rows){
-    if(!r?.companyName)continue;
-    const ipo=baseNse(r);
+    if(!r?.companyName && !r?.symbol && !r?.company)continue;
+    if(!r.companyName && r.company) r.companyName=r.company;\n    const ipo=baseNse(r);
     if(ipo.closeDate&&ipo.closeDate<today)continue;
     const previous=map.get(ipo.id);
     if(!previous||r.status==="Active")map.set(ipo.id,ipo);
