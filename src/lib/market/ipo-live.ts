@@ -190,12 +190,20 @@ async function enrichGmp(ipo:Ipo){
 }
 
 function baseNse(r:any):Ipo{
+  const issuePrice=band(r.issuePrice);
+  const upperPrice=upper(issuePrice);
+  const offered=n(r.noOfSharesOffered);
+  const bid=n(r.noOfsharesBid??r.noOfSharesBid);
+  const reportedSubscription=n(r.noOfTime);
+  const calculatedSubscription=offered&&bid?Number((bid/offered).toFixed(4)):null;
+  const subscription=reportedSubscription!=null&&reportedSubscription>0?reportedSubscription:calculatedSubscription;
+  const subscriptionAmount=bid!=null&&upperPrice!=null?Number((bid*upperPrice/10000000).toFixed(2)):null;
   return {
     symbol:r.symbol??undefined,id:slugId(r.companyName||r.symbol||"ipo"),
     name:clean(r.companyName||r.symbol||"IPO"),
     type:r.series==="SME"?"SME":"Mainboard",
     openDate:date(r.issueStartDate),closeDate:date(r.issueEndDate),listingDate:null,
-    issueSize:null,minSubscription:null,subscription:n(r.noOfTime),subscriptionAmount:null,subscriptionSource:"NSE India",
+    issueSize:null,minSubscription:null,subscription,subscriptionAmount,subscriptionSource:"NSE India",
     subscriptionCategories:[],gmpPct:null,gmpRs:null,gmpSources:[],gmpVerifiedSources:[],
     city:null,state:null,business:null,countries:[],revenues:[],profits:[],eps:[],
     priceBand:band(r.issuePrice),lotSize:null,faceValue:null,
