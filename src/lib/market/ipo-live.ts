@@ -256,12 +256,13 @@ function parseGeography(text:string){
   return {business:section.slice(0,1800),countries};
 }
 function parseFinancials(text:string){
-  const t=text.replace(//g,"");
+  const t=text.replace(/\r/g,"");
   const years=[...t.matchAll(/\b(20\d{2})\b/g)].map(m=>m[1]);
   const uniqueYears=[...new Set(years)].slice(-6);
   const pick=(patterns:RegExp[])=>{
     for(const p of patterns){
-      const m=p.exec(t); if(m?.index==null)continue;
+      const m=p.exec(t);
+      if(m?.index==null)continue;
       const s=t.slice(m.index,Math.min(t.length,m.index+1200));
       const nums=[...s.matchAll(/(?:₹|Rs\.?\s*)?([\d,]+(?:\.\d+)?)\s*(?:crore|lakhs?|million)?/gi)].map(z=>Number(z[1].replace(/,/g,""))).filter(Number.isFinite);
       if(nums.length>=3)return nums.slice(0,3);
