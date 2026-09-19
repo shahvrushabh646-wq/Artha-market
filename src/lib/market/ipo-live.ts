@@ -276,30 +276,11 @@ function parseFinancials(text:string){
   const mk=(vals:number[])=>selected.map((year,i)=>({year,value:vals[i]??null}));
   return {revenues:mk(rev),profits:mk(profit),eps:mk(eps)};
 }
-async function fetchRhpUrlFromIssuePage(ipo:Ipo){
-  try{
-    if(!ipo.symbol)return null;
-    const series=ipo.type==="SME"?"SME":"EQ";
-    const page=NSE+"/market-data/issue-information?series="+series+"&symbol="+encodeURIComponent(String(ipo.symbol))+"&type=Active";
-    const r=await fetch(page,{headers:HEADERS,cache:"no-store"});
-    if(!r.ok)return null;
-    const html=await r.text();
-    const matches=[...html.matchAll(/href=["']([^"']+)["'][^>]*>[^<]*(?:Red Herring Prospectus|RHP|Prospectus)[^<]*</gi)];
-    for(const m of matches){
-      const u=m[1];
-      if(/^https?:\\/\\//i.test(u))return u;
-      if(u.startsWith("/"))return NSE+u;
-    }
-    const plain=[...html.matchAll(/https?:[^"'\\s<>]+(?:rhp|prospectus)[^"'\\s<>]*/gi)];
-    return plain[0]?.[0]??null;
-  }catch{return null;}
-}
-async function fetchOfferDocumentText(url:string){
+async function fetchProspectusText(url:string){
   try{
     const controller=new AbortController();
     const timer=setTimeout(()=>controller.abort(),7000);
-    const reader="https://r.jina.ai/"+url;
-    const r=await fetch(reader,{signal:controller.signal,headers:{"User-Agent":HEADERS["User-Agent"],Accept:"text/plain"},cache:"no-store"});
+    const r=await fetch("https://r.jina.ai/"+url,{signal:controller.signal,headers:{"User-Agent":HEADERS["User-Agent"],Accept:"text/plain"},cache:"no-store"});
     clearTimeout(timer);
     if(!r.ok)return null;
     const text=await r.text();
@@ -308,10 +289,9 @@ async function fetchOfferDocumentText(url:string){
 }
 async function enrichOfferDocument(ipo:Ipo,detail:unknown){
   try{
-    const pageRhp=await fetchRhpUrlFromIssuePage(ipo);
-    const urls=[...new Set([...(pageRhp?[pageRhp]:[]),...documentUrlsFromDetail(detail)])];
+    const urls=documentUrlsFromDetail(detail);
     for(const url of urls.slice(0,3)){
-      const text=await fetchOfferDocumentText(url);
+      const text=await fetchProspectusText(url);
       if(!text)continue;
       const business=parseBusiness(text);
       const geo=parseGeography(text);
@@ -328,10 +308,10 @@ async function enrichOfferDocument(ipo:Ipo,detail:unknown){
       if(office.city)ipo.city=office.city;
       if(office.state)ipo.state=office.state;
       ipo.sourceUrls=[...new Set([...ipo.sourceUrls,url])];
-      ipo.detailSource="NSE India issue-information + Red Herring Prospectus";
-      ipo.verifiedSources=[...new Set([...ipo.verifiedSources,"NSE Red Herring Prospectus"])];
+      ipo.detailSource="NSE India Prospectus / Red Herring Prospectus";
+      ipo.verifiedSources=[...new Set([...ipo.verifiedSources,"NSE Prospectus / RHP"])];
       ipo.verifiedAt=new Date().toISOString();
-      if(business||geo.countries.length||fin.revenues.length||fin.profits.length||fin.eps.length||use.objects.length||use.risks.length||office.city||office.state)break;
+      break;
     }
   }catch{}
   return ipo;
