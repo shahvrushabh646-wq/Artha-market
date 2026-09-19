@@ -71,7 +71,7 @@ function parseInfo(rows:unknown[]){
 }
 function issueSizeCr(v:string|null|undefined){
   const s=clean(v);
-  const m=s.match(/(?:Rs\\.?|₹)\s*([\d,.]+)\s*(million|crore|cr\\b|lakh)/i);
+  const m=s.match(/(?:Rs\.?|₹)\s*([\d,.]+)\s*(million|crore|cr\b|lakh)/i);
   if(!m)return null;
   const x=n(m[1]); if(x==null)return null;
   const u=m[2].toLowerCase();
