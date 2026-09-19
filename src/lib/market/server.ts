@@ -92,6 +92,32 @@ function quoteFromParsed(parsed: { bars: Bar[]; meta: YahooMeta }, symbol: strin
   return makeQuote({ ...parsed.meta, regularMarketPrice: number(parsed.meta.regularMarketPrice) ?? last?.c, chartPreviousClose: number(parsed.meta.chartPreviousClose) ?? number(parsed.meta.previousClose) ?? prev?.c }, symbol);
 }
 
+async function bseQuote(symbol: string): Promise<Quote | null> {
+  const raw=displaySymbol(symbol).toUpperCase().replace(/\.BO$/i,"").trim();
+  if(!raw||raw.startsWith("^")) return null;
+  try{
+    const headers={ "User-Agent": UA, Accept:"application/json,text/plain,*/*", Referer:"https://www.bseindia.com/" };
+    let code=/^\d{6}$/.test(raw)?raw:null;
+    if(!code){
+      const search=await fetch(`https://api.bseindia.com/Msource/1D/getQouteSearch.aspx?Type=EQ&text=${encodeURIComponent(raw)}&flag=site`,{headers,cache:"no-store"});
+      if(!search.ok) throw new Error(`BSE search HTTP ${search.status}`);
+      const text=await search.text();
+      const m=text.match(/(?:scripcode|scripCode|SCRIP_CODE)[^0-9]*(\d{6})/i)||text.match(/\/(\d{6})\//);
+      code=m?.[1]??null;
+    }
+    if(!code) return null;
+    const r=await fetch(`https://api.bseindia.com/BseIndiaAPI/api/getScripHeaderData/w?Debtflag=&scripcode=${code}&seriesid=`,{headers,cache:"no-store"});
+    if(!r.ok) throw new Error(`BSE quote HTTP ${r.status}`);
+    const root=record(await r.json());
+    const price=number(root?.CurrVal??root?.LTP??root?.LastPrice);
+    if(price==null) return null;
+    const previous=number(root?.PrevClose??root?.PreviousClose);
+    const change=number(root?.Change)??(previous!=null?price-previous:null);
+    const changePct=number(root?.PercentChange)??(change!=null&&previous?change/previous*100:null);
+    return {symbol:code+".BO",name:string(root?.Scripname)??raw,price,previousClose:previous,change:change!=null?Math.round(change*100)/100:null,changePct:changePct!=null?Math.round(changePct*100)/100:null,currency:"INR",exchange:"BSE",high52w:number(root?.["52WeekHigh"])??null,low52w:number(root?.["52WeekLow"])??null,high5y:null,low5y:null,price75:null,signal75:null,volume:number(root?.NoOfSharesTraded)??null,dayHigh:number(root?.High)??null,dayLow:number(root?.Low)??null,ok:true};
+  }catch{return null;}
+}
+
 async function nseQuote(symbol: string): Promise<Quote | null> {
   const bare = displaySymbol(symbol).toUpperCase().replace(/\.NS$|\.BO$/i, "").trim();
   if (!bare || bare.startsWith("^")) return null;
@@ -109,9 +135,12 @@ async function nseQuote(symbol: string): Promise<Quote | null> {
 }
 
 async function latestQuote(symbol: string): Promise<Quote> {
-  // Prefer NSE for the latest Indian market price; Yahoo is the history fallback.
-  const nse = await nseQuote(symbol);
-  if (nse?.ok) return nse;
+  // Use the exchange matching the requested symbol first. Fall back to the other Indian exchange, then Yahoo history.
+  const prefersBse=/\.BO$/i.test(symbol);
+  const first= prefersBse ? await bseQuote(symbol) : await nseQuote(symbol);
+  if(first?.ok) return first;
+  const second= prefersBse ? await nseQuote(symbol) : await bseQuote(symbol);
+  if(second?.ok) return second;
   for (const [range, interval] of [["1d", "1m"], ["5d", "1d"], ["1mo", "1d"]] as const) {
     try { const parsed = parseYahoo(await yahooChart(symbol, range, interval)); if (parsed.bars.length) return quoteFromParsed(parsed, symbol); } catch {}
   }
