@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-type Ipo={symbol?:string;googleAnswers?:{question:string;answer:string;source:string;url:string}[];id:string;name:string;type:"Mainboard"|"SME";openDate:string|null;closeDate:string|null;listingDate:string|null;issueSize:number|null;minSubscription:number|null;subscription:number|null;subscriptionAmount:number|null;subscriptionSource:string|null;subscriptionCategories:{category:string;value:number|null}[];gmpPct:number|null;gmpRs:number|null;gmpSources:{source:string;pct:number|null;rs:number|null;asOf:string|null}[];gmpVerifiedSources:string[];city:string|null;state:string|null;business:string|null;countries:{country:string;business:string;salesPct:number|null}[];revenues:{year:string;value:number|null}[];profits:{year:string;value:number|null}[];eps:{year:string;value:number|null}[];priceBand:string|null;lotSize:number|null;faceValue:number|null;sharesOffered:number|null;offeredToPublic:number|null;retailShares:number|null;qibShares:number|null;niiShares:number|null;freshIssue:number|null;offerForSale:number|null;issueType:string|null;objects:string[];risks:string[];promoterHolding:number|null;postIssuePromoterHolding:number|null;moneycontrolUrl:string|null;detailSource:string|null;verifiedSources:string[];sourceUrls:string[];verifiedAt:string};
+type Ipo={symbol?:string;id:string;name:string;type:"Mainboard"|"SME";openDate:string|null;closeDate:string|null;listingDate:string|null;issueSize:number|null;minSubscription:number|null;subscription:number|null;subscriptionAmount:number|null;subscriptionSource:string|null;subscriptionCategories:{category:string;value:number|null}[];gmpPct:number|null;gmpRs:number|null;gmpSources:{source:string;pct:number|null;rs:number|null;asOf:string|null}[];gmpVerifiedSources:string[];city:string|null;state:string|null;business:string|null;countries:{country:string;business:string;salesPct:number|null}[];revenues:{year:string;value:number|null}[];profits:{year:string;value:number|null}[];eps:{year:string;value:number|null}[];priceBand:string|null;lotSize:number|null;faceValue:number|null;sharesOffered:number|null;offeredToPublic:number|null;retailShares:number|null;qibShares:number|null;niiShares:number|null;freshIssue:number|null;offerForSale:number|null;issueType:string|null;objects:string[];risks:string[];promoterHolding:number|null;postIssuePromoterHolding:number|null;moneycontrolUrl:string|null;detailSource:string|null;verifiedSources:string[];sourceUrls:string[];verifiedAt:string};
 type SamcoIpo={id:string;slug:string;company_name:string;type:string;company_profile:string;issue_type:string;issue_open:string;issue_close:string;listed_date:string;face_value:string;price_band:string;bid_lot:string;minimum_order:string;listing:string;issue_size:string;fresh_issue:string;ofs:string;obj_issue:string;key_strengths:string;risks:string;RHP_url:string;knowledge_center_url:string};
 
 const NSE = "https://www.nseindia.com";
@@ -162,85 +162,6 @@ function parseGmp(text:string,company:string){
   }
   return null;
 }
-async function googleSearchAnswers(ipo:Ipo){
-  const questions=[
-    "company profile and IPO what is the company "+ipo.name,
-    "where does "+ipo.name+" operate countries locations business sales distribution",
-    "what business does "+ipo.name+" do products services",
-    "last 3 years revenue profit EPS "+ipo.name+" IPO RHP prospectus",
-    "price band lot size issue size share allocation "+ipo.name+" IPO",
-    "objects of issue use of proceeds risks "+ipo.name+" IPO prospectus"
-  ];
-  const answers:{question:string;answer:string;source:string;url:string}[]=[];
-  await Promise.all(questions.map(async(q,i)=>{
-    try{
-      const controller=new AbortController();
-      const timer=setTimeout(()=>controller.abort(),3500);
-      const url="https://www.google.com/search?q="+encodeURIComponent(q)+"&num=5&hl=en";
-      const r=await fetch(url,{signal:controller.signal,headers:{"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36","Accept":"text/html,application/xhtml+xml"} ,cache:"no-store"});
-      const html=await r.text();
-      clearTimeout(timer);
-      if(!r.ok||!html)return;
-      const text=clean(html).replace(/\s+/g," ");
-      const hits:string[]=[];
-      const re=/(.{0,260}(?:RHP|prospectus|revenue|profit|EPS|business|risk|issue size|price band|lot size|countries|sales).{0,420})/gi;
-      let m:RegExpExecArray|null;
-      while((m=re.exec(text))&&hits.length<4){
-        const s=m[1].replace(/\s+/g," ").trim();
-        if(s.length>80&&!hits.includes(s))hits.push(s);
-      }
-      if(hits.length)answers[i]={question:q,answer:hits.join(" • ").slice(0,2200),source:"Google Search",url};
-    }catch{}
-  }));
-  ipo.googleAnswers=answers.filter(Boolean);
-  if(ipo.googleAnswers.length)ipo.verifiedSources=[...new Set([...ipo.verifiedSources,"Google Search"])];
-  return ipo;
-}
-function prospectusUrls(root:unknown):string[]{
-  const out:string[]=[];
-  function walk(v:unknown){
-    if(v==null||typeof v!=="object")return;
-    if(Array.isArray(v)){v.forEach(walk);return;}
-    for(const [k,x] of Object.entries(v as Record<string,unknown>)){
-      if(typeof x==="string"&&x.startsWith("http")&&/(rhp|prospectus|offer.?document)/i.test(k+" "+x))out.push(x);
-      else walk(x);
-    }
-  }
-  walk(root);
-  return [...new Set(out)];
-}
-async function fetchProspectus(url:string){
-  try{
-    const r=await fetch("https://r.jina.ai/"+url,{headers:{"User-Agent":"Mozilla/5.0"},cache:"no-store"});
-    if(!r.ok)return null;
-    return (await r.text()).slice(0,500000);
-  }catch{return null;}
-}
-function section(text:string,title:string,next:string){
-  const a=text.toLowerCase().indexOf(title.toLowerCase());
-  if(a<0)return null;
-  const b=next?text.toLowerCase().indexOf(next.toLowerCase(),a+title.length):-1;
-  return text.slice(a+title.length,b>a?b:Math.min(text.length,a+2500)).replace(/\s+/g," ").trim();
-}
-async function enrichProspectus(ipo:Ipo,detail:unknown){
-  const urls=prospectusUrls(detail);
-  for(const url of urls.slice(0,2)){
-    const text=await fetchProspectus(url);
-    if(!text)continue;
-    const business=section(text,"OUR BUSINESS","RISK FACTORS")||section(text,"BUSINESS OVERVIEW","RISK FACTORS");
-    const risks=section(text,"RISK FACTORS","OUR BUSINESS")||section(text,"RISK FACTORS","OBJECTS OF THE ISSUE");
-    const objects=section(text,"OBJECTS OF THE ISSUE","RISK FACTORS")||section(text,"OBJECTS OF THE ISSUE","OUR BUSINESS");
-    if(business)ipo.business=business;
-    if(risks)ipo.risks=[risks];
-    if(objects)ipo.objects=[objects];
-    ipo.sourceUrls=[...new Set([...ipo.sourceUrls,url])];
-    ipo.detailSource="NSE Prospectus / Red Herring Prospectus";
-    ipo.verifiedSources=[...new Set([...ipo.verifiedSources,"NSE Prospectus / RHP"])];
-    ipo.verifiedAt=new Date().toISOString();
-    break;
-  }
-  return ipo;
-}
 async function enrichGmp(ipo:Ipo){
   const upperBand=upper(ipo.priceBand);
   const results=await Promise.all(GMP_SOURCES.map(async s=>{
@@ -376,10 +297,8 @@ async function loadNse(){
   const result:Ipo[]=[];
   for(const ipo of map.values()){
     const enriched=await enrichNse(ipo,cookie);
-    const detail=await fetchNse("/api/ipo-detail?symbol="+encodeURIComponent(String(enriched.symbol??""))+"&series="+(enriched.type==="SME"?"SME":"EQ"),cookie);
-    await enrichProspectus(enriched,detail);
-    try{ await googleSearchAnswers(enriched); }catch{}
     try{ result.push(await enrichGmp(enriched)); }catch{ result.push(enriched); }
+  }
   return result
     .filter(x=>!!x.closeDate&&x.closeDate>=today)
     .sort((a,b)=>(a.openDate??"").localeCompare(b.openDate??"")||a.name.localeCompare(b.name));
