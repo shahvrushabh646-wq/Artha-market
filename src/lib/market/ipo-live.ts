@@ -276,6 +276,24 @@ function parseFinancials(text:string){
   const mk=(vals:number[])=>selected.map((year,i)=>({year,value:vals[i]??null}));
   return {revenues:mk(rev),profits:mk(profit),eps:mk(eps)};
 }
+async function fetchRhpUrlFromIssuePage(ipo:Ipo){
+  try{
+    if(!ipo.symbol)return null;
+    const series=ipo.type==="SME"?"SME":"EQ";
+    const page=NSE+"/market-data/issue-information?series="+series+"&symbol="+encodeURIComponent(String(ipo.symbol))+"&type=Active";
+    const r=await fetch(page,{headers:HEADERS,cache:"no-store"});
+    if(!r.ok)return null;
+    const html=await r.text();
+    const matches=[...html.matchAll(/href=["']([^"']+)["'][^>]*>[^<]*(?:Red Herring Prospectus|RHP|Prospectus)[^<]*</gi)];
+    for(const m of matches){
+      const u=m[1];
+      if(/^https?:\\/\\//i.test(u))return u;
+      if(u.startsWith("/"))return NSE+u;
+    }
+    const plain=[...html.matchAll(/https?:[^"'\\s<>]+(?:rhp|prospectus)[^"'\\s<>]*/gi)];
+    return plain[0]?.[0]??null;
+  }catch{return null;}
+}
 async function fetchOfferDocumentText(url:string){
   try{
     const controller=new AbortController();
@@ -290,7 +308,7 @@ async function fetchOfferDocumentText(url:string){
 }
 async function enrichOfferDocument(ipo:Ipo,detail:unknown){
   try{
-    const urls=documentUrlsFromDetail(detail);
+    const urls=[...new Set([...(await fetchRhpUrlFromIssuePage(ipo)?[await fetchRhpUrlFromIssuePage(ipo)]:[]),...documentUrlsFromDetail(detail)])];
     for(const url of urls.slice(0,3)){
       const text=await fetchOfferDocumentText(url);
       if(!text)continue;
