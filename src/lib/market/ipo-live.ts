@@ -296,7 +296,8 @@ async function enrichOfferDocument(ipo:Ipo,detail:unknown){
       if(!text)continue;
       const business=parseBusiness(text);
       const geo=parseGeography(text);
-      const fin=parseFinancials(text);\n      const use=parseObjectsAndRisks(text);\n      const office=parseOffice(text);
+      const fin=parseFinancials(text);
+      const use=parseObjectsAndRisks(text);\n      const office=parseOffice(text);
       if(business)ipo.business=business;
       if(geo.countries.length)ipo.countries=geo.countries;
       if(fin.revenues.length)ipo.revenues=fin.revenues;
