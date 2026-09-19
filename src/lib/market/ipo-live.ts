@@ -230,8 +230,7 @@ function parseObjectsAndRisks(text:string){
   const take=(patterns:RegExp[],max=2600)=>{
     const s=textAround(text,patterns,max);
     if(!s)return [] as string[];
-    return s.split(/
-|•|(?=\d+\.\s)/).map(clean).filter(x=>x.length>25).slice(0,8);
+    return s.split(/\n|•|(?=\d+\.\s)/).map(clean).filter(x=>x.length>25).slice(0,8);
   };
   return {
     objects:take([/objects of the issue/i,/objects of issue/i,/objects of the offer/i],3200),
@@ -251,8 +250,7 @@ function parseGeography(text:string){
   const section=textAround(text,[/geographical presence/i,/geographic(?:al)? presence/i,/countries in which we operate/i,/countries where we operate/i,/geographies/i],2400);
   if(!section)return {business:null,countries:[] as {country:string;business:string;salesPct:number|null}[]};
   const countries:{country:string;business:string;salesPct:number|null}[]=[];
-  const rx=/\b(India|United States(?: of America)?|USA|United Kingdom|UK|UAE|United Arab Emirates|Germany|France|Italy|Singapore|Australia|Canada|Japan|Saudi Arabia|Qatar|Oman|Nepal|Bangladesh)\b[^
-%]{0,100}?(\d+(?:\.\d+)?)\s*%/gi;
+  const rx=/\b(India|United States(?: of America)?|USA|United Kingdom|UK|UAE|United Arab Emirates|Germany|France|Italy|Singapore|Australia|Canada|Japan|Saudi Arabia|Qatar|Oman|Nepal|Bangladesh)\b[^\n%]{0,100}?(\d+(?:\.\d+)?)\s*%/gi;
   let m:RegExpExecArray|null;
   while((m=rx.exec(section))){countries.push({country:m[1],business:"",salesPct:Number(m[2])});if(countries.length>=12)break;}
   return {business:section.slice(0,1800),countries};
