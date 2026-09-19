@@ -226,6 +226,26 @@ function parseBusiness(text:string){
   if(!section)return null;
   return section.replace(/^(?:OUR BUSINESS|BUSINESS OVERVIEW|OUR BUSINESS OVERVIEW|ABOUT THE COMPANY)\\s*/i,"").slice(0,1800).trim()||null;
 }
+function parseObjectsAndRisks(text:string){
+  const take=(patterns:RegExp[],max=2600)=>{
+    const s=textAround(text,patterns,max);
+    if(!s)return [] as string[];
+    return s.split(/\\n|•|(?=\\d+\\.\\s)/).map(clean).filter(x=>x.length>25).slice(0,8);
+  };
+  return {
+    objects:take([/objects of the issue/i,/objects of issue/i,/objects of the offer/i],3200),
+    risks:take([/risk factors/i,/risks in relation to the issue/i,/key risks/i],3200)
+  };
+}
+function parseOffice(text:string){
+  const s=textAround(text,[/registered office/i,/corporate office/i],900);
+  if(!s)return {city:null as string|null,state:null as string|null};
+  const states=["Maharashtra","Gujarat","Delhi","Karnataka","Tamil Nadu","Telangana","Rajasthan","Uttar Pradesh","West Bengal","Haryana","Punjab","Kerala","Madhya Pradesh","Andhra Pradesh","Odisha","Bihar","Jharkhand","Chhattisgarh","Goa","Uttarakhand","Assam"];
+  const state=states.find(v=>new RegExp("\\\\b"+v+"\\\\b","i").test(s))??null;
+  const cities=["Mumbai","Thane","Pune","Navi Mumbai","Ahmedabad","Vadodara","Surat","Delhi","Bengaluru","Bangalore","Chennai","Hyderabad","Jaipur","Kolkata","Noida","Gurugram","Gurgaon","Indore","Lucknow","Kochi","Rajkot","Nagpur","Nashik"];
+  const city=cities.find(v=>new RegExp("\\\\b"+v+"\\\\b","i").test(s))??null;
+  return {city,state};
+}
 function parseGeography(text:string){
   const section=textAround(text,[/geographical presence/i,/geographic(?:al)? presence/i,/countries in which we operate/i,/countries where we operate/i,/geographies/i],2400);
   if(!section)return {business:null,countries:[] as {country:string;business:string;salesPct:number|null}[]};
@@ -242,7 +262,7 @@ function parseFinancials(text:string){
   const uniqueYears=[...new Set(years)].slice(-6);
   const pick=(patterns:RegExp[])=>{
     for(const p of patterns){
-      const m=p.exec(t); if(!m?.index==null)continue;
+      const m=p.exec(t); if(m?.index==null)continue;
       const s=t.slice(m.index,Math.min(t.length,m.index+1200));
       const nums=[...s.matchAll(/(?:₹|Rs\\.?\\s*)?([\\d,]+(?:\\.\\d+)?)\\s*(?:crore|lakhs?|million)?/gi)].map(z=>Number(z[1].replace(/,/g,""))).filter(Number.isFinite);
       if(nums.length>=3)return nums.slice(0,3);
@@ -287,7 +307,7 @@ async function enrichOfferDocument(ipo:Ipo,detail:unknown){
       ipo.detailSource="NSE India issue-information + Red Herring Prospectus";
       ipo.verifiedSources=[...new Set([...ipo.verifiedSources,"NSE Red Herring Prospectus"])];
       ipo.verifiedAt=new Date().toISOString();
-      if(business||geo.countries.length||fin.revenues.length||fin.profits.length||fin.eps.length)break;
+      if(business||geo.countries.length||fin.revenues.length||fin.profits.length||fin.eps.length||use.objects.length||use.risks.length||office.city||office.state)break;
     }
   }catch{}
   return ipo;
