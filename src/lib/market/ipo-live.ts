@@ -69,6 +69,16 @@ function parseInfo(rows:unknown[]){
   }
   return out;
 }
+function rowsFromCategory(raw:unknown):any[]{
+  if(Array.isArray(raw)) return raw;
+  const x=raw as any;
+  if(x&&Array.isArray(x.dataList)) return x.dataList;
+  if(x&&Array.isArray(x.data)) return x.data;
+  if(x&&Array.isArray(x.records)) return x.records;
+  if(x&&x.data&&Array.isArray(x.data.data)) return x.data.data;
+  return [];
+}
+
 function issueSizeCr(v:string|null|undefined){
   const s=clean(v);
   const m=s.match(/(?:Rs\.?|₹)\s*([\d,.]+)\s*(million|crore|cr\b|lakh)/i);
@@ -213,25 +223,43 @@ async function enrichNse(ipo:Ipo,cookie:string){
     const high=upper(info["Price Range"]);
     const low=clean(info["Price Range"]).match(/(?:Rs\.?|₹)?\s*([\d,.]+)\s*(?:-|to|–)/i);
     const lowPrice=n(low?.[1]);
-    if(ipo.lotSize&&lowPrice)ipo.minSubscription=ipo.lotSize*lowPrice;
-    else if(ipo.lotSize&&high)ipo.minSubscription=ipo.lotSize*high;
-    const cats=d?.activeCat?.dataList??[];
+    const applicationPrice=lowPrice??high;
+    if(ipo.lotSize&&applicationPrice){
+      const lotValue=ipo.lotSize*applicationPrice;
+      // SME individual applications require at least 2 lots and a bid value above ₹2 lakh.
+      const minimumLots=ipo.type==="SME"?Math.max(2,Math.ceil(200000/lotValue)):1;
+      ipo.minSubscription=ipo.lotSize*minimumLots*applicationPrice;
+    }
+    const cats=rowsFromCategory(d?.activeCat);
     const mapped:{category:string;value:number|null}[]=[];
     for(const row of cats){
       if(!row||row.srNo==="Sr.No.")continue;
-      const label=clean(row.category).toLowerCase();
-      const value=n(row.noOfTotalMeant);
-      if(label.includes("qualified")||String(row.srNo)==="1")mapped.push({category:"QIB",value});
-      else if(label.includes("non institutional")||String(row.srNo)==="2")mapped.push({category:"NII",value});
-      else if(label.includes("retail")||String(row.srNo)==="3")mapped.push({category:"Retail",value});
-      else if(label==="total")ipo.subscription=value;
+      const label=clean(row.category??row.Category??row.investorCategory??row.name).toLowerCase();
+      const value=n(row.noOfTotalMeant??row.noOfTime??row.subscription??row.noOfTimes);
+      if(label.includes("qualified")||label.includes("qib")||String(row.srNo)==="1")mapped.push({category:"QIB",value});
+      else if(label.includes("non institutional")||label.includes("nii")||label.includes("hni")||String(row.srNo)==="2")mapped.push({category:"NII",value});
+      else if(label.includes("retail")||label.includes("individual")||String(row.srNo)==="3")mapped.push({category:"Retail",value});
+      else if(label.includes("total"))ipo.subscription=value;
     }
     ipo.subscriptionCategories=mapped;
     if(ipo.subscription==null&&mapped.length){
       const vals=mapped.map(x=>x.value).filter((x):x is number=>x!=null);
       if(vals.length)ipo.subscription=Math.max(...vals);
     }
-    ipo.subscriptionAmount=ipo.issueSize!=null&&ipo.subscription!=null?Number((ipo.issueSize*ipo.subscription).toFixed(2)):null;
+    // Some NSE responses expose only the total multiple outside activeCat.
+    if(ipo.subscription==null){
+      const totalRows=rowsFromCategory(d?.subscriptionData??d?.subscription??d?.data);
+      for(const row of totalRows){
+        const label=clean(row?.category??row?.name).toLowerCase();
+        if(label.includes("total")){
+          const value=n(row?.noOfTime??row?.subscription??row?.noOfTimes);
+          if(value!=null){ipo.subscription=value;break;}
+        }
+      }
+    }
+    const bidRows=rowsFromNse(d?.bidDetails??d?.subscriptionData??d?.biddingData);
+    const bidShares=bidRows.reduce((sum,row)=>sum+(n(row?.noOfsharesBid??row?.noOfSharesBid??row?.sharesBid)??0),0);
+    ipo.subscriptionAmount=bidShares>0&&high?Number((bidShares*high/10000000).toFixed(2)):ipo.issueSize!=null&&ipo.subscription!=null?Number((ipo.issueSize*ipo.subscription).toFixed(2)):null;
     ipo.subscriptionSource="NSE India";
     ipo.detailSource="NSE India official issue-information";
     ipo.verifiedSources=["NSE India","NSE India issue-information"];
