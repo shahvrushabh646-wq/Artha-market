@@ -1,12 +1,10 @@
 import { createServerFn } from "@tanstack/react-start";
-import { applyVerifiedIpoOverrides } from "./ipo-overrides";
-
-type Ipo={id:string;name:string;type:"Mainboard"|"SME";openDate:string|null;closeDate:string|null;listingDate:string|null;issueSize:number|null;minSubscription:number|null;subscription:number|null;subscriptionSource:string|null;subscriptionCategories:{category:string;value:number|null}[];gmpPct:number|null;gmpSources:{source:string;pct:number|null}[];city:string|null;state:string|null;business:string|null;countries:{country:string;business:string;salesPct:number|null}[];revenues:{year:string;value:number|null}[];profits:{year:string;value:number|null}[];eps:{year:string;value:number|null}[];priceBand:string|null;lotSize:number|null;faceValue:number|null;sharesOffered:number|null;offeredToPublic:number|null;retailShares:number|null;qibShares:number|null;niiShares:number|null;freshIssue:number|null;offerForSale:number|null;issueType:string|null;objects:string[];risks:string[];promoterHolding:number|null;postIssuePromoterHolding:number|null;moneycontrolUrl:string|null;detailSource:string|null;verifiedSources:string[];sourceUrls:string[];verifiedAt:string};
+type Ipo={symbol?:string;id:string;name:string;type:"Mainboard"|"SME";openDate:string|null;closeDate:string|null;listingDate:string|null;issueSize:number|null;minSubscription:number|null;subscription:number|null;subscriptionSource:string|null;subscriptionCategories:{category:string;value:number|null}[];gmpPct:number|null;gmpSources:{source:string;pct:number|null}[];city:string|null;state:string|null;business:string|null;countries:{country:string;business:string;salesPct:number|null}[];revenues:{year:string;value:number|null}[];profits:{year:string;value:number|null}[];eps:{year:string;value:number|null}[];priceBand:string|null;lotSize:number|null;faceValue:number|null;sharesOffered:number|null;offeredToPublic:number|null;retailShares:number|null;qibShares:number|null;niiShares:number|null;freshIssue:number|null;offerForSale:number|null;issueType:string|null;objects:string[];risks:string[];promoterHolding:number|null;postIssuePromoterHolding:number|null;moneycontrolUrl:string|null;detailSource:string|null;verifiedSources:string[];sourceUrls:string[];verifiedAt:string};
 type SamcoIpo={id:string;slug:string;company_name:string;type:string;company_profile:string;issue_type:string;issue_open:string;issue_close:string;listed_date:string;face_value:string;price_band:string;bid_lot:string;minimum_order:string;listing:string;issue_size:string;fresh_issue:string;ofs:string;obj_issue:string;key_strengths:string;risks:string;RHP_url:string;knowledge_center_url:string};
 
 const NSE = "https://www.nseindia.com";
 const NSE_PAGE = "https://www.nseindia.com/market-data/all-upcoming-issues-ipo";
-const cache=new Map<string,{expires:number;value<Ipo[]>()}>();
+const cache=new Map<string,{expires:number;value:Ipo[]}>();
 const HEADERS={
   "User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36",
   Accept:"application/json, text/plain, */*",
@@ -42,7 +40,7 @@ function issueSizeCr(v:string|null|undefined){
 }
 function baseNse(r:any):Ipo{
   return {
-    id:slugId(r.companyName||r.symbol||"ipo"),
+    symbol:r.symbol??undefined,id:slugId(r.companyName||r.symbol||"ipo"),
     name:clean(r.companyName||r.symbol||"IPO"),
     type:r.series==="SME"?"SME":"Mainboard",
     openDate:date(r.issueStartDate),closeDate:date(r.issueEndDate),listingDate:null,
@@ -60,7 +58,7 @@ function baseNse(r:any):Ipo{
 async function enrichNse(ipo:Ipo,cookie:string){
   try{
     const series=ipo.type==="SME"?"SME":"EQ";
-    const symbol=ipo.name.replace(/\\s+(Limited|Ltd\\.?|Private|Pvt\\.?)$/i,"").trim();
+    const symbol=ipo.symbol;\n    if(!symbol)return ipo;
     const d=await fetchNse("/api/ipo-detail?symbol="+encodeURIComponent(symbol)+"&series="+series,cookie);
     const info=parseInfo(d?.issueInfo?.dataList??[]);
     const period=info["Issue Period"]?.match(/(\\d{2}-\\w{3}-\\d{4})\\s*to\\s*(\\d{2}-\\w{3}-\\d{4})/i);
