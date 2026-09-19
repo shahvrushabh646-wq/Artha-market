@@ -22,13 +22,24 @@ async function nseJson(symbol: string): Promise<unknown> {
   const bare = displaySymbol(symbol).toUpperCase().replace(/\.NS$|\.BO$/i, "").trim();
   const homeUrl = `https://www.nseindia.com/get-quotes/equity?symbol=${encodeURIComponent(bare)}`;
   const apiUrl = `https://www.nseindia.com/api/quote-equity?symbol=${encodeURIComponent(bare)}`;
-  const home = await fetch(homeUrl, { headers: { "User-Agent": UA, Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", "Accept-Language": "en-US,en;q=0.9", "Upgrade-Insecure-Requests": "1" }, cache: "no-store" });
-  const cookieParts = typeof (home.headers as Headers & { getSetCookie?: () => string[] }).getSetCookie === "function"
-    ? (home.headers as Headers & { getSetCookie: () => string[] }).getSetCookie().map((v) => v.split(";", 1)[0])
-    : ((home.headers.get("set-cookie") ?? "").split(/,(?=[^;]+=)/).map((v) => v.split(";", 1)[0]));
-  const res = await fetch(apiUrl, { headers: { "User-Agent": UA, Accept: "application/json,text/plain,*/*", "Accept-Language": "en-US,en;q=0.9", Referer: homeUrl, Origin: "https://www.nseindia.com", "X-Requested-With": "XMLHttpRequest", ...(cookieParts.length ? { Cookie: cookieParts.join("; ") } : {}) }, cache: "no-store" });
-  if (!res.ok) throw new Error(`NSE HTTP ${res.status}`);
-  return res.json();
+  try {
+    const home = await fetch(homeUrl, { headers: { "User-Agent": UA, Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", "Accept-Language": "en-US,en;q=0.9", "Upgrade-Insecure-Requests": "1" }, cache: "no-store" });
+    const h=home.headers as Headers & { getSetCookie?:()=>string[] };
+    const cookieParts = h.getSetCookie?.()?.map(v=>v.split(";",1)[0]) ?? (home.headers.get("set-cookie")??"").split(/,(?=[^;]+=)/).map(v=>v.split(";",1)[0]);
+    const res = await fetch(apiUrl, { headers: { "User-Agent": UA, Accept: "application/json,text/plain,*/*", "Accept-Language": "en-US,en;q=0.9", Referer: homeUrl, Origin: "https://www.nseindia.com", "X-Requested-With": "XMLHttpRequest", ...(cookieParts.length ? { Cookie: cookieParts.join("; ") } : {}) }, cache: "no-store" });
+    if (!res.ok) throw new Error(`NSE HTTP ${res.status}`);
+    return res.json();
+  } catch {
+    const proxy=`https://r.jina.ai/http://www.nseindia.com/api/quote-equity?symbol=${encodeURIComponent(bare)}`;
+    const r=await fetch(proxy,{headers:{Accept:"application/json,text/plain,*/*"},cache:"no-store"});
+    if(!r.ok) throw new Error(`NSE proxy HTTP ${r.status}`);
+    const text=await r.text();
+    try{return JSON.parse(text);}catch{
+      const a=text.indexOf("{"), b=text.lastIndexOf("}");
+      if(a>=0&&b>a)return JSON.parse(text.slice(a,b+1));
+      throw new Error("NSE proxy non-JSON");
+    }
+  }
 }
 
 async function cached<T>(key: string, ttl: number, fn: () => Promise<T>): Promise<T> {
