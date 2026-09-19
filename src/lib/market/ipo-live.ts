@@ -109,7 +109,7 @@ function documentUrlsFromDetail(root:unknown):string[]{
     seen.add(value as any);
     if(Array.isArray(value)){for(const item of value)walk(item);return;}
     for(const [key,val] of Object.entries(value as Record<string,unknown>)){
-      if(typeof val==="string"&&/^https?:\\/\\//i.test(val)){
+      if(typeof val==="string"&&/^https?:\/\//i.test(val)){
         const k=key.toLowerCase();
         const u=val.trim();
         if(/rhp|red.?herring|prospectus|offer.?document|offer.?doc|issue.?document|abridged/i.test(k+" "+u))found.push(u);
