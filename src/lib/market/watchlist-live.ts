@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { normalizeSymbol, displaySymbol } from "./config";
 import type { Bar, Quote } from "./types";
+import { fetchQuotes } from "./server";
 
 type YahooResult = { bars: Bar[]; meta: Record<string, unknown> };
 
@@ -91,11 +92,13 @@ function quoteFromBars(symbol: string, bars: Bar[], meta: Record<string, unknown
 export const fetchWatchlistLive = createServerFn({ method: "POST" })
   .validator((data: unknown) => z.object({ symbols: z.array(z.string()).max(40) }).parse(data))
   .handler(async ({ data }) => {
+    const verifiedQuotes = await fetchQuotes({data:{symbols:data.symbols}});
+    const verifiedMap = new Map(verifiedQuotes.map(q => [q.symbol, q]));
     const results = await Promise.all(data.symbols.map(async raw => {
       const symbol = normalizeSymbol(raw);
       try {
         const [oneYear, fiveYear] = await Promise.all([yahoo(symbol, "1y", "1d"), yahoo(symbol, "5y", "1d")]);
-        const q = quoteFromBars(symbol, oneYear.bars, fiveYear.meta);
+        const q = verifiedMap.get(symbol) ?? quoteFromBars(symbol, oneYear.bars, fiveYear.meta);
         const high5y = fiveYear.bars.length ? Math.max(...fiveYear.bars.map(b => b.h)) : null;
         const low5y = fiveYear.bars.length ? Math.min(...fiveYear.bars.map(b => b.l)) : null;
         const price75 = high5y != null ? Math.round(high5y * 0.25 * 100) / 100 : null;
