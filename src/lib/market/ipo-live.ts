@@ -32,7 +32,7 @@ function parseInfo(rows:unknown[]){
 }
 function issueSizeCr(v:string|null|undefined){
   const s=clean(v);
-  const m=s.match(/(?:Rs\\.?|₹)\\s*([\\d,.]+)\\s*(million|crore|cr\\b|lakh)/i);
+  const m=s.match(/(?:Rs\\.?|₹)\s*([\d,.]+)\s*(million|crore|cr\\b|lakh)/i);
   if(!m)return null;
   const x=n(m[1]); if(x==null)return null;
   const u=m[2].toLowerCase();
@@ -58,15 +58,16 @@ function baseNse(r:any):Ipo{
 async function enrichNse(ipo:Ipo,cookie:string){
   try{
     const series=ipo.type==="SME"?"SME":"EQ";
-    const symbol=ipo.symbol;\n    if(!symbol)return ipo;
+    const symbol=ipo.symbol;
+    if(!symbol)return ipo;
     const d=await fetchNse("/api/ipo-detail?symbol="+encodeURIComponent(symbol)+"&series="+series,cookie);
     const info=parseInfo(d?.issueInfo?.dataList??[]);
-    const period=info["Issue Period"]?.match(/(\\d{2}-\\w{3}-\\d{4})\\s*to\\s*(\\d{2}-\\w{3}-\\d{4})/i);
+    const period=info["Issue Period"]?.match(/(\d{2}-\w{3}-\d{4})\s*to\s*(\d{2}-\w{3}-\d{4})/i);
     if(period){ipo.openDate=date(period[1]);ipo.closeDate=date(period[2]);}
     ipo.priceBand=band(info["Price Range"])||ipo.priceBand;
-    const lot=info["Bid Lot"]?.match(/([\\d,]+)\\s*Equity Shares/i);
+    const lot=info["Bid Lot"]?.match(/([\d,]+)\s*Equity Shares/i);
     ipo.lotSize=n(lot?.[1])??ipo.lotSize;
-    ipo.faceValue=n(info["Face Value"]?.match(/[\\d,.]+/)?.[0])??ipo.faceValue;
+    ipo.faceValue=n(info["Face Value"]?.match(/[\d,.]+/)?.[0])??ipo.faceValue;
     ipo.issueSize=issueSizeCr(info["Issue Size"])??ipo.issueSize;
     const high=upper(info["Price Range"]);
     if(ipo.lotSize&&high)ipo.minSubscription=ipo.lotSize*high;
