@@ -2,7 +2,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { Search } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { POPULAR, displaySymbol, normalizeSymbol } from "@/lib/market/config";
+import { POPULAR, normalizeSymbol } from "@/lib/market/config";
 import { searchSymbols } from "@/lib/market/server";
 import { useDesk } from "@/lib/store";
 import { Button } from "./ui/button";
@@ -83,8 +83,7 @@ export function SymbolSearch({ initial = "" }: { initial?: string }) {
                   <button type="button" className="flex w-full items-center justify-between gap-3 px-3 py-3 text-left hover:bg-surface-3" onClick={() => go(hit.symbol)}>
                     <span className="min-w-0">
                       <span className="block text-sm text-fg">{hit.name}</span>
-                      <span className="block text-xs text-muted">{hit.symbol}</span>
-                    </span>
+                        </span>
                     <span className="text-[11px] uppercase tracking-wider text-subtle">{hit.exchange}</span>
                   </button>
                 </li>
@@ -94,7 +93,7 @@ export function SymbolSearch({ initial = "" }: { initial?: string }) {
             <div className="px-3 py-3 text-sm text-muted">Searching…</div>
           ) : (
             <div className="flex flex-wrap gap-1.5 p-3">
-              {POPULAR.map((s) => <button key={s} type="button" onClick={() => go(s)} className="rounded-full bg-surface px-3 py-1.5 text-xs text-muted hover:text-fg">{displaySymbol(s)}</button>)}
+              {POPULAR.map((s) => <button key={s} type="button" onClick={() => go(s)} className="rounded-full bg-surface px-3 py-1.5 text-xs text-muted hover:text-fg">{s.replace(/\.(NS|BO)$/i, "")}</button>)}
             </div>
           )}
         </div>
