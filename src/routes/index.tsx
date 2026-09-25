@@ -14,39 +14,44 @@ type MetalPrices = { gold10g: number | null; silverKg: number | null; goldChange
 
 async function getIndianMetalPrices(): Promise<{ gold10g: number; silverKg: number; goldChange24hPct: number | null; goldChange24hAmount10g: number | null; silverChange24hPct: number | null; silverChange24hAmountKg: number | null; asOf: string | null } | null> {
   try {
-    const res = await fetch("https://allindiabullion.com/gold-rate/maharashtra/mumbai", { headers: { Accept: "text/html" }, cache: "no-store" });
-    if (!res.ok) return null;
-    const html = await res.text();
+    const [goldRes, silverRes] = await Promise.all([
+      fetch("https://www.moneycontrol.com/news/gold-rates-today/", { headers: { Accept: "text/html" }, cache: "no-store" }),
+      fetch("https://www.moneycontrol.com/news/silver-rates-today/mumbai/", { headers: { Accept: "text/html" }, cache: "no-store" })
+    ]);
+    if (!goldRes.ok || !silverRes.ok) return null;
 
-    const extract = (label: string, nextLabel?: string) => {
-      const block = nextLabel
-        ? html.match(new RegExp(label + "[\\s\\S]{0,6000}?" + nextLabel))
-        : html.match(new RegExp(label + "[\\s\\S]{0,6000}"));
-      const text = block?.[0] ?? "";
-      const price = text.match(/₹\\s*([\\d,]+)/);
-      const move = text.match(/[▲▼]\\s*([\\d,]+)/);
-      return {
-        price: price ? Number(price[1].replace(/,/g, "")) : NaN,
-        move: move ? Number(move[1].replace(/,/g, "")) * (text.includes("▼") ? -1 : 1) : null
-      };
-    };
+    const goldHtml = await goldRes.text();
+    const silverHtml = await silverRes.text();
 
-    const goldData = extract("RETAIL 995", "RTGS 995");
-    const silverData = extract("RETAIL 999", "RTGS 999");
-    const gold = goldData.price;
-    const silver = silverData.price;
-    if (!Number.isFinite(gold) || !Number.isFinite(silver) || gold <= 0 || silver <= 0) return null;
+    // Moneycontrol Mumbai: 24K gold per 10g. Convert to 995 purity.
+    const goldBlock = goldHtml.match(/Gold Rate In Mumbai[\s\S]{0,8000}?24 Carat Rate[\s\S]{0,1800}/i)?.[0] ?? "";
+    const goldPriceMatch = goldBlock.match(/Current Price \(24 Carat \/ 10 Gram\)[\s\S]{0,180}?₹\s*([\d,]+)/i);
+    const goldPrevMatch = goldBlock.match(/Prev Close[\s\S]{0,100}?₹\s*([\d,]+)/i);
+    const gold24 = goldPriceMatch ? Number(goldPriceMatch[1].replace(/,/g, "")) : NaN;
+    const goldPrev24 = goldPrevMatch ? Number(goldPrevMatch[1].replace(/,/g, "")) : NaN;
+    const gold10g = gold24 * 0.995;
+    if (!Number.isFinite(gold10g) || gold10g <= 0) return null;
 
-    const goldMove = goldData.move;
-    const silverMove = silverData.move;
+    // Moneycontrol Mumbai silver is 999-standard silver per kg.
+    const silverBlock = silverHtml.match(/Silver Rate In Mumbai[\s\S]{0,5000}?Compare Silver Rate In Mumbai[\s\S]{0,1200}/i)?.[0] ?? "";
+    const silverPriceMatch = silverBlock.match(/Current Price \(1 KG\)[\s\S]{0,120}?₹\s*([\d,]+)/i);
+    const silverPrevMatch = silverBlock.match(/Prev Close[\s\S]{0,100}?₹\s*([\d,]+)/i);
+    const silverKg = silverPriceMatch ? Number(silverPriceMatch[1].replace(/,/g, "")) : NaN;
+    const silverPrevKg = silverPrevMatch ? Number(silverPrevMatch[1].replace(/,/g, "")) : NaN;
+    if (!Number.isFinite(silverKg) || silverKg <= 0) return null;
+
+    const goldChange24hAmount10g = Number.isFinite(goldPrev24) ? gold10g - goldPrev24 * 0.995 : null;
+    const goldChange24hPct = Number.isFinite(goldPrev24) && goldPrev24 > 0 ? ((gold24 - goldPrev24) / goldPrev24) * 100 : null;
+    const silverChange24hAmountKg = Number.isFinite(silverPrevKg) ? silverKg - silverPrevKg : null;
+    const silverChange24hPct = Number.isFinite(silverPrevKg) && silverPrevKg > 0 ? ((silverKg - silverPrevKg) / silverPrevKg) * 100 : null;
 
     return {
-      gold10g: gold,
-      silverKg: silver,
-      goldChange24hPct: goldMove != null ? (goldMove / (gold - goldMove)) * 100 : null,
-      goldChange24hAmount10g: goldMove,
-      silverChange24hPct: silverMove != null ? (silverMove / (silver - silverMove)) * 100 : null,
-      silverChange24hAmountKg: silverMove,
+      gold10g,
+      silverKg,
+      goldChange24hPct,
+      goldChange24hAmount10g,
+      silverChange24hPct,
+      silverChange24hAmountKg,
       asOf: new Date().toISOString()
     };
   } catch {
