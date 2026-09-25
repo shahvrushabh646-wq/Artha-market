@@ -53,7 +53,7 @@ async function getIndianMetalPrices(): Promise<{ gold10g: number; silverKg: numb
 const fetchPreciousMetals = createServerFn({ method: "GET" }).handler(async (): Promise<MetalPrices> => {
   const quote = await getIndianMetalPrices();
   if (!quote) throw new Error("Live Indian Gold/Silver rate is temporarily unavailable");
-  const { goldUsdOz, silverUsdOz } = quote;
+  const { gold10g, silverKg, goldUsdOz, silverUsdOz, usdInr, goldChange24hPct, goldChange24hAmount10g, silverChange24hPct, silverChange24hAmountKg, asOf } = quote;
   const gold5yHigh10g = 170000;
   const silver5yHighKg = 400000;
   const goldDiscount10Price10g = Math.round(gold5yHigh10g * 0.90);
@@ -66,7 +66,7 @@ const fetchPreciousMetals = createServerFn({ method: "GET" }).handler(async (): 
   const silver50PriceKg = Math.round(silver5yHighKg * 0.50);
   const silver55PriceKg = Math.round(silver5yHighKg * 0.45);
   const goldSignal = gold10g <= goldDiscount40Price10g ? "BUY" : "WAIT";
-  return { gold10g: quote.gold10g, silverKg: quote.silverKg, goldUsdOz: quote.goldUsdOz, silverUsdOz: quote.silverUsdOz, usdInr: quote.usdInr, goldChange24hPct: quote.goldChange24hPct, goldChange24hAmount10g: quote.goldChange24hAmount10g, silverChange24hPct: quote.silverChange24hPct, silverChange24hAmountKg: quote.silverChange24hAmountKg, gold5yHigh10g, goldDiscount10Price10g, goldDiscount20Price10g, goldDiscount30Price10g, goldDiscount40Price10g, silver5yHighKg, silver25PriceKg, silver35PriceKg, silver45PriceKg, silver50PriceKg, silver55PriceKg, goldSignal: "WAIT", asOf: quote.asOf, source: "Yahoo Finance current Gold & Silver futures" };
+  return { gold10g, silverKg, goldUsdOz, silverUsdOz, usdInr, goldChange24hPct, goldChange24hAmount10g, silverChange24hPct, silverChange24hAmountKg, gold5yHigh10g, goldDiscount10Price10g, goldDiscount20Price10g, goldDiscount30Price10g, goldDiscount40Price10g, silver5yHighKg, silver25PriceKg, silver35PriceKg, silver45PriceKg, silver50PriceKg, silver55PriceKg, goldSignal, asOf, source: "Yahoo Finance current Gold & Silver futures" };
 });
 
 function Home() {
