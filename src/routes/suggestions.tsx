@@ -3,7 +3,6 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { Lightbulb, RefreshCw } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { fetchSuggestions } from "@/lib/market/suggestions";
-import { displaySymbol } from "@/lib/market/config";
 import { fmtCurrency } from "@/lib/market/math";
 import type { Quote } from "@/lib/market/types";
 import { Panel, Section, SignalBadge, SkeletonBlock } from "@/components/widgets";
@@ -12,7 +11,7 @@ export const Route = createFileRoute("/suggestions")({ component: Suggestions })
 const STORAGE_KEY = "artha:suggestions:v13";
 const PERIODS = [{value:"1d",label:"1 Day"},{value:"1w",label:"1 Week"},{value:"1m",label:"1 Month"},{value:"3m",label:"3 Months"},{value:"6m",label:"6 Months"}];
 function readSavedSuggestions():Quote[]{if(typeof window==="undefined")return[];try{const raw=window.localStorage.getItem(STORAGE_KEY)||window.localStorage.getItem("artha:suggestions:v12")||window.localStorage.getItem("artha:suggestions:v11")||window.localStorage.getItem("artha:suggestions:v10");if(!raw)return[];const parsed=JSON.parse(raw) as unknown;return Array.isArray(parsed)?parsed as Quote[]:[]}catch{return[];}}
-function StockRow({quote,todayTrigger}:{quote:Quote;todayTrigger:boolean}){const isLow=(quote.price??0)<20;const level=(quote.high5y??0)*(isLow?.10:.25);return <Link to="/stock" search={{symbol:quote.symbol,period:"1Y"}} className="block"><Panel className="min-h-[92px] p-4 transition hover:bg-surface-2"><div className="flex items-center justify-between gap-3"><div><div className="font-medium text-fg">{displaySymbol(quote.symbol)}</div><div className="mt-1 text-xs text-muted">{isLow?"90% Rule":"75% Rule"} · Trigger ≤ {fmtCurrency(level)}</div></div><div className="text-right"><div className="tabular text-sm text-fg">{fmtCurrency(quote.price)}</div><div className="mt-1 text-xs text-muted">5Y high {fmtCurrency(quote.high5y)}</div></div></div><div className="mt-2 flex items-center justify-between"><SignalBadge signal="BUY" />{todayTrigger&&<span className="text-xs font-medium text-up">Triggered today</span>}</div></Panel></Link>}
+function StockRow({quote,todayTrigger}:{quote:Quote;todayTrigger:boolean}){const isLow=(quote.price??0)<20;const level=(quote.high5y??0)*(isLow?.10:.25);return <Link to="/stock" search={{symbol:quote.symbol,period:"1Y"}} className="block"><Panel className="min-h-[92px] p-4 transition hover:bg-surface-2"><div className="flex items-center justify-between gap-3"><div><div className="font-medium text-fg">{quote.name}</div><div className="mt-1 text-xs text-muted">{isLow?"90% Rule":"75% Rule"} · Trigger ≤ {fmtCurrency(level)}</div></div><div className="text-right"><div className="tabular text-sm text-fg">{fmtCurrency(quote.price)}</div><div className="mt-1 text-xs text-muted">5Y high {fmtCurrency(quote.high5y)}</div></div></div><div className="mt-2 flex items-center justify-between"><SignalBadge signal="BUY" />{todayTrigger&&<span className="text-xs font-medium text-up">Triggered today</span>}</div></Panel></Link>}
 function Suggestions(){
   const [saved,setSaved]=useState<Quote[]>(readSavedSuggestions);
   const [period,setPeriod]=useState<"current"|"1d"|"1w"|"1m"|"3m"|"6m">("current");
