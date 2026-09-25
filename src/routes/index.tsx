@@ -14,24 +14,48 @@ type MetalPrices = { gold10g: number | null; silverKg: number | null; goldChange
 
 async function getIndianMetalPrices(): Promise<{ gold10g: number; silverKg: number; goldChange24hPct: number | null; goldChange24hAmount10g: number | null; silverChange24hPct: number | null; silverChange24hAmountKg: number | null; asOf: string | null } | null> {
   try {
-    const currentRes = await fetch("https://api.oropocket.com/public/prices", { headers: { Accept: "application/json" }, cache: "no-store" });
-    if (!currentRes.ok) return null;
-    const raw = await currentRes.json() as { data?: { gold?: { buy?: number; change24h?: { buy?: number } }; silver?: { buy?: number; change24h?: { buy?: number } }; timestamp?: string } };
-    const gold = Number(raw.data?.gold?.buy);
-    const silver = Number(raw.data?.silver?.buy);
-    if (!Number.isFinite(gold) || !Number.isFinite(silver) || gold <= 0 || silver <= 0) return null;
+    const yahoo = async (symbol: string) => {
+      const res = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1m&range=1d`, {
+        headers: { Accept: "application/json", "User-Agent": "Mozilla/5.0" },
+        cache: "no-store"
+      });
+      if (!res.ok) return null;
+      const json = await res.json() as any;
+      const meta = json?.chart?.result?.[0]?.meta;
+      const price = Number(meta?.regularMarketPrice ?? meta?.previousClose);
+      return Number.isFinite(price) && price > 0 ? { price, previousClose: Number(meta?.previousClose), timestamp: Number(meta?.regularMarketTime) } : null;
+    };
 
-    const gold10g = gold * 10;
-    const silverKg = silver * 1000;
-    const goldPct = Number(raw.data?.gold?.change24h?.buy);
-    const silverPct = Number(raw.data?.silver?.change24h?.buy);
-    const goldChange24hPct = Number.isFinite(goldPct) ? goldPct : null;
-    const silverChange24hPct = Number.isFinite(silverPct) ? silverPct : null;
-    const goldChange24hAmount10g = goldChange24hPct != null ? gold10g * goldChange24hPct / 100 : null;
-    const silverChange24hAmountKg = silverChange24hPct != null ? silverKg * silverChange24hPct / 100 : null;
+    const [gold, silver, usdInr] = await Promise.all([yahoo("GC=F"), yahoo("SI=F"), yahoo("INR=X")]);
+    if (!gold || !silver || !usdInr) return null;
 
-    return { gold10g, silverKg, goldChange24hPct, goldChange24hAmount10g, silverChange24hPct, silverChange24hAmountKg, asOf: raw.data?.timestamp ?? new Date().toISOString() };
-  } catch { return null; }
+    // Yahoo Finance gives COMEX gold/silver in USD per troy ounce and USD/INR.
+    // Gold is converted to Indian retail 995 purity per 10g; silver is converted
+    // to Indian retail 999 fine per kg. No local premium, GST or making charges
+    // are invented or added.
+    const troyOunceGrams = 31.1034768;
+    const gold10g = gold.price * usdInr.price / troyOunceGrams * 10 * 0.995;
+    const silverKg = silver.price * usdInr.price / troyOunceGrams * 1000;
+
+    const goldChange24hPct = Number.isFinite(gold.previousClose) && gold.previousClose > 0
+      ? ((gold.price - gold.previousClose) / gold.previousClose) * 100
+      : null;
+    const silverChange24hPct = Number.isFinite(silver.previousClose) && silver.previousClose > 0
+      ? ((silver.price - silver.previousClose) / silver.previousClose) * 100
+      : null;
+
+    return {
+      gold10g,
+      silverKg,
+      goldChange24hPct,
+      goldChange24hAmount10g: goldChange24hPct != null ? gold10g * goldChange24hPct / 100 : null,
+      silverChange24hPct,
+      silverChange24hAmountKg: silverChange24hPct != null ? silverKg * silverChange24hPct / 100 : null,
+      asOf: gold.timestamp > 0 ? new Date(gold.timestamp * 1000).toISOString() : new Date().toISOString()
+    };
+  } catch {
+    return null;
+  }
 }
 
 const fetchPreciousMetals = createServerFn({ method: "GET" }).handler(async (): Promise<MetalPrices> => {
