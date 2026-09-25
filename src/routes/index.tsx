@@ -14,13 +14,51 @@ type MetalPrices = { gold10g: number | null; silverKg: number | null; goldChange
 
 async function getIndianMetalPrices(): Promise<{ gold10g: number; silverKg: number; goldChange24hPct: number | null; goldChange24hAmount10g: number | null; silverChange24hPct: number | null; silverChange24hAmountKg: number | null; asOf: string | null } | null> {
   try {
-    const res = await fetch("https://api.oropocket.com/public/prices", { headers: { Accept: "application/json" }, cache: "no-store" });
-    if (!res.ok) return null;
-    const raw = await res.json() as { data?: { gold?: { buy?: number; change24h?: { buy?: number } }; silver?: { buy?: number; change24h?: { buy?: number } }; timestamp?: string } };
+    const currentRes = await fetch("https://api.oropocket.com/public/prices", { headers: { Accept: "application/json" }, cache: "no-store" });
+    if (!currentRes.ok) return null;
+    const raw = await currentRes.json() as { data?: { gold?: { buy?: number }; silver?: { buy?: number }; timestamp?: string } };
     const gold = Number(raw.data?.gold?.buy);
     const silver = Number(raw.data?.silver?.buy);
     if (!Number.isFinite(gold) || !Number.isFinite(silver) || gold <= 0 || silver <= 0) return null;
-    return { gold10g: gold * 10, silverKg: silver * 1000, asOf: raw.data?.timestamp ?? new Date().toISOString() };
+
+    const gold10g = gold * 10;
+    const silverKg = silver * 1000;
+    let goldChange24hPct: number | null = null;
+    let silverChange24hPct: number | null = null;
+    let goldChange24hAmount10g: number | null = null;
+    let silverChange24hAmountKg: number | null = null;
+
+    // The public feed does not expose a 24h-change field. Use its historical endpoint
+    // when available so the app never invents a movement value.
+    try {
+      const from = new Date(Date.now() - 2 * 86400000).toISOString();
+      const historyRes = await fetch(`https://api.oropocket.com/public/prices/history?asset=gold&interval=day&from=${encodeURIComponent(from)}`, { headers: { Accept: "application/json" }, cache: "no-store" });
+      const historyRaw = historyRes.ok ? await historyRes.json() as any : null;
+      const rows = Array.isArray(historyRaw?.data) ? historyRaw.data : Array.isArray(historyRaw?.data?.rows) ? historyRaw.data.rows : [];
+      const goldPrev = [...rows].reverse().find((row: any) => Number(row?.buy ?? row?.buy_price ?? row?.price) > 0);
+      const goldPrevPerGram = goldPrev ? Number(goldPrev.buy ?? goldPrev.buy_price ?? goldPrev.price) : NaN;
+      if (Number.isFinite(goldPrevPerGram) && goldPrevPerGram > 0) {
+        const previous10g = goldPrevPerGram * 10;
+        goldChange24hAmount10g = gold10g - previous10g;
+        goldChange24hPct = (goldChange24hAmount10g / previous10g) * 100;
+      }
+    } catch {}
+
+    try {
+      const from = new Date(Date.now() - 2 * 86400000).toISOString();
+      const historyRes = await fetch(`https://api.oropocket.com/public/prices/history?asset=silver&interval=day&from=${encodeURIComponent(from)}`, { headers: { Accept: "application/json" }, cache: "no-store" });
+      const historyRaw = historyRes.ok ? await historyRes.json() as any : null;
+      const rows = Array.isArray(historyRaw?.data) ? historyRaw.data : Array.isArray(historyRaw?.data?.rows) ? historyRaw.data.rows : [];
+      const silverPrev = [...rows].reverse().find((row: any) => Number(row?.buy ?? row?.buy_price ?? row?.price) > 0);
+      const silverPrevPerGram = silverPrev ? Number(silverPrev.buy ?? silverPrev.buy_price ?? silverPrev.price) : NaN;
+      if (Number.isFinite(silverPrevPerGram) && silverPrevPerGram > 0) {
+        const previousKg = silverPrevPerGram * 1000;
+        silverChange24hAmountKg = silverKg - previousKg;
+        silverChange24hPct = (silverChange24hAmountKg / previousKg) * 100;
+      }
+    } catch {}
+
+    return { gold10g, silverKg, goldChange24hPct, goldChange24hAmount10g, silverChange24hPct, silverChange24hAmountKg, asOf: raw.data?.timestamp ?? new Date().toISOString() };
   } catch { return null; }
 }
 
