@@ -14,44 +14,29 @@ type MetalPrices = { gold10g: number | null; silverKg: number | null; goldChange
 
 async function getIndianMetalPrices(): Promise<{ gold10g: number; silverKg: number; goldChange24hPct: number | null; goldChange24hAmount10g: number | null; silverChange24hPct: number | null; silverChange24hAmountKg: number | null; asOf: string | null } | null> {
   try {
-    const yahoo = async (symbol: string) => {
-      const res = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1m&range=1d`, {
-        headers: { Accept: "application/json", "User-Agent": "Mozilla/5.0" },
-        cache: "no-store"
-      });
-      if (!res.ok) return null;
-      const json = await res.json() as any;
-      const meta = json?.chart?.result?.[0]?.meta;
-      const price = Number(meta?.regularMarketPrice ?? meta?.previousClose);
-      return Number.isFinite(price) && price > 0 ? { price, previousClose: Number(meta?.previousClose), timestamp: Number(meta?.regularMarketTime) } : null;
-    };
+    const res = await fetch("https://allindiabullion.com/gold-rate/maharashtra/mumbai", { headers: { Accept: "text/html" }, cache: "no-store" });
+    if (!res.ok) return null;
+    const html = await res.text();
 
-    const [gold, silver, usdInr] = await Promise.all([yahoo("GC=F"), yahoo("SI=F"), yahoo("INR=X")]);
-    if (!gold || !silver || !usdInr) return null;
+    const goldMatch = html.match(/RETAIL 995[\s\S]{0,180}?₹([\d,]+)/i);
+    const silverMatch = html.match(/RETAIL 999[\s\S]{0,180}?SILVER[\s\S]{0,180}?₹([\d,]+)/i);
+    const gold = goldMatch ? Number(goldMatch[1].replace(/,/g, "")) : NaN;
+    const silver = silverMatch ? Number(silverMatch[1].replace(/,/g, "")) : NaN;
+    if (!Number.isFinite(gold) || !Number.isFinite(silver) || gold <= 0 || silver <= 0) return null;
 
-    // Yahoo Finance gives COMEX gold/silver in USD per troy ounce and USD/INR.
-    // Gold is converted to Indian retail 995 purity per 10g; silver is converted
-    // to Indian retail 999 fine per kg. No local premium, GST or making charges
-    // are invented or added.
-    const troyOunceGrams = 31.1034768;
-    const gold10g = gold.price * usdInr.price / troyOunceGrams * 10 * 0.995;
-    const silverKg = silver.price * usdInr.price / troyOunceGrams * 1000;
-
-    const goldChange24hPct = Number.isFinite(gold.previousClose) && gold.previousClose > 0
-      ? ((gold.price - gold.previousClose) / gold.previousClose) * 100
-      : null;
-    const silverChange24hPct = Number.isFinite(silver.previousClose) && silver.previousClose > 0
-      ? ((silver.price - silver.previousClose) / silver.previousClose) * 100
-      : null;
+    const changeMatch = html.match(/RETAIL 995[\s\S]{0,220}?₹[\d,]+\s*([▲▼])\s*([\d,]+)/i);
+    const silverChangeMatch = html.match(/RETAIL 999[\s\S]{0,220}?SILVER[\s\S]{0,220}?₹[\d,]+\s*([▲▼])\s*([\d,]+)/i);
+    const goldMove = changeMatch ? Number(changeMatch[2].replace(/,/g, "")) * (changeMatch[1] === "▼" ? -1 : 1) : null;
+    const silverMove = silverChangeMatch ? Number(silverChangeMatch[2].replace(/,/g, "")) * (silverChangeMatch[1] === "▼" ? -1 : 1) : null;
 
     return {
-      gold10g,
-      silverKg,
-      goldChange24hPct,
-      goldChange24hAmount10g: goldChange24hPct != null ? gold10g * goldChange24hPct / 100 : null,
-      silverChange24hPct,
-      silverChange24hAmountKg: silverChange24hPct != null ? silverKg * silverChange24hPct / 100 : null,
-      asOf: gold.timestamp > 0 ? new Date(gold.timestamp * 1000).toISOString() : new Date().toISOString()
+      gold10g: gold,
+      silverKg: silver,
+      goldChange24hPct: goldMove != null ? (goldMove / (gold - goldMove)) * 100 : null,
+      goldChange24hAmount10g: goldMove,
+      silverChange24hPct: silverMove != null ? (silverMove / (silver - silverMove)) * 100 : null,
+      silverChange24hAmountKg: silverMove,
+      asOf: new Date().toISOString()
     };
   } catch {
     return null;
@@ -95,8 +80,8 @@ function PreciousMetals() {
   const formatINR = (value: number) => `₹${Math.round(value).toLocaleString("en-IN")}`;
   return <Section title="Gold & Silver" hint="Live Indian bullion quote">
     <div className="grid gap-3 sm:grid-cols-2">
-      <Panel className="p-4"><div className="flex items-start justify-between gap-3"><div><div className="text-sm font-medium text-fg">Gold 995</div><div className="mt-1 text-xs text-muted">Yahoo Finance-derived retail reference · ₹ / 10g · 995 fine</div></div><div className="text-xs text-muted">INR</div></div><div className="mt-2 text-2xl font-semibold tabular text-fg">{metals.data?.gold10g != null ? formatINR(metals.data.gold10g) : metals.isLoading ? "Loading…" : "Price unavailable"}</div><div className="mt-1 text-sm font-medium tabular">{metals.data?.goldChange24hPct != null && metals.data?.goldChange24hAmount10g != null ? <span className={metals.data.goldChange24hPct > 0 ? "text-up" : metals.data.goldChange24hPct < 0 ? "text-down" : "text-muted"}>{metals.data.goldChange24hPct > 0 ? "↑" : metals.data.goldChange24hPct < 0 ? "↓" : "→"} {metals.data.goldChange24hAmount10g >= 0 ? "+" : "-"}{formatINR(Math.abs(metals.data.goldChange24hAmount10g))} ({metals.data.goldChange24hPct >= 0 ? "+" : ""}{metals.data.goldChange24hPct.toFixed(2)}%) today</span> : <span className="text-muted">Today’s change unavailable</span>}</div><div className="mt-2 rounded-xl border border-accent/40 bg-accent/10 px-3 py-2"><div className="text-sm font-semibold text-fg">5-Year High: {formatINR(metals.data?.gold5yHigh10g ?? 170000)}</div></div><div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">{[{ label: "10% discount", value: metals.data?.goldDiscount10Price10g }, { label: "20% discount", value: metals.data?.goldDiscount20Price10g }, { label: "30% discount", value: metals.data?.goldDiscount30Price10g }, { label: "40% discount", value: metals.data?.goldDiscount40Price10g }].map((row) => <div key={row.label} className="rounded-lg bg-surface-2 p-2"><div className="text-xs text-muted">{row.label}</div><div className="mt-1 tabular text-sm text-fg">{row.value != null ? formatINR(row.value) : "—"}</div></div>)}</div><div className="mt-3 text-xs text-muted">Rule: BUY when current price ≤ 60% of 5-Year High</div></Panel>
-      <Panel className="p-4"><div className="flex items-start justify-between gap-3"><div><div className="text-sm font-medium text-fg">Silver 999</div><div className="mt-1 text-xs text-muted">Yahoo Finance-derived retail reference · ₹ / kg · 999 fine</div></div><div className="text-xs text-muted">INR</div></div><div className="mt-2 text-2xl font-semibold tabular text-fg">{metals.data?.silverKg != null ? formatINR(metals.data.silverKg) : metals.isLoading ? "Loading…" : "Price unavailable"}</div><div className="mt-1 text-sm font-medium tabular">{metals.data?.silverChange24hPct != null && metals.data?.silverChange24hAmountKg != null ? <span className={metals.data.silverChange24hPct > 0 ? "text-up" : metals.data.silverChange24hPct < 0 ? "text-down" : "text-muted"}>{metals.data.silverChange24hPct > 0 ? "↑" : metals.data.silverChange24hPct < 0 ? "↓" : "→"} {metals.data.silverChange24hAmountKg >= 0 ? "+" : "-"}{formatINR(Math.abs(metals.data.silverChange24hAmountKg))} ({metals.data.silverChange24hPct >= 0 ? "+" : ""}{metals.data.silverChange24hPct.toFixed(2)}%) today</span> : <span className="text-muted">Today’s change unavailable</span>}</div><div className="mt-2 rounded-xl border border-accent/40 bg-accent/10 px-3 py-2"><div className="text-sm font-semibold text-fg">5-Year High: {formatINR(metals.data?.silver5yHighKg ?? 400000)}</div></div><div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-5">{[{ label: "25%", value: metals.data?.silver25PriceKg }, { label: "35%", value: metals.data?.silver35PriceKg }, { label: "45%", value: metals.data?.silver45PriceKg }, { label: "50%", value: metals.data?.silver50PriceKg }, { label: "55%", value: metals.data?.silver55PriceKg }].map((row) => <div key={row.label} className="rounded-lg bg-surface-2 p-2"><div className="text-xs text-muted">{row.label}</div><div className="mt-1 tabular text-sm text-fg">{row.value != null ? formatINR(row.value) : "—"}</div></div>)}</div><div className="mt-3 text-xs text-muted">Silver rule levels are calculated from the fixed 5-Year High reference.</div></Panel>
-    </div><p className="mt-2 text-[11px] text-subtle">Source: Yahoo Finance COMEX gold (GC=F), silver (SI=F) and USD/INR (INR=X), converted to Indian retail metal reference units. Data is refreshed by the app every 60 seconds.</p>
+      <Panel className="p-4"><div className="flex items-start justify-between gap-3"><div><div className="text-sm font-medium text-fg">Gold 995</div><div className="mt-1 text-xs text-muted">Indian retail reference · ₹ / 10g · 995 fine</div></div><div className="text-xs text-muted">INR</div></div><div className="mt-2 text-2xl font-semibold tabular text-fg">{metals.data?.gold10g != null ? formatINR(metals.data.gold10g) : metals.isLoading ? "Loading…" : "Price unavailable"}</div><div className="mt-1 text-sm font-medium tabular">{metals.data?.goldChange24hPct != null && metals.data?.goldChange24hAmount10g != null ? <span className={metals.data.goldChange24hPct > 0 ? "text-up" : metals.data.goldChange24hPct < 0 ? "text-down" : "text-muted"}>{metals.data.goldChange24hPct > 0 ? "↑" : metals.data.goldChange24hPct < 0 ? "↓" : "→"} {metals.data.goldChange24hAmount10g >= 0 ? "+" : "-"}{formatINR(Math.abs(metals.data.goldChange24hAmount10g))} ({metals.data.goldChange24hPct >= 0 ? "+" : ""}{metals.data.goldChange24hPct.toFixed(2)}%) today</span> : <span className="text-muted">Today’s change unavailable</span>}</div><div className="mt-2 rounded-xl border border-accent/40 bg-accent/10 px-3 py-2"><div className="text-sm font-semibold text-fg">5-Year High: {formatINR(metals.data?.gold5yHigh10g ?? 170000)}</div></div><div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">{[{ label: "10% discount", value: metals.data?.goldDiscount10Price10g }, { label: "20% discount", value: metals.data?.goldDiscount20Price10g }, { label: "30% discount", value: metals.data?.goldDiscount30Price10g }, { label: "40% discount", value: metals.data?.goldDiscount40Price10g }].map((row) => <div key={row.label} className="rounded-lg bg-surface-2 p-2"><div className="text-xs text-muted">{row.label}</div><div className="mt-1 tabular text-sm text-fg">{row.value != null ? formatINR(row.value) : "—"}</div></div>)}</div><div className="mt-3 text-xs text-muted">Rule: BUY when current price ≤ 60% of 5-Year High</div></Panel>
+      <Panel className="p-4"><div className="flex items-start justify-between gap-3"><div><div className="text-sm font-medium text-fg">Silver 999</div><div className="mt-1 text-xs text-muted">Indian retail reference · ₹ / kg · 999 fine</div></div><div className="text-xs text-muted">INR</div></div><div className="mt-2 text-2xl font-semibold tabular text-fg">{metals.data?.silverKg != null ? formatINR(metals.data.silverKg) : metals.isLoading ? "Loading…" : "Price unavailable"}</div><div className="mt-1 text-sm font-medium tabular">{metals.data?.silverChange24hPct != null && metals.data?.silverChange24hAmountKg != null ? <span className={metals.data.silverChange24hPct > 0 ? "text-up" : metals.data.silverChange24hPct < 0 ? "text-down" : "text-muted"}>{metals.data.silverChange24hPct > 0 ? "↑" : metals.data.silverChange24hPct < 0 ? "↓" : "→"} {metals.data.silverChange24hAmountKg >= 0 ? "+" : "-"}{formatINR(Math.abs(metals.data.silverChange24hAmountKg))} ({metals.data.silverChange24hPct >= 0 ? "+" : ""}{metals.data.silverChange24hPct.toFixed(2)}%) today</span> : <span className="text-muted">Today’s change unavailable</span>}</div><div className="mt-2 rounded-xl border border-accent/40 bg-accent/10 px-3 py-2"><div className="text-sm font-semibold text-fg">5-Year High: {formatINR(metals.data?.silver5yHighKg ?? 400000)}</div></div><div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-5">{[{ label: "25%", value: metals.data?.silver25PriceKg }, { label: "35%", value: metals.data?.silver35PriceKg }, { label: "45%", value: metals.data?.silver45PriceKg }, { label: "50%", value: metals.data?.silver50PriceKg }, { label: "55%", value: metals.data?.silver55PriceKg }].map((row) => <div key={row.label} className="rounded-lg bg-surface-2 p-2"><div className="text-xs text-muted">{row.label}</div><div className="mt-1 tabular text-sm text-fg">{row.value != null ? formatINR(row.value) : "—"}</div></div>)}</div><div className="mt-3 text-xs text-muted">Silver rule levels are calculated from the fixed 5-Year High reference.</div></Panel>
+    </div><p className="mt-2 text-[11px] text-subtle">Source: Indian retail bullion reference rate for Mumbai. Rates are refreshed from the live retail reference source. Data is refreshed by the app every 60 seconds.</p>
   </Section>;
 }
