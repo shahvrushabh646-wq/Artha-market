@@ -2,7 +2,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { Search } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { POPULAR, normalizeSymbol } from "@/lib/market/config";
+import { companyName, POPULAR, normalizeSymbol } from "@/lib/market/config";
 import { searchSymbols } from "@/lib/market/server";
 import { useDesk } from "@/lib/store";
 import { Button } from "./ui/button";
@@ -93,7 +93,7 @@ export function SymbolSearch({ initial = "" }: { initial?: string }) {
             <div className="px-3 py-3 text-sm text-muted">Searching…</div>
           ) : (
             <div className="flex flex-wrap gap-1.5 p-3">
-              {POPULAR.map((s) => <button key={s} type="button" onClick={() => go(s)} className="rounded-full bg-surface px-3 py-1.5 text-xs text-muted hover:text-fg">{s.replace(/\.(NS|BO)$/i, "")}</button>)}
+              {POPULAR.map((s) => <button key={s} type="button" onClick={() => go(s)} className="rounded-full bg-surface px-3 py-1.5 text-xs text-muted hover:text-fg">{companyName(s)}</button>)}
             </div>
           )}
         </div>
