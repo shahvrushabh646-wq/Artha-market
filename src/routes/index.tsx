@@ -18,16 +18,27 @@ async function getIndianMetalPrices(): Promise<{ gold10g: number; silverKg: numb
     if (!res.ok) return null;
     const html = await res.text();
 
-    const goldMatch = html.match(/RETAIL 995[\s\S]{0,180}?₹([\d,]+)/i);
-    const silverMatch = html.match(/RETAIL 999[\s\S]{0,180}?SILVER[\s\S]{0,180}?₹([\d,]+)/i);
-    const gold = goldMatch ? Number(goldMatch[1].replace(/,/g, "")) : NaN;
-    const silver = silverMatch ? Number(silverMatch[1].replace(/,/g, "")) : NaN;
+    const extract = (label: string, nextLabel?: string) => {
+      const block = nextLabel
+        ? html.match(new RegExp(label + "[\\s\\S]{0,6000}?" + nextLabel))
+        : html.match(new RegExp(label + "[\\s\\S]{0,6000}"));
+      const text = block?.[0] ?? "";
+      const price = text.match(/₹\\s*([\\d,]+)/);
+      const move = text.match(/[▲▼]\\s*([\\d,]+)/);
+      return {
+        price: price ? Number(price[1].replace(/,/g, "")) : NaN,
+        move: move ? Number(move[1].replace(/,/g, "")) * (text.includes("▼") ? -1 : 1) : null
+      };
+    };
+
+    const goldData = extract("RETAIL 995", "RTGS 995");
+    const silverData = extract("RETAIL 999", "RTGS 999");
+    const gold = goldData.price;
+    const silver = silverData.price;
     if (!Number.isFinite(gold) || !Number.isFinite(silver) || gold <= 0 || silver <= 0) return null;
 
-    const changeMatch = html.match(/RETAIL 995[\s\S]{0,220}?₹[\d,]+\s*([▲▼])\s*([\d,]+)/i);
-    const silverChangeMatch = html.match(/RETAIL 999[\s\S]{0,220}?SILVER[\s\S]{0,220}?₹[\d,]+\s*([▲▼])\s*([\d,]+)/i);
-    const goldMove = changeMatch ? Number(changeMatch[2].replace(/,/g, "")) * (changeMatch[1] === "▼" ? -1 : 1) : null;
-    const silverMove = silverChangeMatch ? Number(silverChangeMatch[2].replace(/,/g, "")) * (silverChangeMatch[1] === "▼" ? -1 : 1) : null;
+    const goldMove = goldData.move;
+    const silverMove = silverData.move;
 
     return {
       gold10g: gold,
