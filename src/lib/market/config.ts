@@ -31,3 +31,10 @@ export function normalizeSymbol(raw: string): string {
   return `${s}.NS`;
 }
 export function displaySymbol(symbol: string): string { return symbol.replace(/\.NS$/i, "").replace(/\.BO$/i, ""); }
+
+export const COMPANY_NAMES: Record<string, string> = {
+  KREBSBIO: "Krebs Biochemicals & Industries Limited",
+};
+export function companyName(symbol: string, fallback?: string): string {
+  return COMPANY_NAMES[displaySymbol(symbol).toUpperCase()] ?? fallback ?? displaySymbol(symbol);
+}
