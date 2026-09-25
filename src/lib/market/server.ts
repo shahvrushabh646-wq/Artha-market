@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { CHART_PERIODS, INDICES, MOVERS_UNIVERSE, PERIOD_MAP, displaySymbol, normalizeSymbol, type ChartPeriod } from "./config";
+import { CHART_PERIODS, INDICES, MOVERS_UNIVERSE, PERIOD_MAP, companyName, displaySymbol, normalizeSymbol, type ChartPeriod } from "./config";
 import type { Bar, Dividend, Quote, SearchHit } from "./types";
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/138 Safari/537.36";
@@ -51,7 +51,7 @@ async function cached<T>(key: string, ttl: number, fn: () => Promise<T>): Promis
 }
 
 function emptyQuote(symbol: string): Quote {
-  return { symbol, name: displaySymbol(symbol), price: null, previousClose: null, change: null, changePct: null, currency: "INR", exchange: null, high52w: null, low52w: null, high5y: null, low5y: null, price75: null, signal75: null, volume: null, dayHigh: null, dayLow: null, ok: false };
+  return { symbol, name: companyName(symbol), price: null, previousClose: null, change: null, changePct: null, currency: "INR", exchange: null, high52w: null, low52w: null, high5y: null, low5y: null, price75: null, signal75: null, volume: null, dayHigh: null, dayLow: null, ok: false };
 }
 
 function makeQuote(meta: YahooMeta, fallback: string): Quote {
@@ -59,7 +59,7 @@ function makeQuote(meta: YahooMeta, fallback: string): Quote {
   const previous = number(meta.chartPreviousClose) ?? number(meta.previousClose);
   const change = price != null && previous != null ? Math.round((price - previous) * 100) / 100 : null;
   const changePct = number(meta.regularMarketChangePercent) ?? (change != null && previous ? Math.round(change / previous * 10000) / 100 : null);
-  return { symbol: string(meta.symbol) ?? fallback, name: string(meta.longName) ?? string(meta.shortName) ?? fallback, price, previousClose: previous, change, changePct, currency: string(meta.currency) ?? "INR", exchange: string(meta.fullExchangeName) ?? string(meta.exchangeName), high52w: number(meta.fiftyTwoWeekHigh), low52w: number(meta.fiftyTwoWeekLow), high5y: null, low5y: null, price75: null, signal75: null, volume: number(meta.regularMarketVolume), dayHigh: number(meta.regularMarketDayHigh), dayLow: number(meta.regularMarketDayLow), ok: price != null };
+  return { symbol: string(meta.symbol) ?? fallback, name: companyName(fallback, string(meta.longName) ?? string(meta.shortName) ?? fallback), price, previousClose: previous, change, changePct, currency: string(meta.currency) ?? "INR", exchange: string(meta.fullExchangeName) ?? string(meta.exchangeName), high52w: number(meta.fiftyTwoWeekHigh), low52w: number(meta.fiftyTwoWeekLow), high5y: null, low5y: null, price75: null, signal75: null, volume: number(meta.regularMarketVolume), dayHigh: number(meta.regularMarketDayHigh), dayLow: number(meta.regularMarketDayLow), ok: price != null };
 }
 
 function parseYahoo(raw: unknown): { bars: Bar[]; meta: YahooMeta; dividends: Dividend[] } {
@@ -125,7 +125,7 @@ async function bseQuote(symbol: string): Promise<Quote | null> {
     const previous=number(root?.PrevClose??root?.PreviousClose);
     const change=number(root?.Change)??(previous!=null?price-previous:null);
     const changePct=number(root?.PercentChange)??(change!=null&&previous?change/previous*100:null);
-    return {symbol:code+".BO",name:string(root?.Scripname)??raw,price,previousClose:previous,change:change!=null?Math.round(change*100)/100:null,changePct:changePct!=null?Math.round(changePct*100)/100:null,currency:"INR",exchange:"BSE",high52w:number(root?.["52WeekHigh"])??null,low52w:number(root?.["52WeekLow"])??null,high5y:null,low5y:null,price75:null,signal75:null,volume:number(root?.NoOfSharesTraded)??null,dayHigh:number(root?.High)??null,dayLow:number(root?.Low)??null,ok:true};
+    return {symbol:code+".BO",name:companyName(raw,string(root?.Scripname)??raw),price,previousClose:previous,change:change!=null?Math.round(change*100)/100:null,changePct:changePct!=null?Math.round(changePct*100)/100:null,currency:"INR",exchange:"BSE",high52w:number(root?.["52WeekHigh"])??null,low52w:number(root?.["52WeekLow"])??null,high5y:null,low5y:null,price75:null,signal75:null,volume:number(root?.NoOfSharesTraded)??null,dayHigh:number(root?.High)??null,dayLow:number(root?.Low)??null,ok:true};
   }catch{return null;}
 }
 
@@ -141,7 +141,7 @@ async function nseQuote(symbol: string): Promise<Quote | null> {
     const change = number(p?.change) ?? (previous != null ? price - previous : null);
     const changePct = number(p?.pChange) ?? (change != null && previous ? change / previous * 100 : null);
     const week = record(p?.weekHighLow), intra = record(p?.intraDayHighLow);
-    return { symbol: `${bare}.NS`, name: string(meta?.companyName) ?? string(info?.companyName) ?? bare, price, previousClose: previous, change: change != null ? Math.round(change * 100) / 100 : null, changePct: changePct != null ? Math.round(changePct * 100) / 100 : null, currency: "INR", exchange: "NSE", high52w: number(week?.max), low52w: number(week?.min), high5y: null, low5y: null, price75: null, signal75: null, volume: number(p?.totalTradedVolume), dayHigh: number(intra?.max), dayLow: number(intra?.min), ok: true };
+    return { symbol: `${bare}.NS`, name: companyName(bare, string(meta?.companyName) ?? string(info?.companyName) ?? bare), price, previousClose: previous, change: change != null ? Math.round(change * 100) / 100 : null, changePct: changePct != null ? Math.round(changePct * 100) / 100 : null, currency: "INR", exchange: "NSE", high52w: number(week?.max), low52w: number(week?.min), high5y: null, low5y: null, price75: null, signal75: null, volume: number(p?.totalTradedVolume), dayHigh: number(intra?.max), dayLow: number(intra?.min), ok: true };
   } catch { return null; }
 }
 
