@@ -34,6 +34,14 @@ export function displaySymbol(symbol: string): string { return symbol.replace(/\
 
 export const COMPANY_NAMES: Record<string, string> = {
   KREBSBIO: "Krebs Biochemicals & Industries Limited",
+  RELIANCE: "Reliance Industries Limited",
+  TCS: "Tata Consultancy Services Limited",
+  HDFCBANK: "HDFC Bank Limited",
+  INFY: "Infosys Limited",
+  ICICIBANK: "ICICI Bank Limited",
+  SBIN: "State Bank of India",
+  ITC: "ITC Limited",
+  BHARTIARTL: "Bharti Airtel Limited",
 };
 export function companyName(symbol: string, fallback?: string): string {
   return COMPANY_NAMES[displaySymbol(symbol).toUpperCase()] ?? fallback ?? displaySymbol(symbol);
