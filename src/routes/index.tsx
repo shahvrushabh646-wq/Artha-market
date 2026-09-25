@@ -14,34 +14,37 @@ type MetalPrices = { gold10g: number | null; silverKg: number | null; goldChange
 
 async function getIndianMetalPrices(): Promise<{ gold10g: number; silverKg: number; goldChange24hPct: number | null; goldChange24hAmount10g: number | null; silverChange24hPct: number | null; silverChange24hAmountKg: number | null; asOf: string | null } | null> {
   try {
-    const [goldRes, silverRes] = await Promise.all([
-      fetch("https://www.moneycontrol.com/news/gold-rates-today/", { headers: { Accept: "text/html" }, cache: "no-store" }),
-      fetch("https://www.moneycontrol.com/news/silver-rates-today/mumbai/", { headers: { Accept: "text/html" }, cache: "no-store" })
+    // Yahoo Finance live commodity futures + live USD/INR FX.
+    // Prices are converted from USD/oz to INR per 10g (gold) and INR/kg (silver).
+    const [goldRes, silverRes, fxRes] = await Promise.all([
+      fetch("https://query1.finance.yahoo.com/v8/finance/chart/GC=F?interval=1m&range=1d", { headers: { Accept: "application/json" }, cache: "no-store" }),
+      fetch("https://query1.finance.yahoo.com/v8/finance/chart/SI=F?interval=1m&range=1d", { headers: { Accept: "application/json" }, cache: "no-store" }),
+      fetch("https://query1.finance.yahoo.com/v8/finance/chart/INR=X?interval=1m&range=1d", { headers: { Accept: "application/json" }, cache: "no-store" })
     ]);
-    if (!goldRes.ok || !silverRes.ok) return null;
+    if (!goldRes.ok || !silverRes.ok || !fxRes.ok) return null;
 
-    const goldHtml = await goldRes.text();
-    const silverHtml = await silverRes.text();
+    const [goldJson, silverJson, fxJson] = await Promise.all([goldRes.json(), silverRes.json(), fxRes.json()]);
+    const goldMeta = goldJson?.chart?.result?.[0]?.meta;
+    const silverMeta = silverJson?.chart?.result?.[0]?.meta;
+    const fxMeta = fxJson?.chart?.result?.[0]?.meta;
+    const goldUsdOz = Number(goldMeta?.regularMarketPrice ?? goldMeta?.previousClose);
+    const silverUsdOz = Number(silverMeta?.regularMarketPrice ?? silverMeta?.previousClose);
+    const usdInr = Number(fxMeta?.regularMarketPrice ?? fxMeta?.previousClose);
+    if (![goldUsdOz, silverUsdOz, usdInr].every(Number.isFinite) || usdInr <= 0) return null;
 
-    // Use the exact Mumbai 24K / 10g gold price published by Moneycontrol.
-    const goldBlock = goldHtml.match(/Gold Rate In Mumbai[\s\S]{0,8000}?24 Carat Rate[\s\S]{0,1800}/i)?.[0] ?? "";
-    const goldPriceMatch = goldBlock.match(/Current Price \(24 Carat \/ 10 Gram\)[\s\S]{0,180}?₹\s*([\d,]+)/i);
-    const goldPrevMatch = goldBlock.match(/Prev Close[\s\S]{0,100}?₹\s*([\d,]+)/i);
-    const gold24 = goldPriceMatch ? Number(goldPriceMatch[1].replace(/,/g, "")) : NaN;
-    const goldPrev24 = goldPrevMatch ? Number(goldPrevMatch[1].replace(/,/g, "")) : NaN;
-    const gold10g = gold24;
-    if (!Number.isFinite(gold10g) || gold10g <= 0) return null;
+    const TROY_OUNCE_GRAMS = 31.1034768;
+    const gold10g = (goldUsdOz * usdInr / TROY_OUNCE_GRAMS) * 10;
+    const silverKg = (silverUsdOz * usdInr / TROY_OUNCE_GRAMS) * 1000;
 
-    // Moneycontrol Mumbai silver is 999-standard silver per kg.
-    const silverBlock = silverHtml.match(/Silver Rate In Mumbai[\s\S]{0,5000}?Compare Silver Rate In Mumbai[\s\S]{0,1200}/i)?.[0] ?? "";
-    const silverPriceMatch = silverBlock.match(/Current Price \(1 KG\)[\s\S]{0,120}?₹\s*([\d,]+)/i);
-    const silverPrevMatch = silverBlock.match(/Prev Close[\s\S]{0,100}?₹\s*([\d,]+)/i);
-    const silverKg = silverPriceMatch ? Number(silverPriceMatch[1].replace(/,/g, "")) : NaN;
-    const silverPrevKg = silverPrevMatch ? Number(silverPrevMatch[1].replace(/,/g, "")) : NaN;
-    if (!Number.isFinite(silverKg) || silverKg <= 0) return null;
+    const goldPrevUsdOz = Number(goldMeta?.previousClose);
+    const silverPrevUsdOz = Number(silverMeta?.previousClose);
+    const goldPrev10g = Number.isFinite(goldPrevUsdOz) ? (goldPrevUsdOz * usdInr / TROY_OUNCE_GRAMS) * 10 : NaN;
+    const silverPrevKg = Number.isFinite(silverPrevUsdOz) ? (silverPrevUsdOz * usdInr / TROY_OUNCE_GRAMS) * 1000 : NaN;
 
-    const goldChange24hAmount10g = Number.isFinite(goldPrev24) ? gold10g - goldPrev24 : null;
-    const goldChange24hPct = Number.isFinite(goldPrev24) && goldPrev24 > 0 ? ((gold10g - goldPrev24) / goldPrev24) * 100 : null;
+    if (!Number.isFinite(gold10g) || !Number.isFinite(silverKg) || gold10g <= 0 || silverKg <= 0) return null;
+
+    const goldChange24hAmount10g = Number.isFinite(goldPrev10g) ? gold10g - goldPrev10g : null;
+    const goldChange24hPct = Number.isFinite(goldPrev10g) && goldPrev10g > 0 ? ((gold10g - goldPrev10g) / goldPrev10g) * 100 : null;
     const silverChange24hAmountKg = Number.isFinite(silverPrevKg) ? silverKg - silverPrevKg : null;
     const silverChange24hPct = Number.isFinite(silverPrevKg) && silverPrevKg > 0 ? ((silverKg - silverPrevKg) / silverPrevKg) * 100 : null;
 
