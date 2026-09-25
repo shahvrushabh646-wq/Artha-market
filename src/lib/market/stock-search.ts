@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import { companyName } from "@/lib/market/config";
 
 export type StockSearchHit = { symbol: string; name: string; exchange: string };
 
@@ -36,7 +37,7 @@ export const searchStocks = createServerFn({ method: "GET" })
           const baseSymbol = rawSymbol.replace(/\.(NS|BO)$/i, "");
           return {
             symbol: baseSymbol + (isBse ? ".BO" : ".NS"),
-            name: String(x.longname ?? x.shortname ?? x.symbol ?? ""),
+            name: companyName(baseSymbol, String(x.longname ?? x.shortname ?? x.symbol ?? "")),
             exchange: isBse ? "BSE" : "NSE",
           };
         })
