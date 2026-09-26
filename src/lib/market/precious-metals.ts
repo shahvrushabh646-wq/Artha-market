@@ -48,72 +48,123 @@ let lastGood: MetalQuote | null = null;
  */
 async function fromGoogleFinanceMumbai(): Promise<MetalQuote | null> {
   try {
-    const googleSearch = async (query: string) => {
-      const url = `https://www.google.com/search?hl=en-IN&gl=IN&gbv=1&q=${encodeURIComponent(query)}`;
-      const res = await fetch(url, {
-        headers: {
-          Accept: "text/html,application/xhtml+xml",
-          "User-Agent": UA,
-          "Accept-Language": "en-IN,en;q=0.9"
-        },
-        cache: "no-store",
-        signal: AbortSignal.timeout(8000)
-      });
-      return res.ok ? await res.text() : "";
+    const googleSearch = async (query: string): Promise<string> => {
+      const urls = [
+        `https://www.google.com/search?hl=en-IN&gl=IN&gbv=1&udm=14&q=${encodeURIComponent(query)}`,
+        `https://www.google.co.in/search?hl=en-IN&gl=IN&gbv=1&q=${encodeURIComponent(query)}`,
+        `https://www.google.com/search?hl=en-IN&gl=IN&q=${encodeURIComponent(query)}`
+      ];
+
+      for (const url of urls) {
+        try {
+          const res = await fetch(url, {
+            headers: {
+              Accept: "text/html,application/xhtml+xml",
+              "User-Agent": UA,
+              "Accept-Language": "en-IN,en;q=0.9"
+            },
+            cache: "no-store",
+            signal: AbortSignal.timeout(6000)
+          });
+          if (res.ok) {
+            const html = await res.text();
+            if (html.length > 1000) return html;
+          }
+        } catch {
+          // Try the next Google endpoint.
+        }
+      }
+      return "";
     };
 
     const clean = (html: string) =>
       html
-        .replace(/<script[\s\S]*?<\/script>/gi, " ")
-        .replace(/<style[\s\S]*?<\/style>/gi, " ")
+        .replace(/<script[\\s\\S]*?<\\/script>/gi, " ")
+        .replace(/<style[\\s\\S]*?<\\/style>/gi, " ")
         .replace(/<[^>]+>/g, " ")
         .replace(/&nbsp;|&#160;/gi, " ")
         .replace(/&#8377;|&rupee;/gi, "₹")
         .replace(/&amp;/gi, "&")
-        .replace(/\s+/g, " ")
+        .replace(/&#44;/gi, ",")
+        .replace(/\\s+/g, " ")
         .trim();
 
+    const extractAmountAfter = (
+      text: string,
+      anchor: RegExp,
+      min: number,
+      max: number
+    ): number | null => {
+      const match = text.match(anchor);
+      if (!match || match.index == null) return null;
+
+      const section = text.slice(match.index, match.index + 700);
+      const numbers = section.match(/(?:₹\\s*)?([0-9]{1,3}(?:,[0-9]{2,3})+(?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)/g) ?? [];
+
+      for (const raw of numbers) {
+        const value = Number(raw.replace(/₹|,/g, ""));
+        if (Number.isFinite(value) && value >= min && value <= max) {
+          return Math.round(value);
+        }
+      }
+      return null;
+    };
+
     const [goldHtml, silverHtml] = await Promise.all([
-      googleSearch("10g of 24k gold 99.9% in Mumbai today"),
-      googleSearch("1kg of 999 silver in Mumbai today")
+      googleSearch("10g of 24k gold (99.9%) in Mumbai"),
+      googleSearch("1kg of 999 silver in Mumbai")
     ]);
 
     const goldText = clean(goldHtml);
     const silverText = clean(silverHtml);
 
-    const goldMatch =
-      goldText.match(/10g\s+of\s+24k\s+gold[\s\S]{0,180}?\b(?:is|=)\s*(?:₹\s*)?([\d,]+(?:\.\d+)?)/i) ??
-      goldText.match(/24k\s+gold[^₹\d]{0,120}(?:₹\s*)?([\d,]+(?:\.\d+)?)\s*(?:Indian\s+Rupee|INR)/i);
+    const gold10g =
+      extractAmountAfter(
+        goldText,
+        /10g\\s+of\\s+24k\\s+gold/i,
+        100000,
+        250000
+      ) ??
+      extractAmountAfter(
+        goldText,
+        /24k\\s+gold/i,
+        100000,
+        250000
+      );
 
-    const silverMatch =
-      silverText.match(/1kg\s+of\s+999\s+silver[\s\S]{0,180}?\b(?:is|=)\s*(?:₹\s*)?([\d,]+(?:\.\d+)?)/i) ??
-      silverText.match(/999\s+silver[^₹\d]{0,120}(?:₹\s*)?([\d,]+(?:\.\d+)?)\s*(?:Indian\s+Rupee|INR)/i);
+    const silverKg =
+      extractAmountAfter(
+        silverText,
+        /1kg\\s+of\\s+999\\s+silver/i,
+        150000,
+        600000
+      ) ??
+      extractAmountAfter(
+        silverText,
+        /999\\s+silver/i,
+        150000,
+        600000
+      );
 
-    if (!goldMatch || !silverMatch) return null;
+    // Do not reject a valid Google gold quote just because Google's silver
+    // result is temporarily unavailable. The other configured source is used
+    // for the missing metal below.
+    if (gold10g == null && silverKg == null) return null;
 
-    const gold10g = Math.round(Number(goldMatch[1].replace(/,/g, "")));
-    const silverKg = Math.round(Number(silverMatch[1].replace(/,/g, "")));
-
-    if (
-      !Number.isFinite(gold10g) ||
-      !Number.isFinite(silverKg) ||
-      gold10g < 100000 ||
-      gold10g > 250000 ||
-      silverKg < 150000 ||
-      silverKg > 600000
-    ) {
-      return null;
-    }
+    const fallback = await fromIndianSpotFeed();
 
     return {
-      gold10g,
-      silverKg,
+      gold10g: gold10g ?? fallback?.gold10g ?? 0,
+      silverKg: silverKg ?? fallback?.silverKg ?? 0,
       goldChange24hPct: null,
       goldChange24hAmount10g: null,
       silverChange24hPct: null,
       silverChange24hAmountKg: null,
       asOf: new Date().toISOString(),
-      source: "Google Finance/Search · Mumbai · GST excluded"
+      source:
+        gold10g != null && silverKg != null
+          ? "Google Finance/Search · Mumbai · GST excluded"
+          : "Google Finance/Search + India fallback · Mumbai · GST excluded"
     };
   } catch {
     return null;
