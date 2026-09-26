@@ -64,13 +64,13 @@ async function fromGoogleFinanceMumbai(): Promise<MetalQuote | null> {
 
     const clean = (html: string) =>
       html
-        .replace(/<script[\\s\\S]*?<\\/script>/gi, " ")
-        .replace(/<style[\\s\\S]*?<\\/style>/gi, " ")
+        .replace(/<script[\s\S]*?<\/script>/gi, " ")
+        .replace(/<style[\s\S]*?<\/style>/gi, " ")
         .replace(/<[^>]+>/g, " ")
         .replace(/&nbsp;|&#160;/gi, " ")
         .replace(/&#8377;|&rupee;/gi, "₹")
         .replace(/&amp;/gi, "&")
-        .replace(/\\s+/g, " ")
+        .replace(/\s+/g, " ")
         .trim();
 
     const [goldHtml, silverHtml] = await Promise.all([
@@ -82,12 +82,12 @@ async function fromGoogleFinanceMumbai(): Promise<MetalQuote | null> {
     const silverText = clean(silverHtml);
 
     const goldMatch =
-      goldText.match(/10g\\s+of\\s+24k\\s+gold[^₹\\d]{0,120}(?:₹\\s*)?([\\d,]+(?:\\.\\d+)?)/i) ??
-      goldText.match(/24k\\s+gold[^₹\\d]{0,120}(?:₹\\s*)?([\\d,]+(?:\\.\\d+)?)\\s*(?:Indian\\s+Rupee|INR)/i);
+      goldText.match(/10g\s+of\s+24k\s+gold[^₹\d]{0,120}(?:₹\s*)?([\d,]+(?:\.\d+)?)/i) ??
+      goldText.match(/24k\s+gold[^₹\d]{0,120}(?:₹\s*)?([\d,]+(?:\.\d+)?)\s*(?:Indian\s+Rupee|INR)/i);
 
     const silverMatch =
-      silverText.match(/1kg\\s+of\\s+999\\s+silver[^₹\\d]{0,120}(?:₹\\s*)?([\\d,]+(?:\\.\\d+)?)/i) ??
-      silverText.match(/999\\s+silver[^₹\\d]{0,120}(?:₹\\s*)?([\\d,]+(?:\\.\\d+)?)\\s*(?:Indian\\s+Rupee|INR)/i);
+      silverText.match(/1kg\s+of\s+999\s+silver[^₹\d]{0,120}(?:₹\s*)?([\d,]+(?:\.\d+)?)/i) ??
+      silverText.match(/999\s+silver[^₹\d]{0,120}(?:₹\s*)?([\d,]+(?:\.\d+)?)\s*(?:Indian\s+Rupee|INR)/i);
 
     if (!goldMatch || !silverMatch) return null;
 
