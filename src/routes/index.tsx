@@ -19,28 +19,26 @@ async function getIndianMetalPrices(): Promise<{ gold10g: number; silverKg: numb
       fetch("https://groww.in/silver-rates/silver-rates-in-maharashtra", { headers: { Accept: "text/html" }, cache: "no-store" })
     ]);
     if (!goldRes.ok || !silverRes.ok) return null;
+
     const [goldHtml, silverHtml] = await Promise.all([goldRes.text(), silverRes.text()]);
-    const text = (html: string) => html
-      .replace(/<script[\s\S]*?<\/script>/gi, " ")
-      .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    const clean = (html: string) => html
+      .replace(/<script[\\s\\S]*?<\\/script>/gi, " ")
+      .replace(/<style[\\s\\S]*?<\\/style>/gi, " ")
       .replace(/<[^>]+>/g, " ")
       .replace(/&nbsp;/g, " ")
       .replace(/&amp;/g, "&")
-      .replace(/\s+/g, " ");
+      .replace(/\\s+/g, " ");
 
-    const goldText = text(goldHtml);
-    const silverText = text(silverHtml);
+    const goldText = clean(goldHtml);
+    const silverText = clean(silverHtml);
 
-    const goldMatch = goldText.match(/24K Gold \/ 10gm\s+[^₹]{0,50}₹([\d,]+(?:\.\d+)?)/i);
-      ?? goldText.match(/24K Gold \/ 10gm\\s+[^₹]{0,30}₹([\\d,]+(?:\\.\\d+)?)/i);
-    const silverMatch = silverText.match(/Silver \/ 10gm\s+[^₹]{0,50}₹([\d,]+(?:\.\d+)?)/i);
-      ?? silverText.match(/Silver \/ 10gm\\s+[^₹]{0,30}₹([\\d,]+(?:\\.\\d+)?)/i);
+    const goldMatch = goldText.match(/24K Gold \/ 10gm\\s+[^₹]{0,80}₹([\\d,]+(?:\\.\\d+)?)/i);
+    const silverMatch = silverText.match(/Silver \/ 10gm\\s+[^₹]{0,80}₹([\\d,]+(?:\\.\\d+)?)/i);
 
     if (!goldMatch || !silverMatch) return null;
 
     const gold10g = Number(goldMatch[1].replace(/,/g, ""));
-    const silver10g = Number(silverMatch[1].replace(/,/g, ""));
-    const silverKg = silver10g * 100;
+    const silverKg = Number(silverMatch[1].replace(/,/g, "")) * 100;
 
     if (!Number.isFinite(gold10g) || !Number.isFinite(silverKg) || gold10g <= 0 || silverKg <= 0) return null;
 
