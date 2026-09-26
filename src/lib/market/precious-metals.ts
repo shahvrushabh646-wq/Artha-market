@@ -82,11 +82,11 @@ async function fromGoogleFinanceMumbai(): Promise<MetalQuote | null> {
     const silverText = clean(silverHtml);
 
     const goldMatch =
-      goldText.match(/10g\s+of\s+24k\s+gold[^₹\d]{0,120}(?:₹\s*)?([\d,]+(?:\.\d+)?)/i) ??
+      goldText.match(/10g\s+of\s+24k\s+gold[\s\S]{0,180}?\b(?:is|=)\s*(?:₹\s*)?([\d,]+(?:\.\d+)?)/i) ??
       goldText.match(/24k\s+gold[^₹\d]{0,120}(?:₹\s*)?([\d,]+(?:\.\d+)?)\s*(?:Indian\s+Rupee|INR)/i);
 
     const silverMatch =
-      silverText.match(/1kg\s+of\s+999\s+silver[^₹\d]{0,120}(?:₹\s*)?([\d,]+(?:\.\d+)?)/i) ??
+      silverText.match(/1kg\s+of\s+999\s+silver[\s\S]{0,180}?\b(?:is|=)\s*(?:₹\s*)?([\d,]+(?:\.\d+)?)/i) ??
       silverText.match(/999\s+silver[^₹\d]{0,120}(?:₹\s*)?([\d,]+(?:\.\d+)?)\s*(?:Indian\s+Rupee|INR)/i);
 
     if (!goldMatch || !silverMatch) return null;
