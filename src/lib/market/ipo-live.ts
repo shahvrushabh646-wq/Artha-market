@@ -298,7 +298,7 @@ async function enrichNse(ipo:Ipo,cookie:string){
         const label=clean(row?.category??row?.name).toLowerCase();
         if(label.includes("total")){
           const value=n(row?.noOfTime??row?.subscription??row?.noOfTimes);
-          if(value!=null){ipo.subscription=value;break;}
+          if(value!=null){ipo.subscription=Number(value.toFixed(2));break;}
         }
       }
     }
