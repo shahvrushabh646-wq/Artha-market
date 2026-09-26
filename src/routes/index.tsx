@@ -14,23 +14,32 @@ type MetalPrices = { gold10g: number | null; silverKg: number | null; goldChange
 
 async function getIndianMetalPrices(): Promise<{ gold10g: number; silverKg: number; goldChange24hPct: number | null; goldChange24hAmount10g: number | null; silverChange24hPct: number | null; silverChange24hAmountKg: number | null; asOf: string | null } | null> {
   try {
-    const res = await fetch("https://www.motilaloswal.com/commodity-market/commodity-market-live", {
+    const response = await fetch("https://www.motilaloswal.com/commodity-market/commodity-market-live", {
       headers: { Accept: "text/html" },
       cache: "no-store"
     });
-    if (!res.ok) return null;
+    if (!response.ok) return null;
 
-    const html = await res.text();
+    const html = await response.text();
+    const stripTags = new RegExp("<[^>]*>", "g");
+    const scripts = new RegExp("<script[\\s\\S]*?</script>", "gi");
+    const styles = new RegExp("<style[\\s\\S]*?</style>", "gi");
+    const spaces = new RegExp("\\s+", "g");
     const text = html
-      .replace(/<script[\\s\\S]*?<\\/script>/gi, " ")
-      .replace(/<style[\\s\\S]*?<\\/style>/gi, " ")
-      .replace(/<[^>]+>/g, " ")
+      .replace(scripts, " ")
+      .replace(styles, " ")
+      .replace(stripTags, " ")
       .replace(/&nbsp;/g, " ")
       .replace(/&amp;/g, "&")
-      .replace(/\\s+/g, " ");
+      .replace(spaces, " ");
 
-    const goldMatch = text.match(/Gold[\\s\\S]{0,250}?₹\\s*([\\d,]+(?:\\.\\d+)?)[\\s\\S]{0,120}?10\\s*g/i);
-    const silverMatch = text.match(/Silver[\\s\\S]{0,250}?₹\\s*([\\d,]+(?:\\.\\d+)?)[\\s\\S]{0,120}?kg/i);
+    const numberPattern = "([0-9,]+(?:\\.[0-9]+)?)";
+    const goldMatch =
+      text.match(new RegExp("Gold[^0-9₹]{0,120}₹?\\s*" + numberPattern + "\\s*(?:/\\s*10\\s*g|per\\s*10\\s*g)?", "i")) ||
+      text.match(new RegExp("Gold[^0-9]{0,120}" + numberPattern + "\\s*(?:/\\s*10\\s*g|per\\s*10\\s*g)", "i"));
+    const silverMatch =
+      text.match(new RegExp("Silver[^0-9₹]{0,120}₹?\\s*" + numberPattern + "\\s*(?:/\\s*kg|per\\s*kg)?", "i")) ||
+      text.match(new RegExp("Silver[^0-9]{0,120}" + numberPattern + "\\s*(?:/\\s*kg|per\\s*kg)", "i"));
 
     if (!goldMatch || !silverMatch) return null;
 
