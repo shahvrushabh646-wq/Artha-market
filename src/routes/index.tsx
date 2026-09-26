@@ -14,14 +14,14 @@ type MetalPrices = { gold10g: number | null; silverKg: number | null; goldChange
 
 async function getIndianMetalPrices(): Promise<{ gold10g: number; silverKg: number; goldChange24hPct: number | null; goldChange24hAmount10g: number | null; silverChange24hPct: number | null; silverChange24hAmountKg: number | null; asOf: string | null } | null> {
   try {
-    const [goldRes, silverRes] = await Promise.all([
-      fetch("https://groww.in/gold-rates/gold-rate-today-in-bhiwandi", { headers: { Accept: "text/html" }, cache: "no-store" }),
-      fetch("https://groww.in/silver-rates/silver-rates-in-maharashtra", { headers: { Accept: "text/html" }, cache: "no-store" })
-    ]);
-    if (!goldRes.ok || !silverRes.ok) return null;
+    const res = await fetch("https://www.motilaloswal.com/commodity-market/commodity-market-live", {
+      headers: { Accept: "text/html" },
+      cache: "no-store"
+    });
+    if (!res.ok) return null;
 
-    const [goldHtml, silverHtml] = await Promise.all([goldRes.text(), silverRes.text()]);
-    const clean = (html: string) => html
+    const html = await res.text();
+    const text = html
       .replace(/<script[\\s\\S]*?<\\/script>/gi, " ")
       .replace(/<style[\\s\\S]*?<\\/style>/gi, " ")
       .replace(/<[^>]+>/g, " ")
@@ -29,16 +29,13 @@ async function getIndianMetalPrices(): Promise<{ gold10g: number; silverKg: numb
       .replace(/&amp;/g, "&")
       .replace(/\\s+/g, " ");
 
-    const goldText = clean(goldHtml);
-    const silverText = clean(silverHtml);
-
-    const goldMatch = goldText.match(/24K Gold \/ 10gm\\s+[^₹]{0,80}₹([\\d,]+(?:\\.\\d+)?)/i);
-    const silverMatch = silverText.match(/Silver \/ 10gm\\s+[^₹]{0,80}₹([\\d,]+(?:\\.\\d+)?)/i);
+    const goldMatch = text.match(/Gold[\\s\\S]{0,250}?₹\\s*([\\d,]+(?:\\.\\d+)?)[\\s\\S]{0,120}?10\\s*g/i);
+    const silverMatch = text.match(/Silver[\\s\\S]{0,250}?₹\\s*([\\d,]+(?:\\.\\d+)?)[\\s\\S]{0,120}?kg/i);
 
     if (!goldMatch || !silverMatch) return null;
 
     const gold10g = Number(goldMatch[1].replace(/,/g, ""));
-    const silverKg = Number(silverMatch[1].replace(/,/g, "")) * 100;
+    const silverKg = Number(silverMatch[1].replace(/,/g, ""));
 
     if (!Number.isFinite(gold10g) || !Number.isFinite(silverKg) || gold10g <= 0 || silverKg <= 0) return null;
 
@@ -72,7 +69,7 @@ const fetchPreciousMetals = createServerFn({ method: "GET" }).handler(async (): 
   const silver50PriceKg = Math.round(silver5yHighKg * 0.50);
   const silver55PriceKg = Math.round(silver5yHighKg * 0.45);
   const goldSignal = gold10g <= goldDiscount40Price10g ? "BUY" : "WAIT";
-  return { gold10g, silverKg, goldChange24hPct, goldChange24hAmount10g, silverChange24hPct, silverChange24hAmountKg, gold5yHigh10g, goldDiscount10Price10g, goldDiscount20Price10g, goldDiscount30Price10g, goldDiscount40Price10g, silver5yHighKg, silver25PriceKg, silver35PriceKg, silver45PriceKg, silver50PriceKg, silver55PriceKg, goldSignal, asOf, source: "Groww current Indian Gold & Silver rates" };
+  return { gold10g, silverKg, goldChange24hPct, goldChange24hAmount10g, silverChange24hPct, silverChange24hAmountKg, gold5yHigh10g, goldDiscount10Price10g, goldDiscount20Price10g, goldDiscount30Price10g, goldDiscount40Price10g, silver5yHighKg, silver25PriceKg, silver35PriceKg, silver45PriceKg, silver50PriceKg, silver55PriceKg, goldSignal, asOf, source: "Motilal Oswal live commodity market" };
 });
 
 function Home() {
@@ -89,12 +86,12 @@ function Home() {
 }
 
 function PreciousMetals() {
-  const metals = useQuery({ queryKey: ["precious-metals-groww-current-v1"], queryFn: () => fetchPreciousMetals(), staleTime: 30000, refetchInterval: 60000, refetchOnWindowFocus: true, retry: 2 });
+  const metals = useQuery({ queryKey: ["precious-metals-motilaloswal-current-v1"], queryFn: () => fetchPreciousMetals(), staleTime: 30000, refetchInterval: 60000, refetchOnWindowFocus: true, retry: 2 });
   const formatINR = (value: number) => `₹${Math.round(value).toLocaleString("en-IN")}`;
   return <Section title="Gold & Silver" hint="Current prices in Indian ₹">
     <div className="grid gap-3 sm:grid-cols-2">
       <Panel className="p-4"><div className="flex items-start justify-between gap-3"><div><div className="text-sm font-medium text-fg">Gold 24K</div><div className="mt-1 text-xs text-muted">Current Indian Gold · ₹ / 10g</div></div><div className="text-xs text-muted">INR</div></div><div className="mt-2 text-2xl font-semibold tabular text-fg">{metals.data?.gold10g != null ? formatINR(metals.data.gold10g) : metals.isLoading ? "Loading…" : "Price unavailable"}</div><div className="mt-1 text-sm font-medium tabular">{metals.data?.goldChange24hPct != null && metals.data?.goldChange24hAmount10g != null ? <span className={metals.data.goldChange24hPct > 0 ? "text-up" : metals.data.goldChange24hPct < 0 ? "text-down" : "text-muted"}>{metals.data.goldChange24hPct > 0 ? "↑" : metals.data.goldChange24hPct < 0 ? "↓" : "→"} {metals.data.goldChange24hAmount10g >= 0 ? "+" : "-"}{formatINR(Math.abs(metals.data.goldChange24hAmount10g))} ({metals.data.goldChange24hPct >= 0 ? "+" : ""}{metals.data.goldChange24hPct.toFixed(2)}%) today</span> : <span className="text-muted">Today’s change unavailable</span>}</div><div className="mt-2 rounded-xl border border-accent/40 bg-accent/10 px-3 py-2"><div className="text-sm font-semibold text-fg">5-Year High: {formatINR(metals.data?.gold5yHigh10g ?? 170000)}</div></div><div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">{[{ label: "10% discount", value: metals.data?.goldDiscount10Price10g }, { label: "20% discount", value: metals.data?.goldDiscount20Price10g }, { label: "30% discount", value: metals.data?.goldDiscount30Price10g }, { label: "40% discount", value: metals.data?.goldDiscount40Price10g }].map((row) => <div key={row.label} className="rounded-lg bg-surface-2 p-2"><div className="text-xs text-muted">{row.label}</div><div className="mt-1 tabular text-sm text-fg">{row.value != null ? formatINR(row.value) : "—"}</div></div>)}</div><div className="mt-3 text-xs text-muted">Rule: BUY when current price ≤ 60% of 5-Year High</div></Panel>
       <Panel className="p-4"><div className="flex items-start justify-between gap-3"><div><div className="text-sm font-medium text-fg">Silver 999</div><div className="mt-1 text-xs text-muted">Current Indian Silver · ₹ / kg</div></div><div className="text-xs text-muted">INR</div></div><div className="mt-2 text-2xl font-semibold tabular text-fg">{metals.data?.silverKg != null ? formatINR(metals.data.silverKg) : metals.isLoading ? "Loading…" : "Price unavailable"}</div><div className="mt-1 text-sm font-medium tabular">{metals.data?.silverChange24hPct != null && metals.data?.silverChange24hAmountKg != null ? <span className={metals.data.silverChange24hPct > 0 ? "text-up" : metals.data.silverChange24hPct < 0 ? "text-down" : "text-muted"}>{metals.data.silverChange24hPct > 0 ? "↑" : metals.data.silverChange24hPct < 0 ? "↓" : "→"} {metals.data.silverChange24hAmountKg >= 0 ? "+" : "-"}{formatINR(Math.abs(metals.data.silverChange24hAmountKg))} ({metals.data.silverChange24hPct >= 0 ? "+" : ""}{metals.data.silverChange24hPct.toFixed(2)}%) today</span> : <span className="text-muted">Today’s change unavailable</span>}</div><div className="mt-2 rounded-xl border border-accent/40 bg-accent/10 px-3 py-2"><div className="text-sm font-semibold text-fg">5-Year High: {formatINR(metals.data?.silver5yHighKg ?? 400000)}</div></div><div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-5">{[{ label: "25%", value: metals.data?.silver25PriceKg }, { label: "35%", value: metals.data?.silver35PriceKg }, { label: "45%", value: metals.data?.silver45PriceKg }, { label: "50%", value: metals.data?.silver50PriceKg }, { label: "55%", value: metals.data?.silver55PriceKg }].map((row) => <div key={row.label} className="rounded-lg bg-surface-2 p-2"><div className="text-xs text-muted">{row.label}</div><div className="mt-1 tabular text-sm text-fg">{row.value != null ? formatINR(row.value) : "—"}</div></div>)}</div><div className="mt-3 text-xs text-muted">Silver rule levels are calculated from the fixed 5-Year High reference.</div></Panel>
-    </div><p className="mt-2 text-[11px] text-subtle">Current Indian prices in ₹ only. Source: Groww. Data is refreshed by the app every 60 seconds.</p>
+    </div><p className="mt-2 text-[11px] text-subtle">Current Indian prices in ₹ only. Source: Motilal Oswal. Data is refreshed by the app every 60 seconds.</p>
   </Section>;
 }
