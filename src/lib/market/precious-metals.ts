@@ -304,7 +304,7 @@ export const fetchPreciousMetals = createServerFn({ method: "GET" }).handler(
       gold5yHigh10g,
       goldDiscount10Price10g,
       goldDiscount20Price10g,
-      goldDiscount30Price10Price10g: goldDiscount30Price10g,
+      goldDiscount30Price10g,
       goldDiscount40Price10g,
       silver5yHighKg,
       silver25PriceKg,
