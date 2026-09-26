@@ -50,8 +50,6 @@ let lastGood: MetalQuote | null = null;
  */
 async function fromIndiaRateApi(): Promise<MetalQuote | null> {
   try {
-    // Mumbai retail reference page publishes GST-exclusive RETAIL 999
-    // separately from the higher "999 WITH GST" figure.
     const res = await fetch(
       "https://allindiabullion.com/gold-rate/maharashtra/mumbai",
       {
@@ -68,20 +66,14 @@ async function fromIndiaRateApi(): Promise<MetalQuote | null> {
 
     const html = await res.text();
 
-    const clean = html
-      .replace(/<script[\s\S]*?<\/script>/gi, " ")
-      .replace(/<style[\s\S]*?<\/style>/gi, " ")
-      .replace(/<[^>]+>/g, " ")
-      .replace(/&nbsp;/gi, " ")
-      .replace(/&amp;/gi, "&")
-      .replace(/\s+/g, " ");
-
-    const goldMatch = clean.match(
-      /RETAIL\s*999\s+GOLD\s+₹\s*([\d,]+(?:\.\d+)?)/i
-    );
-    const silverMatch = clean.match(
-      /RETAIL\s*999\s+SILVER\s+₹\s*([\d,]+(?:\.\d+)?)/i
-    );
+    // Read the explicit headline 24K and Silver 999 reference values.
+    // These are GST-exclusive metal-reference rates on the Mumbai page.
+    const goldMatch =
+      html.match(/24K Gold[\\s\\S]{0,1500}?₹\\s*([\\d,]+(?:\\.\\d+)?)/i) ??
+      html.match(/24K[\\s\\S]{0,800}?₹\\s*([\\d,]+(?:\\.\\d+)?)/i);
+    const silverMatch =
+      html.match(/Silver[\\s\\S]{0,1500}?₹\\s*([\\d,]+(?:\\.\\d+)?)[\\s\\S]{0,100}?per kg/i) ??
+      html.match(/Silver[\\s\\S]{0,800}?₹\\s*([\\d,]+(?:\\.\\d+)?)/i);
 
     const gold10g = goldMatch
       ? Math.round(Number(goldMatch[1].replace(/,/g, "")))
@@ -93,13 +85,14 @@ async function fromIndiaRateApi(): Promise<MetalQuote | null> {
     if (
       !Number.isFinite(gold10g) ||
       !Number.isFinite(silverKg) ||
-      gold10g <= 0 ||
-      silverKg <= 0
+      gold10g < 100000 ||
+      gold10g > 250000 ||
+      silverKg < 150000 ||
+      silverKg > 600000
     ) {
       return null;
     }
 
-    // The page separately publishes "WITH GST". We deliberately do NOT use it.
     return {
       gold10g,
       silverKg,
@@ -108,7 +101,7 @@ async function fromIndiaRateApi(): Promise<MetalQuote | null> {
       silverChange24hPct: null,
       silverChange24hAmountKg: null,
       asOf: new Date().toISOString(),
-      source: "All India Bullion · Mumbai RETAIL 999 · GST excluded"
+      source: "All India Bullion · Mumbai 24K/999 reference · GST excluded"
     };
   } catch {
     return null;
