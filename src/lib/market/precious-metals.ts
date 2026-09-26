@@ -50,37 +50,29 @@ let lastGood: MetalQuote | null = null;
  */
 async function fromIndiaRateApi(): Promise<MetalQuote | null> {
   try {
-    const res = await fetch(
-      "https://allindiabullion.com/gold-rate/maharashtra/mumbai",
-      {
-        headers: {
-          Accept: "text/html,application/xhtml+xml",
-          "User-Agent": UA,
-          "Accept-Language": "en-IN,en;q=0.9"
-        },
-        cache: "no-store",
-        signal: AbortSignal.timeout(8000)
-      }
-    );
+    const res = await fetch("https://allindiabullion.com/benchmark", {
+      headers: {
+        Accept: "text/html,application/xhtml+xml",
+        "User-Agent": UA,
+        "Accept-Language": "en-IN,en;q=0.9"
+      },
+      cache: "no-store",
+      signal: AbortSignal.timeout(8000)
+    });
     if (!res.ok) return null;
 
     const html = await res.text();
 
-    // Read the explicit headline 24K and Silver 999 reference values.
-    // These are GST-exclusive metal-reference rates on the Mumbai page.
+    // AIB benchmark publishes one clean India-wide daily fix:
+    // Gold 999 (24K) per 10g and Silver 999 per kg, GST excluded.
     const goldMatch =
-      html.match(/24K Gold[\s\S]{0,1500}?₹\s*([\d,]+(?:\.\d+)?)/i) ??
-      html.match(/24K[\s\S]{0,800}?₹\s*([\d,]+(?:\.\d+)?)/i);
+      html.match(/Gold 999 \(24K\)[\s\S]{0,500}?₹\s*([\d,]+)/i) ??
+      html.match(/Gold 999[\s\S]{0,500}?₹\s*([\d,]+)/i);
     const silverMatch =
-      html.match(/Silver[\s\S]{0,1500}?₹\s*([\d,]+(?:\.\d+)?)[\s\S]{0,100}?per kg/i) ??
-      html.match(/Silver[\s\S]{0,800}?₹\s*([\d,]+(?:\.\d+)?)/i);
+      html.match(/Silver 999[\s\S]{0,500}?₹\s*([\d,]+)/i);
 
-    const gold10g = goldMatch
-      ? Math.round(Number(goldMatch[1].replace(/,/g, "")))
-      : NaN;
-    const silverKg = silverMatch
-      ? Math.round(Number(silverMatch[1].replace(/,/g, "")))
-      : NaN;
+    const gold10g = goldMatch ? Math.round(Number(goldMatch[1].replace(/,/g, ""))) : NaN;
+    const silverKg = silverMatch ? Math.round(Number(silverMatch[1].replace(/,/g, ""))) : NaN;
 
     if (
       !Number.isFinite(gold10g) ||
@@ -101,12 +93,13 @@ async function fromIndiaRateApi(): Promise<MetalQuote | null> {
       silverChange24hPct: null,
       silverChange24hAmountKg: null,
       asOf: new Date().toISOString(),
-      source: "All India Bullion · Mumbai 24K/999 reference · GST excluded"
+      source: "All India Bullion · India benchmark · GST excluded"
     };
   } catch {
     return null;
   }
 }
+
 /**
  * Secondary source: GoldPrice.org's INR JSON feed.
  * This is an Indian INR spot-derived fallback, not a Mumbai jeweller quote.
