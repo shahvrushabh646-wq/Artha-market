@@ -50,71 +50,70 @@ let lastGood: MetalQuote | null = null;
  */
 async function fromIndiaRateApi(): Promise<MetalQuote | null> {
   try {
-    const res = await fetch("https://api.oropocket.com/public/prices", {
-      headers: { Accept: "application/json", "User-Agent": UA },
-      cache: "no-store",
-      signal: AbortSignal.timeout(8000)
-    });
-
+    // Mumbai retail reference page publishes GST-exclusive RETAIL 999
+    // separately from the higher "999 WITH GST" figure.
+    const res = await fetch(
+      "https://allindiabullion.com/gold-rate/maharashtra/mumbai",
+      {
+        headers: {
+          Accept: "text/html,application/xhtml+xml",
+          "User-Agent": UA,
+          "Accept-Language": "en-IN,en;q=0.9"
+        },
+        cache: "no-store",
+        signal: AbortSignal.timeout(8000)
+      }
+    );
     if (!res.ok) return null;
 
-    const json = (await res.json()) as {
-      data?: {
-        gold?: {
-          buy?: unknown;
-          change24h?: { buy?: unknown };
-        };
-        silver?: {
-          buy?: unknown;
-          change24h?: { buy?: unknown };
-        };
-        timestamp?: unknown;
-      };
-    };
+    const html = await res.text();
 
-    const goldPerGram = Number(json.data?.gold?.buy);
-    const silverPerGram = Number(json.data?.silver?.buy);
+    const clean = html
+      .replace(/<script[\\s\\S]*?<\\/script>/gi, " ")
+      .replace(/<style[\\s\\S]*?<\\/style>/gi, " ")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&nbsp;/gi, " ")
+      .replace(/&amp;/gi, "&")
+      .replace(/\\s+/g, " ");
+
+    const goldMatch = clean.match(
+      /RETAIL\\s*999\\s+GOLD\\s+₹\\s*([\\d,]+(?:\\.\\d+)?)/i
+    );
+    const silverMatch = clean.match(
+      /RETAIL\\s*999\\s+SILVER\\s+₹\\s*([\\d,]+(?:\\.\\d+)?)/i
+    );
+
+    const gold10g = goldMatch
+      ? Math.round(Number(goldMatch[1].replace(/,/g, "")))
+      : NaN;
+    const silverKg = silverMatch
+      ? Math.round(Number(silverMatch[1].replace(/,/g, "")))
+      : NaN;
+
     if (
-      !Number.isFinite(goldPerGram) ||
-      !Number.isFinite(silverPerGram) ||
-      goldPerGram <= 0 ||
-      silverPerGram <= 0
+      !Number.isFinite(gold10g) ||
+      !Number.isFinite(silverKg) ||
+      gold10g <= 0 ||
+      silverKg <= 0
     ) {
       return null;
     }
 
-    const goldChange = Number(json.data?.gold?.change24h?.buy);
-    const silverChange = Number(json.data?.silver?.change24h?.buy);
-    const goldChange24hPct = Number.isFinite(goldChange) ? goldChange : null;
-    const silverChange24hPct = Number.isFinite(silverChange) ? silverChange : null;
-
-    const gold10g = Math.round(goldPerGram * 10);
-    const silverKg = Math.round(silverPerGram * 1000);
-
+    // The page separately publishes "WITH GST". We deliberately do NOT use it.
     return {
       gold10g,
       silverKg,
-      goldChange24hPct,
-      goldChange24hAmount10g:
-        goldChange24hPct != null
-          ? Math.round(gold10g * (goldChange24hPct / 100))
-          : null,
-      silverChange24hPct,
-      silverChange24hAmountKg:
-        silverChange24hPct != null
-          ? Math.round(silverKg * (silverChange24hPct / 100))
-          : null,
-      asOf:
-        typeof json.data?.timestamp === "string"
-          ? json.data.timestamp
-          : new Date().toISOString(),
-      source: "OroPocket · India INR buy rate"
+      goldChange24hPct: null,
+      goldChange24hAmount10g: null,
+      silverChange24hPct: null,
+      silverChange24hAmountKg: null,
+      asOf: new Date().toISOString(),
+      source: "All India Bullion · Mumbai RETAIL 999 · GST excluded"
     };
   } catch {
     return null;
   }
 }
-
 /**
  * Secondary source: GoldPrice.org's INR JSON feed.
  * This is an Indian INR spot-derived fallback, not a Mumbai jeweller quote.
