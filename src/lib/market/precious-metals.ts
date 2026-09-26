@@ -69,11 +69,11 @@ async function fromIndiaRateApi(): Promise<MetalQuote | null> {
     // Read the explicit headline 24K and Silver 999 reference values.
     // These are GST-exclusive metal-reference rates on the Mumbai page.
     const goldMatch =
-      html.match(/24K Gold[\s\S]{0,1500}?₹\\s*([\\d,]+(?:\\.\\d+)?)/i) ??
-      html.match(/24K[\s\S]{0,800}?₹\\s*([\\d,]+(?:\\.\\d+)?)/i);
+      html.match(/24K Gold[\s\S]{0,1500}?₹\s*([\d,]+(?:\.\d+)?)/i) ??
+      html.match(/24K[\s\S]{0,800}?₹\s*([\d,]+(?:\.\d+)?)/i);
     const silverMatch =
-      html.match(/Silver[\s\S]{0,1500}?₹\\s*([\\d,]+(?:\\.\\d+)?)[\s\S]{0,100}?per kg/i) ??
-      html.match(/Silver[\s\S]{0,800}?₹\\s*([\\d,]+(?:\\.\\d+)?)/i);
+      html.match(/Silver[\s\S]{0,1500}?₹\s*([\d,]+(?:\.\d+)?)[\s\S]{0,100}?per kg/i) ??
+      html.match(/Silver[\s\S]{0,800}?₹\s*([\d,]+(?:\.\d+)?)/i);
 
     const gold10g = goldMatch
       ? Math.round(Number(goldMatch[1].replace(/,/g, "")))
