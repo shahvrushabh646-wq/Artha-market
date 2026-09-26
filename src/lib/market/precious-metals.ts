@@ -69,18 +69,18 @@ async function fromIndiaRateApi(): Promise<MetalQuote | null> {
     const html = await res.text();
 
     const clean = html
-      .replace(/<script[\\s\\S]*?<\\/script>/gi, " ")
-      .replace(/<style[\\s\\S]*?<\\/style>/gi, " ")
+      .replace(/<script[\s\S]*?<\\/script>/gi, " ")
+      .replace(/<style[\s\S]*?<\\/style>/gi, " ")
       .replace(/<[^>]+>/g, " ")
       .replace(/&nbsp;/gi, " ")
       .replace(/&amp;/gi, "&")
-      .replace(/\\s+/g, " ");
+      .replace(/\s+/g, " ");
 
     const goldMatch = clean.match(
-      /RETAIL\\s*999\\s+GOLD\\s+₹\\s*([\\d,]+(?:\\.\\d+)?)/i
+      /RETAIL\s*999\s+GOLD\s+₹\s*([\d,]+(?:\.\d+)?)/i
     );
     const silverMatch = clean.match(
-      /RETAIL\\s*999\\s+SILVER\\s+₹\\s*([\\d,]+(?:\\.\\d+)?)/i
+      /RETAIL\s*999\s+SILVER\s+₹\s*([\d,]+(?:\.\d+)?)/i
     );
 
     const gold10g = goldMatch
