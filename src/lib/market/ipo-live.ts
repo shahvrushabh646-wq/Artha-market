@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-type Ipo={symbol?:string;id:string;name:string;type:"Mainboard"|"SME";openDate:string|null;closeDate:string|null;listingDate:string|null;issueSize:number|null;minSubscription:number|null;subscription:number|null;subscriptionAmount:number|null;subscriptionSource:string|null;subscriptionCategories:{category:string;value:number|null}[];gmpPct:number|null;gmpRs:number|null;gmpSources:{source:string;url:string|null;pct:number|null;rs:number|null;asOf:string|null}[];gmpVerifiedSources:string[];city:string|null;state:string|null;business:string|null;countries:{country:string;business:string;salesPct:number|null}[];revenues:{year:string;value:number|null}[];profits:{year:string;value:number|null}[];eps:{year:string;value:number|null}[];priceBand:string|null;lotSize:number|null;faceValue:number|null;sharesOffered:number|null;offeredToPublic:number|null;retailShares:number|null;qibShares:number|null;niiShares:number|null;freshIssue:number|null;offerForSale:number|null;issueType:string|null;objects:string[];risks:string[];promoterHolding:number|null;postIssuePromoterHolding:number|null;moneycontrolUrl:string|null;detailSource:string|null;verifiedSources:string[];sourceUrls:string[];verifiedAt:string};
+type Ipo={symbol?:string;exchange?:"NSE India"|"BSE India";id:string;name:string;type:"Mainboard"|"SME";openDate:string|null;closeDate:string|null;listingDate:string|null;issueSize:number|null;minSubscription:number|null;subscription:number|null;subscriptionAmount:number|null;subscriptionSource:string|null;subscriptionCategories:{category:string;value:number|null}[];gmpPct:number|null;gmpRs:number|null;gmpSources:{source:string;url:string|null;pct:number|null;rs:number|null;asOf:string|null}[];gmpVerifiedSources:string[];city:string|null;state:string|null;business:string|null;countries:{country:string;business:string;salesPct:number|null}[];revenues:{year:string;value:number|null}[];profits:{year:string;value:number|null}[];eps:{year:string;value:number|null}[];priceBand:string|null;lotSize:number|null;faceValue:number|null;sharesOffered:number|null;offeredToPublic:number|null;retailShares:number|null;qibShares:number|null;niiShares:number|null;freshIssue:number|null;offerForSale:number|null;issueType:string|null;objects:string[];risks:string[];promoterHolding:number|null;postIssuePromoterHolding:number|null;moneycontrolUrl:string|null;detailSource:string|null;verifiedSources:string[];sourceUrls:string[];verifiedAt:string};
 type SamcoIpo={id:string;slug:string;company_name:string;type:string;company_profile:string;issue_type:string;issue_open:string;issue_close:string;listed_date:string;face_value:string;price_band:string;bid_lot:string;minimum_order:string;listing:string;issue_size:string;fresh_issue:string;ofs:string;obj_issue:string;key_strengths:string;risks:string;RHP_url:string;knowledge_center_url:string};
 
 const NSE = "https://www.nseindia.com";
@@ -212,14 +212,14 @@ function baseNse(r:any):Ipo{
   const bid=n(r.noOfsharesBid??r.noOfSharesBid);
   const reportedSubscription=n(r.noOfTime);
   const calculatedSubscription=offered&&bid?Number((bid/offered).toFixed(4)):null;
-  const subscription=reportedSubscription!=null&&reportedSubscription>0?reportedSubscription:calculatedSubscription;
-  const subscriptionAmount=bid!=null&&upperPrice!=null?Number((bid*upperPrice/10000000).toFixed(2)):null;
+  const subscription=reportedSubscription!=null&&reportedSubscription>0?Number(reportedSubscription.toFixed(2)):r.status==="Active"&&offered!=null&&bid!=null?Number((bid/offered).toFixed(2)):calculatedSubscription;
+  const subscriptionAmount=bid!=null&&bid>0&&upperPrice!=null?Number((bid*upperPrice/10000000).toFixed(2)):null;
   return {
-    symbol:r.symbol??undefined,id:slugId(r.companyName||r.symbol||"ipo"),
+    symbol:r.symbol??undefined,exchange:r.isBse==="1"?"BSE India":"NSE India",id:slugId(r.companyName||r.symbol||"ipo"),
     name:clean(r.companyName||r.symbol||"IPO"),
     type:r.series==="SME"?"SME":"Mainboard",
     openDate:date(r.issueStartDate),closeDate:date(r.issueEndDate),listingDate:null,
-    issueSize:null,minSubscription:null,subscription,subscriptionAmount,subscriptionSource:"NSE India",
+    issueSize:null,minSubscription:null,subscription,subscriptionAmount,subscriptionSource:r.isBse==="1"?"BSE India":"NSE India",
     subscriptionCategories:[],gmpPct:null,gmpRs:null,gmpSources:[],gmpVerifiedSources:[],
     city:null,state:null,business:null,countries:[],revenues:[],profits:[],eps:[],
     priceBand:band(r.issuePrice),lotSize:null,faceValue:null,
@@ -255,18 +255,42 @@ async function enrichNse(ipo:Ipo,cookie:string){
       ipo.minSubscription=ipo.lotSize*minimumLots*applicationPrice;
     }
     const cats=rowsFromCategory(d?.activeCat);
-    const mapped:{category:string;value:number|null}[]=[];
+    const grouped=new Map<string,Array<{label:string;row:any;value:number|null}>>();
     for(const row of cats){
       if(!row||row.srNo==="Sr.No.")continue;
       const label=clean(row.category??row.Category??row.investorCategory??row.name).toLowerCase();
-      const value=n(row.noOfTotalMeant??row.noOfTime??row.subscription??row.noOfTimes);
-      if(label.includes("qualified")||label.includes("qib")||String(row.srNo)==="1")mapped.push({category:"QIB",value});
-      else if(label.includes("non institutional")||label.includes("nii")||label.includes("hni")||String(row.srNo)==="2")mapped.push({category:"NII",value});
-      else if(label.includes("retail")||label.includes("individual")||String(row.srNo)==="3")mapped.push({category:"Retail",value});
-      else if(label.includes("total"))ipo.subscription=value;
+      if(label.includes("total")&&!label.includes("qib")&&!label.includes("nii")){
+        const total=n(row.noOfTotalMeant??row.noOfTime??row.subscription??row.noOfTimes);
+        if(total!=null)ipo.subscription=Number(total.toFixed(2));
+        continue;
+      }
+      const category=label.includes("qualified")||label.includes("qib")?"QIB"
+        :label.includes("non institutional")||label.includes("non-institutional")||label.includes("nii")||label.includes("hni")?"NII"
+        :label.includes("retail")||label.includes("individual")?"Retail":null;
+      if(!category)continue;
+      const valueRaw=n(row.noOfTotalMeant??row.noOfTime??row.subscription??row.noOfTimes);
+      const rows=grouped.get(category)??[];
+      rows.push({label,row,value:valueRaw==null?null:Number(valueRaw.toFixed(2))});
+      grouped.set(category,rows);
     }
-    ipo.subscriptionCategories=mapped;
-    // Category demand is not a valid substitute for the official overall total.
+    const valueFor=(rows:Array<{label:string;row:any;value:number|null}>):number|null=>{
+      if(!rows.length)return null;
+      const exact=rows.find(x=>{
+        const label=x.label.replace(/[^a-z]/g,"");
+        return label==="qib"||label==="qualifiedinstitutionalbuyers"||label==="nii"||label==="noninstitutional"||label==="retail"||label==="retailindividual";
+      });
+      if(exact)return exact.value;
+      const unique=[...new Set(rows.map(x=>x.value).filter((v):v is number=>v!=null))];
+      if(unique.length===1)return unique[0];
+      const shareTotals=rows.reduce((acc,x)=>{
+        const offered=n(x.row.noOfSharesOffered??x.row.sharesOffered??x.row.noOfSharesReserved);
+        const bid=n(x.row.noOfsharesBid??x.row.noOfSharesBid??x.row.sharesBid);
+        if(offered!=null&&bid!=null&&offered>0){acc.offered+=offered;acc.bid+=bid;acc.usable=true;}
+        return acc;
+      },{offered:0,bid:0,usable:false});
+      return shareTotals.usable?Number((shareTotals.bid/shareTotals.offered).toFixed(2)):null;
+    };
+    ipo.subscriptionCategories=["QIB","NII","Retail"].filter(category=>grouped.has(category)).map(category=>({category,value:valueFor(grouped.get(category)??[])}));
     // Some NSE responses expose only the total multiple outside activeCat.
     if(ipo.subscription==null){
       const totalRows=rowsFromCategory(d?.subscriptionData??d?.subscription??d?.data);
@@ -280,8 +304,8 @@ async function enrichNse(ipo:Ipo,cookie:string){
     }
     const bidRows=rowsFromNse(d?.bidDetails??d?.subscriptionData??d?.biddingData);
     const bidShares=bidRows.reduce((sum,row)=>sum+(n(row?.noOfsharesBid??row?.noOfSharesBid??row?.sharesBid)??0),0);
-    ipo.subscriptionAmount=bidShares>0&&high?Number((bidShares*high/10000000).toFixed(2)):ipo.issueSize!=null&&ipo.subscription!=null?Number((ipo.issueSize*ipo.subscription).toFixed(2)):null;
-    ipo.subscriptionSource="NSE India";
+    if(bidShares>0&&high)ipo.subscriptionAmount=Number((bidShares*high/10000000).toFixed(2));
+    ipo.subscriptionSource=ipo.exchange??"NSE India";
     ipo.detailSource="NSE India official issue-information";
     ipo.verifiedSources=["NSE India","NSE India issue-information"];
     ipo.verifiedAt=new Date().toISOString();
