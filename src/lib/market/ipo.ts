@@ -4,7 +4,7 @@ import { fetchOpenIposLive } from "./ipo-live";
 type Ipo = {
   id:string; name:string; type:"Mainboard"|"SME"; openDate:string|null; closeDate:string|null; listingDate:string|null;
   issueSize:number|null; minSubscription:number|null; subscription:number|null; subscriptionAmount:number|null; subscriptionSource:string|null;
-  subscriptionCategories:{category:string;value:number|null}[]; gmpPct:number|null; gmpSources:{source:string;pct:number|null}[];
+  subscriptionCategories:{category:string;value:number|null}[]; gmpPct:number|null; gmpSources:{source:string;url:string|null;pct:number|null;rs:number|null;asOf:string|null}[];
   city:string|null; state:string|null; business:string|null; countries:{country:string;business:string;salesPct:number|null}[];
   revenues:{year:string;value:number|null}[]; profits:{year:string;value:number|null}[]; eps:{year:string;value:number|null}[];
   priceBand:string|null; lotSize:number|null; faceValue:number|null; sharesOffered:number|null; offeredToPublic:number|null;
