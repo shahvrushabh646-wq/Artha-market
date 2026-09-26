@@ -79,14 +79,14 @@ async function fromGoogleFinanceMumbai(): Promise<MetalQuote | null> {
 
     const clean = (html: string) =>
       html
-        .replace(/<script[\\s\\S]*?<\\/script>/gi, " ")
-        .replace(/<style[\\s\\S]*?<\\/style>/gi, " ")
+        .replace(/<script[\s\S]*?<\/script>/gi, " ")
+        .replace(/<style[\s\S]*?<\/style>/gi, " ")
         .replace(/<[^>]+>/g, " ")
         .replace(/&nbsp;|&#160;/gi, " ")
         .replace(/&#8377;|&rupee;/gi, "₹")
         .replace(/&amp;/gi, "&")
         .replace(/&#44;/gi, ",")
-        .replace(/\\s+/g, " ")
+        .replace(/\s+/g, " ")
         .trim();
 
     const extractAmountAfter = (
@@ -99,7 +99,7 @@ async function fromGoogleFinanceMumbai(): Promise<MetalQuote | null> {
       if (!match || match.index == null) return null;
 
       const section = text.slice(match.index, match.index + 700);
-      const numbers = section.match(/(?:₹\\s*)?([0-9]{1,3}(?:,[0-9]{2,3})+(?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)/g) ?? [];
+      const numbers = section.match(/(?:₹\s*)?([0-9]{1,3}(?:,[0-9]{2,3})+(?:\.[0-9]+)?|[0-9]+(?:\.[0-9]+)?)/g) ?? [];
 
       for (const raw of numbers) {
         const value = Number(raw.replace(/₹|,/g, ""));
@@ -121,13 +121,13 @@ async function fromGoogleFinanceMumbai(): Promise<MetalQuote | null> {
     const gold10g =
       extractAmountAfter(
         goldText,
-        /10g\\s+of\\s+24k\\s+gold/i,
+        /10g\s+of\s+24k\s+gold/i,
         100000,
         250000
       ) ??
       extractAmountAfter(
         goldText,
-        /24k\\s+gold/i,
+        /24k\s+gold/i,
         100000,
         250000
       );
@@ -135,13 +135,13 @@ async function fromGoogleFinanceMumbai(): Promise<MetalQuote | null> {
     const silverKg =
       extractAmountAfter(
         silverText,
-        /1kg\\s+of\\s+999\\s+silver/i,
+        /1kg\s+of\s+999\s+silver/i,
         150000,
         600000
       ) ??
       extractAmountAfter(
         silverText,
-        /999\\s+silver/i,
+        /999\s+silver/i,
         150000,
         600000
       );
