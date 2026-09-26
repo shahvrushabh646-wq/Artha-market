@@ -48,31 +48,55 @@ let lastGood: MetalQuote | null = null;
  *   Gold 24K -> INR / 10g
  *   Silver -> INR / kg
  */
-async function fromIndiaRateApi(): Promise<MetalQuote | null> {
+async function fromMumbaiGoodReturns(): Promise<MetalQuote | null> {
   try {
-    const res = await fetch("https://allindiabullion.com/benchmark", {
-      headers: {
-        Accept: "text/html,application/xhtml+xml",
-        "User-Agent": UA,
-        "Accept-Language": "en-IN,en;q=0.9"
-      },
-      cache: "no-store",
-      signal: AbortSignal.timeout(8000)
-    });
-    if (!res.ok) return null;
+    const fetchPage = async (url: string) => {
+      const res = await fetch(url, {
+        headers: {
+          Accept: "text/html,application/xhtml+xml",
+          "User-Agent": UA,
+          "Accept-Language": "en-IN,en;q=0.9"
+        },
+        cache: "no-store",
+        signal: AbortSignal.timeout(8000)
+      });
+      return res.ok ? await res.text() : "";
+    };
 
-    const html = await res.text();
+    const [goldHtml, silverHtml] = await Promise.all([
+      fetchPage("https://www.goodreturns.in/gold-rates/mumbai.html"),
+      fetchPage("https://www.goodreturns.in/silver-rates/mumbai.html")
+    ]);
 
-    // AIB benchmark publishes one clean India-wide daily fix:
-    // Gold 999 (24K) per 10g and Silver 999 per kg, GST excluded.
+    // Strip markup so the parser is resilient to table/span changes.
+    const clean = (html: string) =>
+      html
+        .replace(/<script[\\s\\S]*?<\\/script>/gi, " ")
+        .replace(/<style[\\s\\S]*?<\\/style>/gi, " ")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/&nbsp;|&#160;/gi, " ")
+        .replace(/&#8377;|&rupee;/gi, "₹")
+        .replace(/&amp;/gi, "&")
+        .replace(/\\s+/g, " ")
+        .trim();
+
+    const goldText = clean(goldHtml);
+    const silverText = clean(silverHtml);
+
+    // GoodReturns publishes Mumbai rates excluding GST/TCS/other levies.
     const goldMatch =
-      html.match(/Gold 999 \(24K\)[\s\S]{0,500}?₹\s*([\d,]+)/i) ??
-      html.match(/Gold 999[\s\S]{0,500}?₹\s*([\d,]+)/i);
+      goldText.match(/24K\\s*Gold\\s*\\/g\\s*₹\\s*([\\d,]+)/i) ??
+      goldText.match(/24\\s*karat\\s*gold[^₹]{0,120}₹\\s*([\\d,]+)/i);
     const silverMatch =
-      html.match(/Silver 999[\s\S]{0,500}?₹\s*([\d,]+)/i);
+      silverText.match(/Silver\\s*\\/kg\\s*₹\\s*([\\d,]+)/i) ??
+      silverText.match(/price\\s+of\\s+silver\\s+in\\s+Mumbai[^₹]{0,120}₹\\s*[\\d,]+[^₹]{0,80}₹\\s*([\\d,]+)\\s*per\\s+kilogram/i);
 
-    const gold10g = goldMatch ? Math.round(Number(goldMatch[1].replace(/,/g, ""))) : NaN;
-    const silverKg = silverMatch ? Math.round(Number(silverMatch[1].replace(/,/g, ""))) : NaN;
+    const gold10g = goldMatch
+      ? Math.round(Number(goldMatch[1].replace(/,/g, "")) * 10)
+      : NaN;
+    const silverKg = silverMatch
+      ? Math.round(Number(silverMatch[1].replace(/,/g, "")))
+      : NaN;
 
     if (
       !Number.isFinite(gold10g) ||
@@ -93,13 +117,12 @@ async function fromIndiaRateApi(): Promise<MetalQuote | null> {
       silverChange24hPct: null,
       silverChange24hAmountKg: null,
       asOf: new Date().toISOString(),
-      source: "All India Bullion · India benchmark · GST excluded"
+      source: "GoodReturns · Mumbai · GST excluded"
     };
   } catch {
     return null;
   }
 }
-
 /**
  * Secondary source: GoldPrice.org's INR JSON feed.
  * This is an Indian INR spot-derived fallback, not a Mumbai jeweller quote.
@@ -215,7 +238,7 @@ async function fromMumbaiGoogleSearch(): Promise<MetalQuote | null> {
 
 async function getIndianMetalPrices(): Promise<MetalQuote | null> {
   return (
-    (await fromIndiaRateApi()) ??
+    (await fromMumbaiGoodReturns()) ??
     (await fromIndianSpotFeed()) ??
     (await fromMumbaiGoogleSearch())
   );
