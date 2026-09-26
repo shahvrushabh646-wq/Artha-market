@@ -15,32 +15,41 @@ type MetalPrices = { gold10g: number | null; silverKg: number | null; goldChange
 async function getIndianMetalPrices(): Promise<{ gold10g: number; silverKg: number; goldChange24hPct: number | null; goldChange24hAmount10g: number | null; silverChange24hPct: number | null; silverChange24hAmountKg: number | null; asOf: string | null } | null> {
   try {
     const [goldRes, silverRes] = await Promise.all([
-      fetch("https://groww.in/gold-rates", { headers: { Accept: "text/html" }, cache: "no-store" }),
-      fetch("https://groww.in/silver-rates", { headers: { Accept: "text/html" }, cache: "no-store" })
+      fetch("https://groww.in/gold-rates/gold-rate-today-in-bhiwandi", { headers: { Accept: "text/html" }, cache: "no-store" }),
+      fetch("https://groww.in/silver-rates/silver-rates-in-maharashtra", { headers: { Accept: "text/html" }, cache: "no-store" })
     ]);
     if (!goldRes.ok || !silverRes.ok) return null;
     const [goldHtml, silverHtml] = await Promise.all([goldRes.text(), silverRes.text()]);
-    const clean = (html: string) => html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ");
-    const goldText = clean(goldHtml);
-    const silverText = clean(silverHtml);
-    const goldMatch = goldText.match(/Today's gold price in India stands at ₹([\\d,]+(?:\\.\\d+)?) per gram for 24 karat/i);
-    const silverMatch = silverText.match(/Today's silver price in India stands at ₹([\\d,]+(?:\\.\\d+)?) per gram for silver \(999 purity\)/i);
+    const text = (html: string) => html
+      .replace(/<script[\\s\\S]*?<\\/script>/gi, " ")
+      .replace(/<style[\\s\\S]*?<\\/style>/gi, " ")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&nbsp;/g, " ")
+      .replace(/&amp;/g, "&")
+      .replace(/\\s+/g, " ");
+
+    const goldText = text(goldHtml);
+    const silverText = text(silverHtml);
+
+    const goldMatch = goldText.match(/24K Gold \/ 10gm\\s+26 Sep ['’]26\\s+₹([\\d,]+(?:\\.\\d+)?)/i)
+      ?? goldText.match(/24K Gold \/ 10gm\\s+[^₹]{0,30}₹([\\d,]+(?:\\.\\d+)?)/i);
+    const silverMatch = silverText.match(/Silver \/ 10gm\\s+25 Sep ['’]26\\s+₹([\\d,]+(?:\\.\\d+)?)/i)
+      ?? silverText.match(/Silver \/ 10gm\\s+[^₹]{0,30}₹([\\d,]+(?:\\.\\d+)?)/i);
+
     if (!goldMatch || !silverMatch) return null;
-    const goldPerGram = Number(goldMatch[1].replace(/,/g, ""));
-    const silverPerGram = Number(silverMatch[1].replace(/,/g, ""));
-    if (!Number.isFinite(goldPerGram) || !Number.isFinite(silverPerGram) || goldPerGram <= 0 || silverPerGram <= 0) return null;
-    const goldChangeMatch = goldText.match(/24K Gold \/ 10gm[\\s\\S]{0,120}?([+-]?[\\d,]+(?:\\.\\d+)?)\\(/i);
-    const silverChangeMatch = silverText.match(/Silver \/ 10gm[\\s\\S]{0,120}?([+-]?[\\d,]+(?:\\.\\d+)?)\\(/i);
-    const gold10g = goldPerGram * 10;
-    const silverKg = silverPerGram * 1000;
-    const goldChange24hAmount10g = goldChangeMatch ? Number(goldChangeMatch[1].replace(/,/g, "")) : null;
-    const silverChange24hAmountKg = silverChangeMatch ? Number(silverChangeMatch[1].replace(/,/g, "")) * 100 : null;
+
+    const gold10g = Number(goldMatch[1].replace(/,/g, ""));
+    const silver10g = Number(silverMatch[1].replace(/,/g, ""));
+    const silverKg = silver10g * 100;
+
+    if (!Number.isFinite(gold10g) || !Number.isFinite(silverKg) || gold10g <= 0 || silverKg <= 0) return null;
+
     return {
       gold10g,
       silverKg,
-      goldChange24hAmount10g: Number.isFinite(goldChange24hAmount10g) ? goldChange24hAmount10g : null,
+      goldChange24hAmount10g: null,
       goldChange24hPct: null,
-      silverChange24hAmountKg: Number.isFinite(silverChange24hAmountKg) ? silverChange24hAmountKg : null,
+      silverChange24hAmountKg: null,
       silverChange24hPct: null,
       asOf: new Date().toISOString()
     };
