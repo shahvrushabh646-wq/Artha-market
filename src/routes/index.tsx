@@ -21,19 +21,19 @@ async function getIndianMetalPrices(): Promise<{ gold10g: number; silverKg: numb
     if (!goldRes.ok || !silverRes.ok) return null;
     const [goldHtml, silverHtml] = await Promise.all([goldRes.text(), silverRes.text()]);
     const text = (html: string) => html
-      .replace(/<script[\\s\\S]*?<\\/script>/gi, " ")
-      .replace(/<style[\\s\\S]*?<\\/style>/gi, " ")
+      .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style[\s\S]*?<\/style>/gi, " ")
       .replace(/<[^>]+>/g, " ")
       .replace(/&nbsp;/g, " ")
       .replace(/&amp;/g, "&")
-      .replace(/\\s+/g, " ");
+      .replace(/\s+/g, " ");
 
     const goldText = text(goldHtml);
     const silverText = text(silverHtml);
 
-    const goldMatch = goldText.match(/24K Gold \/ 10gm\\s+26 Sep ['’]26\\s+₹([\\d,]+(?:\\.\\d+)?)/i)
+    const goldMatch = goldText.match(/24K Gold \/ 10gm\s+[^₹]{0,50}₹([\d,]+(?:\.\d+)?)/i);
       ?? goldText.match(/24K Gold \/ 10gm\\s+[^₹]{0,30}₹([\\d,]+(?:\\.\\d+)?)/i);
-    const silverMatch = silverText.match(/Silver \/ 10gm\\s+25 Sep ['’]26\\s+₹([\\d,]+(?:\\.\\d+)?)/i)
+    const silverMatch = silverText.match(/Silver \/ 10gm\s+[^₹]{0,50}₹([\d,]+(?:\.\d+)?)/i);
       ?? silverText.match(/Silver \/ 10gm\\s+[^₹]{0,30}₹([\\d,]+(?:\\.\\d+)?)/i);
 
     if (!goldMatch || !silverMatch) return null;
