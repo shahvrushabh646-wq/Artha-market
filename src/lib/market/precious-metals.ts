@@ -126,7 +126,7 @@ async function fromOroPocket(): Promise<MetalQuote | null> {
       silverChange24hAmountKg:
         silverPrevious != null ? Math.round(silverKg - silverPrevious) : null,
       asOf: timestamp,
-      source: "OroPocket · Mumbai/India buy rate · GST excluded"
+      source: "OroPocket · India buy rate · GST excluded"
     };
   } catch {
     return null;
@@ -250,7 +250,6 @@ async function fromMumbaiGoogleSearch(): Promise<MetalQuote | null> {
 async function getIndianMetalPrices(): Promise<MetalQuote | null> {
   return (
     (await fromOroPocket()) ??
-    (await fromMumbaiGoodReturns()) ??
     (await fromIndianSpotFeed()) ??
     (await fromMumbaiGoogleSearch())
   );
