@@ -42,87 +42,98 @@ type MetalQuote = {
 let lastGood: MetalQuote | null = null;
 
 /**
- * Primary source: India-specific INR buy quotes.
- * Gold and silver are returned per gram, excluding GST.
- * We convert only the display units required by Artha:
+ * Primary source: OroPocket's public India price API.
+ * The API returns live gold/silver BUY rates in INR per gram.
+ * Its BUY rate excludes GST, so Artha converts only the display units:
  *   Gold 24K -> INR / 10g
- *   Silver -> INR / kg
+ *   Silver 999 -> INR / kg
  */
-async function fromMumbaiGoodReturns(): Promise<MetalQuote | null> {
+async function fromOroPocket(): Promise<MetalQuote | null> {
   try {
-    const fetchPage = async (url: string) => {
-      const res = await fetch(url, {
-        headers: {
-          Accept: "text/html,application/xhtml+xml",
-          "User-Agent": UA,
-          "Accept-Language": "en-IN,en;q=0.9"
-        },
-        cache: "no-store",
-        signal: AbortSignal.timeout(8000)
-      });
-      return res.ok ? await res.text() : "";
+    const res = await fetch("https://api.oropocket.com/public/prices", {
+      headers: {
+        Accept: "application/json",
+        "User-Agent": UA
+      },
+      cache: "no-store",
+      signal: AbortSignal.timeout(8000)
+    });
+
+    if (!res.ok) return null;
+
+    const json = (await res.json()) as {
+      statusCode?: number;
+      data?: {
+        gold?: {
+          buy?: unknown;
+          change24h?: { buy?: unknown };
+          currency?: unknown;
+          unit?: unknown;
+        };
+        silver?: {
+          buy?: unknown;
+          change24h?: { buy?: unknown };
+          currency?: unknown;
+          unit?: unknown;
+        };
+        timestamp?: unknown;
+      };
     };
 
-    const [goldHtml, silverHtml] = await Promise.all([
-      fetchPage("https://www.goodreturns.in/gold-rates/mumbai.html"),
-      fetchPage("https://www.goodreturns.in/silver-rates/mumbai.html")
-    ]);
-
-    // Strip markup so the parser is resilient to table/span changes.
-    const clean = (html: string) =>
-      html
-        .replace(/<script[\s\S]*?<\/script>/gi, " ")
-        .replace(/<style[\s\S]*?<\/style>/gi, " ")
-        .replace(/<[^>]+>/g, " ")
-        .replace(/&nbsp;|&#160;/gi, " ")
-        .replace(/&#8377;|&rupee;/gi, "₹")
-        .replace(/&amp;/gi, "&")
-        .replace(/\s+/g, " ")
-        .trim();
-
-    const goldText = clean(goldHtml);
-    const silverText = clean(silverHtml);
-
-    // GoodReturns publishes Mumbai rates excluding GST/TCS/other levies.
-    const goldMatch =
-      goldText.match(/24K\s*Gold\s*\/g\s*₹\s*([\d,]+)/i) ??
-      goldText.match(/24\s*karat\s*gold[^₹]{0,120}₹\s*([\d,]+)/i);
-    const silverMatch =
-      silverText.match(/Silver\s*\/kg\s*₹\s*([\d,]+)/i) ??
-      silverText.match(/price\s+of\s+silver\s+in\s+Mumbai[^₹]{0,120}₹\s*[\d,]+[^₹]{0,80}₹\s*([\d,]+)\s*per\s+kilogram/i);
-
-    const gold10g = goldMatch
-      ? Math.round(Number(goldMatch[1].replace(/,/g, "")) * 10)
-      : NaN;
-    const silverKg = silverMatch
-      ? Math.round(Number(silverMatch[1].replace(/,/g, "")))
-      : NaN;
+    const goldPerGram = Number(json.data?.gold?.buy);
+    const silverPerGram = Number(json.data?.silver?.buy);
+    const goldChangePct = Number(json.data?.gold?.change24h?.buy);
+    const silverChangePct = Number(json.data?.silver?.change24h?.buy);
+    const timestamp =
+      typeof json.data?.timestamp === "string"
+        ? json.data.timestamp
+        : new Date().toISOString();
 
     if (
-      !Number.isFinite(gold10g) ||
-      !Number.isFinite(silverKg) ||
-      gold10g < 100000 ||
-      gold10g > 250000 ||
-      silverKg < 150000 ||
-      silverKg > 600000
+      json.statusCode !== 200 ||
+      !Number.isFinite(goldPerGram) ||
+      !Number.isFinite(silverPerGram) ||
+      goldPerGram <= 0 ||
+      silverPerGram <= 0 ||
+      json.data?.gold?.currency !== "INR" ||
+      json.data?.silver?.currency !== "INR" ||
+      json.data?.gold?.unit !== "gram" ||
+      json.data?.silver?.unit !== "gram"
     ) {
       return null;
     }
 
+    const gold10g = Math.round(goldPerGram * 10);
+    const silverKg = Math.round(silverPerGram * 1000);
+    const validGoldChange = Number.isFinite(goldChangePct) ? goldChangePct : null;
+    const validSilverChange = Number.isFinite(silverChangePct) ? silverChangePct : null;
+    const goldPrevious =
+      validGoldChange != null && validGoldChange > -100
+        ? gold10g / (1 + validGoldChange / 100)
+        : null;
+    const silverPrevious =
+      validSilverChange != null && validSilverChange > -100
+        ? silverKg / (1 + validSilverChange / 100)
+        : null;
+
     return {
       gold10g,
       silverKg,
-      goldChange24hPct: null,
-      goldChange24hAmount10g: null,
-      silverChange24hPct: null,
-      silverChange24hAmountKg: null,
-      asOf: new Date().toISOString(),
-      source: "GoodReturns · Mumbai · GST excluded"
+      goldChange24hPct: validGoldChange,
+      goldChange24hAmount10g:
+        goldPrevious != null ? Math.round(gold10g - goldPrevious) : null,
+      silverChange24hPct: validSilverChange,
+      silverChange24hAmountKg:
+        silverPrevious != null ? Math.round(silverKg - silverPrevious) : null,
+      asOf: timestamp,
+      source: "OroPocket · Mumbai/India buy rate · GST excluded"
     };
   } catch {
     return null;
   }
 }
+
+
 /**
  * Secondary source: GoldPrice.org's INR JSON feed.
  * This is an Indian INR spot-derived fallback, not a Mumbai jeweller quote.
@@ -238,6 +249,7 @@ async function fromMumbaiGoogleSearch(): Promise<MetalQuote | null> {
 
 async function getIndianMetalPrices(): Promise<MetalQuote | null> {
   return (
+    (await fromOroPocket()) ??
     (await fromMumbaiGoodReturns()) ??
     (await fromIndianSpotFeed()) ??
     (await fromMumbaiGoogleSearch())
