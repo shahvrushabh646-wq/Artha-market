@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-type Ipo={symbol?:string;id:string;name:string;type:"Mainboard"|"SME";openDate:string|null;closeDate:string|null;listingDate:string|null;issueSize:number|null;minSubscription:number|null;subscription:number|null;subscriptionAmount:number|null;subscriptionSource:string|null;subscriptionCategories:{category:string;value:number|null}[];gmpPct:number|null;gmpRs:number|null;gmpSources:{source:string;pct:number|null;rs:number|null;asOf:string|null}[];gmpVerifiedSources:string[];city:string|null;state:string|null;business:string|null;countries:{country:string;business:string;salesPct:number|null}[];revenues:{year:string;value:number|null}[];profits:{year:string;value:number|null}[];eps:{year:string;value:number|null}[];priceBand:string|null;lotSize:number|null;faceValue:number|null;sharesOffered:number|null;offeredToPublic:number|null;retailShares:number|null;qibShares:number|null;niiShares:number|null;freshIssue:number|null;offerForSale:number|null;issueType:string|null;objects:string[];risks:string[];promoterHolding:number|null;postIssuePromoterHolding:number|null;moneycontrolUrl:string|null;detailSource:string|null;verifiedSources:string[];sourceUrls:string[];verifiedAt:string};
+type Ipo={symbol?:string;id:string;name:string;type:"Mainboard"|"SME";openDate:string|null;closeDate:string|null;listingDate:string|null;issueSize:number|null;minSubscription:number|null;subscription:number|null;subscriptionAmount:number|null;subscriptionSource:string|null;subscriptionCategories:{category:string;value:number|null}[];gmpPct:number|null;gmpRs:number|null;gmpSources:{source:string;url:string|null;pct:number|null;rs:number|null;asOf:string|null}[];gmpVerifiedSources:string[];city:string|null;state:string|null;business:string|null;countries:{country:string;business:string;salesPct:number|null}[];revenues:{year:string;value:number|null}[];profits:{year:string;value:number|null}[];eps:{year:string;value:number|null}[];priceBand:string|null;lotSize:number|null;faceValue:number|null;sharesOffered:number|null;offeredToPublic:number|null;retailShares:number|null;qibShares:number|null;niiShares:number|null;freshIssue:number|null;offerForSale:number|null;issueType:string|null;objects:string[];risks:string[];promoterHolding:number|null;postIssuePromoterHolding:number|null;moneycontrolUrl:string|null;detailSource:string|null;verifiedSources:string[];sourceUrls:string[];verifiedAt:string};
 type SamcoIpo={id:string;slug:string;company_name:string;type:string;company_profile:string;issue_type:string;issue_open:string;issue_close:string;listed_date:string;face_value:string;price_band:string;bid_lot:string;minimum_order:string;listing:string;issue_size:string;fresh_issue:string;ofs:string;obj_issue:string;key_strengths:string;risks:string;RHP_url:string;knowledge_center_url:string};
 
 const NSE = "https://www.nseindia.com";
@@ -106,7 +106,9 @@ function parseGmpFromText(text:string,company:string){
     idx=compact.indexOf(first);
   }
   if(idx<0)return null;
-  const window=t.slice(idx,idx+900);
+  // Keep the match close to this IPO row so a neighbouring IPO's premium
+  // can never be attributed to the requested company.
+  const window=t.slice(idx,idx+260);
   const m=window.match(/(?:GMP|grey market premium|live gmp)[^₹0-9\-]{0,80}(?:₹\s*)?(-?\d[\d,]*(?:\.\d+)?)/i);
   if(!m)return null;
   const value=Number(m[1].replace(/,/g,""));
@@ -156,7 +158,20 @@ function aliasesFor(company:string){
   return [...new Set(a)];
 }
 function parseGmp(text:string,company:string){
-  for(const alias of aliasesFor(company)){
+  const aliases=aliasesFor(company);
+  const rows=[...text.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)].map(m=>clean(m[1]));
+  // On tracker pages, require the company and GMP to occur in the same table row.
+  if(rows.length){
+    for(const row of rows){
+      if(!aliases.some(alias=>normName(row).includes(normName(alias))))continue;
+      for(const alias of aliases){
+        const rs=parseGmpFromText(row,alias);
+        if(rs!=null)return rs;
+      }
+    }
+    return null;
+  }
+  for(const alias of aliases){
     const rs=parseGmpFromText(text,alias);
     if(rs!=null)return rs;
   }
@@ -166,14 +181,15 @@ async function enrichGmp(ipo:Ipo){
   const upperBand=upper(ipo.priceBand);
   const results=await Promise.all(GMP_SOURCES.map(async s=>{
     let rs:number|null=null;
+    let matchedUrl:string|null=null;
     for(const url of gmpUrls(ipo,s.name)){
       const text=await fetchSourceText(url);
-      if(text){rs=parseGmp(text,ipo.name);if(rs!=null)break;}
+      if(text){rs=parseGmp(text,ipo.name);if(rs!=null){matchedUrl=url;break;}}
     }
     const pct=rs!=null&&upperBand?Number(((rs/upperBand)*100).toFixed(2)):null;
-    return {source:s.name,pct,rs,asOf:new Date().toISOString()};
+    return {source:s.name,url:matchedUrl,pct,rs,asOf:rs!=null?new Date().toISOString():null};
   }));
-  const valid=results.filter(x=>x.rs!=null) as Array<{source:string;pct:number|null;rs:number;asOf:string}>;
+  const valid=results.filter(x=>x.rs!=null) as Array<{source:string;url:string|null;pct:number|null;rs:number;asOf:string|null}>;
   ipo.gmpSources=results;
   ipo.gmpVerifiedSources=valid.map(x=>x.source);
   if(valid.length>=2){
@@ -250,10 +266,7 @@ async function enrichNse(ipo:Ipo,cookie:string){
       else if(label.includes("total"))ipo.subscription=value;
     }
     ipo.subscriptionCategories=mapped;
-    if(ipo.subscription==null&&mapped.length){
-      const vals=mapped.map(x=>x.value).filter((x):x is number=>x!=null);
-      if(vals.length)ipo.subscription=Math.max(...vals);
-    }
+    // Category demand is not a valid substitute for the official overall total.
     // Some NSE responses expose only the total multiple outside activeCat.
     if(ipo.subscription==null){
       const totalRows=rowsFromCategory(d?.subscriptionData??d?.subscription??d?.data);
