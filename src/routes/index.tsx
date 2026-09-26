@@ -65,7 +65,7 @@ const fetchPreciousMetals = createServerFn({ method: "GET" }).handler(async (): 
   const silver50PriceKg = Math.round(silver5yHighKg * 0.50);
   const silver55PriceKg = Math.round(silver5yHighKg * 0.45);
   const goldSignal = gold10g <= goldDiscount40Price10g ? "BUY" : "WAIT";
-  return { gold10g, silverKg, goldUsdOz, silverUsdOz, usdInr, goldChange24hPct, goldChange24hAmount10g, silverChange24hPct, silverChange24hAmountKg, gold5yHigh10g, goldDiscount10Price10g, goldDiscount20Price10g, goldDiscount30Price10g, goldDiscount40Price10g, silver5yHighKg, silver25PriceKg, silver35PriceKg, silver45PriceKg, silver50PriceKg, silver55PriceKg, goldSignal, asOf, source: "Yahoo Finance current Gold & Silver converted to INR" };
+  return { gold10g, silverKg, goldChange24hPct, goldChange24hAmount10g, silverChange24hPct, silverChange24hAmountKg, gold5yHigh10g, goldDiscount10Price10g, goldDiscount20Price10g, goldDiscount30Price10g, goldDiscount40Price10g, silver5yHighKg, silver25PriceKg, silver35PriceKg, silver45PriceKg, silver50PriceKg, silver55PriceKg, goldSignal, asOf, source: "Yahoo Finance current Gold & Silver converted to INR" };
 });
 
 function Home() {
