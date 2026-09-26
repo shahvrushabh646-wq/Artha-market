@@ -20,7 +20,7 @@ async function getIndianMetalPrices(): Promise<{ gold10g: number; silverKg: numb
     ]);
     if (!goldRes.ok || !silverRes.ok) return null;
     const [goldHtml, silverHtml] = await Promise.all([goldRes.text(), silverRes.text()]);
-    const clean = (html: string) => html.replace(/<script[\\s\\S]*?<\\/script>/gi, " ").replace(/<style[\\s\\S]*?<\\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/\\s+/g, " ");
+    const clean = (html: string) => html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ");
     const goldText = clean(goldHtml);
     const silverText = clean(silverHtml);
     const goldMatch = goldText.match(/Today's gold price in India stands at ₹([\\d,]+(?:\\.\\d+)?) per gram for 24 karat/i);
