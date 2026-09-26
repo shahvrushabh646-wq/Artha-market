@@ -71,13 +71,13 @@ async function fromMumbaiGoodReturns(): Promise<MetalQuote | null> {
     // Strip markup so the parser is resilient to table/span changes.
     const clean = (html: string) =>
       html
-        .replace(/<script[\\s\\S]*?<\\/script>/gi, " ")
-        .replace(/<style[\\s\\S]*?<\\/style>/gi, " ")
+        .replace(/<script[\s\S]*?<\/script>/gi, " ")
+        .replace(/<style[\s\S]*?<\/style>/gi, " ")
         .replace(/<[^>]+>/g, " ")
         .replace(/&nbsp;|&#160;/gi, " ")
         .replace(/&#8377;|&rupee;/gi, "₹")
         .replace(/&amp;/gi, "&")
-        .replace(/\\s+/g, " ")
+        .replace(/\s+/g, " ")
         .trim();
 
     const goldText = clean(goldHtml);
@@ -85,11 +85,11 @@ async function fromMumbaiGoodReturns(): Promise<MetalQuote | null> {
 
     // GoodReturns publishes Mumbai rates excluding GST/TCS/other levies.
     const goldMatch =
-      goldText.match(/24K\\s*Gold\\s*\\/g\\s*₹\\s*([\\d,]+)/i) ??
-      goldText.match(/24\\s*karat\\s*gold[^₹]{0,120}₹\\s*([\\d,]+)/i);
+      goldText.match(/24K\s*Gold\s*\/g\s*₹\s*([\d,]+)/i) ??
+      goldText.match(/24\s*karat\s*gold[^₹]{0,120}₹\s*([\d,]+)/i);
     const silverMatch =
-      silverText.match(/Silver\\s*\\/kg\\s*₹\\s*([\\d,]+)/i) ??
-      silverText.match(/price\\s+of\\s+silver\\s+in\\s+Mumbai[^₹]{0,120}₹\\s*[\\d,]+[^₹]{0,80}₹\\s*([\\d,]+)\\s*per\\s+kilogram/i);
+      silverText.match(/Silver\s*\/kg\s*₹\s*([\d,]+)/i) ??
+      silverText.match(/price\s+of\s+silver\s+in\s+Mumbai[^₹]{0,120}₹\s*[\d,]+[^₹]{0,80}₹\s*([\d,]+)\s*per\s+kilogram/i);
 
     const gold10g = goldMatch
       ? Math.round(Number(goldMatch[1].replace(/,/g, "")) * 10)
