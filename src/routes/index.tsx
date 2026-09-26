@@ -19,54 +19,28 @@ async function getIndianMetalPrices(): Promise<{ gold10g: number; silverKg: numb
     "Accept-Language": "en-IN,en;q=0.9"
   };
 
-  const parseRupeeValues = (html: string) =>
-    [...html.matchAll(/₹\\s*([\\d,]{5,9})(?:\\.\\d+)?/g)]
-      .map((m) => Number(m[1].replace(/,/g, "")))
-      .filter((v) => Number.isFinite(v));
-
-  const findNear = (html: string, terms: RegExp[], min: number, max: number) => {
-    const text = html.replace(/<script[\\s\\S]*?<\\/script>|<style[\\s\\S]*?<\\/style>/gi, " ");
-    for (const term of terms) {
-      const matches = [...text.matchAll(term)];
-      for (const match of matches) {
-        const window = text.slice(Math.max(0, (match.index ?? 0) - 900), (match.index ?? 0) + 1400);
-        const values = parseRupeeValues(window).filter((v) => v >= min && v <= max);
-        if (values.length) return values[0];
-      }
-    }
-    return null;
+  const googleSearch = async (query: string) => {
+    const url = `https://www.google.com/search?hl=en-IN&gl=IN&gbv=1&q=${encodeURIComponent(query)}`;
+    const res = await fetch(url, { headers, cache: "no-store" });
+    return res.ok ? await res.text() : "";
   };
 
+  const numbers = (html: string) =>
+    [...html.matchAll(/₹\s*([\d,]+(?:\.\d+)?)/g)]
+      .map(m => Number(m[1].replace(/,/g, "")))
+      .filter(Number.isFinite);
+
   try {
-    const searches = [
-      { url: "https://www.google.com/search?hl=en-IN&gl=IN&q=gold+price+in+mumbai+today+24k+per+10+gram&gbv=1", kind: "gold" },
-      { url: "https://www.google.com/search?hl=en-IN&gl=IN&q=silver+price+in+mumbai+today+999+per+kg&gbv=1", kind: "silver" }
-    ];
+    const [goldHtml, silverHtml] = await Promise.all([
+      googleSearch("gold price in mumbai today 24k per 10 gram"),
+      googleSearch("silver price in mumbai today 999 per kg")
+    ]);
 
-    let gold10g: number | null = null;
-    let silverKg: number | null = null;
+    const goldCandidates = numbers(goldHtml).filter(v => v >= 100000 && v <= 250000);
+    const silverCandidates = numbers(silverHtml).filter(v => v >= 150000 && v <= 500000);
 
-    for (const search of searches) {
-      const res = await fetch(search.url, { headers, cache: "no-store" });
-      if (!res.ok) continue;
-      const html = await res.text();
-
-      if (search.kind === "gold") {
-        gold10g = findNear(
-          html,
-          [/24K[\\s\\S]{0,1800}Mumbai/i, /Mumbai[\\s\\S]{0,1800}24K/i, /gold[\\s\\S]{0,1200}Mumbai/i],
-          100000,
-          250000
-        );
-      } else {
-        silverKg = findNear(
-          html,
-          [/999[\\s\\S]{0,1800}Mumbai/i, /Mumbai[\\s\\S]{0,1800}999/i, /silver[\\s\\S]{0,1200}Mumbai/i],
-          150000,
-          500000
-        );
-      }
-    }
+    const gold10g = goldCandidates[0] ?? null;
+    const silverKg = silverCandidates[0] ?? null;
 
     if (gold10g == null || silverKg == null) return null;
 
@@ -83,6 +57,7 @@ async function getIndianMetalPrices(): Promise<{ gold10g: number; silverKg: numb
     return null;
   }
 }
+
 const fetchPreciousMetals = createServerFn({ method: "GET" }).handler(async (): Promise<MetalPrices> => {
   const quote = await getIndianMetalPrices();
   const gold5yHigh10g = 170000;
