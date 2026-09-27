@@ -273,14 +273,14 @@ function htmlMeta(html:string,name:string){
       if(mi>=0){
         const rest=tag.slice(mi+marker.length).trim();
         const quote=rest[0];
-        if(quote==="""||quote==="'"){
+        if(quote === '"' || quote === "'"){
           const qend=rest.indexOf(quote,1);
           if(qend>0&&rest.slice(1,qend).toLowerCase()===target){
             const ci=tagLower.indexOf("content=");
             if(ci>=0){
               const cr=tag.slice(ci+8).trim();
               const cq=cr[0];
-              if(cq==="""||cq==="'"){
+              if(cq === '"' || cq === "'"){
                 const ce=cr.indexOf(cq,1);
                 if(ce>0)return cr.slice(1,ce);
               }
@@ -330,7 +330,7 @@ async function duckSearch(query:string){
       if(hi>=0){
         const rest=tag.slice(hi+hrefMarker.length).trim();
         const q=rest[0];
-        if(q==="""||q==="'"){
+        if(q === '"' || q === "'"){
           const qe=rest.indexOf(q,1);
           if(qe>0){
             out.push({title:stripHtml(html.slice(tagEnd+1,b)),url:rest.slice(1,qe),snippet:""});
