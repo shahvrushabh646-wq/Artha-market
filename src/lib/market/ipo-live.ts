@@ -5,6 +5,7 @@ type SamcoIpo={id:string;slug:string;company_name:string;type:string;company_pro
 const NSE = "https://www.nseindia.com";
 const NSE_PAGE = "https://www.nseindia.com/market-data/all-upcoming-issues-ipo";
 const cache=new Map<string,{expires:number;value:Ipo[]}>();
+const CACHE_MS=5000;
 function clean(v:unknown){return String(v??"").replace(/<[^>]*>/g," ").replace(/\s+/g," ").trim();}
 function n(v:unknown){if(v==null||v==="")return null;const x=Number(String(v).replace(/,/g,"").replace(/%/g,"").trim());return Number.isFinite(x)?x:null;}
 function date(v:unknown){const s=clean(v);if(!s)return null;const m=s.match(/^(\d{1,2})[-\/](\w{3,})[-\/](\d{4})$/i);if(m){const months=["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"];const mi=months.indexOf(m[2].slice(0,3).toLowerCase());if(mi>=0)return m[3]+"-"+String(mi+1).padStart(2,"0")+"-"+String(Number(m[1])).padStart(2,"0");}const d=new Date(s);return Number.isNaN(d.getTime())?null:d.toISOString().slice(0,10);}
@@ -424,11 +425,11 @@ export const fetchOpenIposLive=createServerFn({method:"GET"}).handler(async()=>{
   if(hit&&hit.expires>Date.now())return hit.value;
   try{
     const value=await loadNse();
-    cache.set("nse",{expires:Date.now()+60000,value});
+    cache.set("nse",{expires:Date.now()+CACHE_MS,value});
     return value;
   }catch{
     const empty:Ipo[]=[];
-    cache.set("nse",{expires:Date.now()+15000,value:empty});
+    cache.set("nse",{expires:Date.now()+2000,value:empty});
     return empty;
   }
 });
