@@ -75,7 +75,7 @@ async function fetchGrowwFallback(): Promise<Ipo[]>{
     const html=await r.text();
     clearTimeout(timer);
     if(!r.ok)return [];
-    const m=html.match(/<script id="__NEXT_DATA__"[^>]*>([\\s\\S]+?)<\\/script>/);
+    const m=html.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]+?)<\/script>/);
     if(!m)return [];
     const next=JSON.parse(m[1]) as any;
     const page=next?.props?.pageProps??{};
