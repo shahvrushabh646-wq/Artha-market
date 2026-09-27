@@ -263,19 +263,19 @@ function htmlMeta(html:string,name:string){
   return m?.[1]??null;
 }
 function stripHtml(s:string){
-  return clean(s.replace(/<script[\\s\\S]*?<\\/script>/gi," ").replace(/<style[\\s\\S]*?<\\/style>/gi," "));
+  return clean(s.replace(/<script[\s\S]*?<\\/script>/gi," ").replace(/<style[\s\S]*?<\\/style>/gi," "));
 }
 async function duckSearch(query:string){
   try{
     const r=await fetch("https://html.duckduckgo.com/html/?q="+encodeURIComponent(query),{headers:{"User-Agent":HEADERS["User-Agent"],Accept:"text/html,text/plain,*/*"},cache:"no-store"});
     if(!r.ok)return [] as Array<{title:string;url:string;snippet:string}>;
     const html=await r.text();
-    return [...html.matchAll(/<a[^>]+class=["']result__a["'][^>]*href=["']([^"']+)["'][^>]*>([\\s\\S]*?)<\\/a>/gi)].slice(0,8).map(m=>({title:stripHtml(m[2]),url:m[1],snippet:""}));
+    return [...html.matchAll(/<a[^>]+class=["']result__a["'][^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\\/a>/gi)].slice(0,8).map(m=>({title:stripHtml(m[2]),url:m[1],snippet:""}));
   }catch{return [] as Array<{title:string;url:string;snippet:string}>}
 }
 function looksLikeCompanySite(url:string){
   try{
-    const host=new URL(url).hostname.toLowerCase().replace(/^www\\./,"");
+    const host=new URL(url).hostname.toLowerCase().replace(/^www\./,"");
     return !/(nseindia|bseindia|sebi|moneycontrol|economictimes|business-standard|financialexpress|reuters|indiatoday|linkedin|facebook|instagram|youtube|wikipedia|ipowatch|ipocentral|investorgain|gmpwatch|groww|zerodha|upstox)/.test(host);
   }catch{return false;}
 }
@@ -287,7 +287,7 @@ async function universalResearch(ipo:Ipo){
     const html=await fetchSourceText(official.url);
     if(html){
       const description=htmlMeta(html,"description")||htmlMeta(html,"og:description");
-      const title=htmlMeta(html,"og:title")||clean(html.match(/<title[^>]*>([\\s\\S]*?)<\\/title>/i)?.[1]);
+      const title=htmlMeta(html,"og:title")||clean(html.match(/<title[^>]*>([\s\S]*?)<\\/title>/i)?.[1]);
       const body=stripHtml(html).slice(0,18000);
       if(description||title) ipo.business=clean(description||title).slice(0,700);
       ipo.sourceUrls=[...new Set([official.url,...ipo.sourceUrls])];
