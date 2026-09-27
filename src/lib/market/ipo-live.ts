@@ -397,9 +397,27 @@ async function loadNse(){
     const enriched=await enrichNse(ipo,cookie);
     try{ result.push(await enrichGmp(enriched)); }catch{ result.push(enriched); }
   }
-  return result
+  const filtered=result
     .filter(x=>!!x.closeDate&&x.closeDate>=today)
     .sort((a,b)=>(a.openDate??"").localeCompare(b.openDate??"")||a.name.localeCompare(b.name));
+
+  // NSE can return a technically valid response with an empty/unusable
+  // payload. In that case the previous fallback was skipped because rows
+  // existed but could not be converted into IPO records.
+  if(!filtered.length){
+    const groww=await fetchGrowwFallback();
+    if(groww.length){
+      const enriched:Ipo[]=[];
+      for(const ipo of groww){
+        try{enriched.push(await enrichGmp(ipo));}catch{enriched.push(ipo);}
+      }
+      return enriched
+        .filter(x=>!!x.name&&(!x.closeDate||x.closeDate>=today))
+        .sort((a,b)=>(a.openDate??"").localeCompare(b.openDate??"")||a.name.localeCompare(b.name));
+    }
+  }
+
+  return filtered;
 }
 export const fetchOpenIposLive=createServerFn({method:"GET"}).handler(async()=>{
   const hit=cache.get("nse");
