@@ -263,14 +263,17 @@ function htmlMeta(html:string,name:string){
   return m?.[1]??null;
 }
 function stripHtml(s:string){
-  return clean(s.replace(/<script[\s\S]*?<\\/script>/gi," ").replace(/<style[\s\S]*?<\\/style>/gi," "));
+  const withoutScripts=s.replace(new RegExp("<script[\\\\s\\\\S]*?</script>","gi")," ");
+  const withoutStyles=withoutScripts.replace(new RegExp("<style[\\\\s\\\\S]*?</style>","gi")," ");
+  return clean(withoutStyles);
 }
 async function duckSearch(query:string){
   try{
     const r=await fetch("https://html.duckduckgo.com/html/?q="+encodeURIComponent(query),{headers:{"User-Agent":HEADERS["User-Agent"],Accept:"text/html,text/plain,*/*"},cache:"no-store"});
     if(!r.ok)return [] as Array<{title:string;url:string;snippet:string}>;
     const html=await r.text();
-    return [...html.matchAll(/<a[^>]+class=["']result__a["'][^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\\/a>/gi)].slice(0,8).map(m=>({title:stripHtml(m[2]),url:m[1],snippet:""}));
+    const re=new RegExp("<a[^>]+class=[\\\\\"']result__a[\\\\\"'][^>]*href=[\\\\\"']([^\\\\\"']+)[\\\\\"'][^>]*>([\\\\s\\\\S]*?)</a>","gi");
+    return [...html.matchAll(re)].slice(0,8).map(m=>({title:stripHtml(m[2]),url:m[1],snippet:""}));
   }catch{return [] as Array<{title:string;url:string;snippet:string}>}
 }
 function looksLikeCompanySite(url:string){
@@ -287,7 +290,7 @@ async function universalResearch(ipo:Ipo){
     const html=await fetchSourceText(official.url);
     if(html){
       const description=htmlMeta(html,"description")||htmlMeta(html,"og:description");
-      const title=htmlMeta(html,"og:title")||clean(html.match(/<title[^>]*>([\s\S]*?)<\\/title>/i)?.[1]);
+      const title=htmlMeta(html,"og:title")||clean(html.match(new RegExp("<title[^>]*>([\\s\\S]*?)</title>","i"))?.[1]);
       const body=stripHtml(html).slice(0,18000);
       if(description||title) ipo.business=clean(description||title).slice(0,700);
       ipo.sourceUrls=[...new Set([official.url,...ipo.sourceUrls])];
@@ -300,7 +303,7 @@ async function universalResearch(ipo:Ipo){
     }
   }
   const wiki=await duckSearch('site:wikipedia.org "'+company+'"');
-  const wikiHit=wiki.find(x=>/wikipedia\\.org\\/wiki\\//i.test(x.url));
+  const wikiHit=wiki.find(x=>/wikipedia\.org\/wiki\//i.test(x.url));
   if(wikiHit){
     ipo.sourceUrls=[...new Set([...ipo.sourceUrls,wikiHit.url])];
     ipo.verifiedSources=[...new Set(["Wikipedia (background only)",...ipo.verifiedSources])];
@@ -349,7 +352,7 @@ function applyMetricSearch(raw:any,ipo:Ipo){
   walk(raw);
   const unique=new Map<string,{year:string;revenue:number|null;profit:number|null;eps:number|null}>();
   for(const r of rows){if(r.year&&!unique.has(r.year))unique.set(r.year,r);}
-  const arr=[...unique.values()].filter(r=>/20\\d{2}|FY/i.test(r.year)).slice(-3);
+  const arr=[...unique.values()].filter(r=>/20\d{2}|FY/i.test(r.year)).slice(-3);
   if(arr.length){
     ipo.revenues=arr.map(r=>({year:r.year,value:r.revenue})).filter(r=>r.value!=null);
     ipo.profits=arr.map(r=>({year:r.year,value:r.profit})).filter(r=>r.value!=null);
