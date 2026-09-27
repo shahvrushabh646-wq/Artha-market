@@ -217,8 +217,7 @@ function parseGmp(text:string,company:string){
     for(const row of rows){
       if(!aliases.some(alias=>normName(row).includes(normName(alias))))continue;
       for(const alias of aliases){
-        const rs=parseGmpFromText(row,alias);
-        if(rs!=null)return rs;
+        const rs=parseGmpFromText(row,alias);        if(rs!=null)return rs;
       }
     }
     return null;
@@ -257,7 +256,104 @@ async function enrichGmp(ipo:Ipo){
   return ipo;
 }
 
-function baseNse(r:any):Ipo{
+
+function htmlMeta(html:string,name:string){
+  const re=new RegExp('<meta[^>]+(?:name|property)=["\\']'+name+'["\\'][^>]+content=["\\']([^"\\']+)["\\']','i');
+  return re.exec(html)?.[1]??null;
+}
+function stripHtml(s:string){return clean(s.replace(/<script[\\s\\S]*?<\\/script>/gi," ").replace(/<style[\\s\\S]*?<\\/style>/gi," "));}
+async function duckSearch(query:string){
+  try{
+    const r=await fetch("https://html.duckduckgo.com/html/?q="+encodeURIComponent(query),{headers:{"User-Agent":HEADERS["User-Agent"],Accept:"text/html,text/plain,*/*"},cache:"no-store"});
+    if(!r.ok)return [] as Array<{title:string;url:string;snippet:string}>;
+    const html=await r.text();
+    return [...html.matchAll(/<a[^>]+class=["']result__a["'][^>]*href=["']([^"']+)["'][^>]*>([\\s\\S]*?)<\\/a>/gi)].slice(0,8).map(m=>({title:stripHtml(m[2]),url:m[1],snippet:""}));
+  }catch{return [] as Array<{title:string;url:string;snippet:string}>}
+}
+function looksLikeCompanySite(url:string){
+  try{
+    const host=new URL(url).hostname.toLowerCase().replace(/^www\\./,"");
+    return !/(nseindia|bseindia|sebi|moneycontrol|economictimes|business-standard|financialexpress|reuters|indiatoday|linkedin|facebook|instagram|youtube|wikipedia|ipowatch|ipocentral|investorgain|gmpwatch|groww|zerodha|upstox)/.test(host);
+  }catch{return false;}
+}
+async function universalResearch(ipo:Ipo){
+  const company=ipo.name;
+  const results=await duckSearch('"'+company+'" official website India');
+  const official=results.find(x=>looksLikeCompanySite(x.url));
+  if(official){
+    const html=await fetchSourceText(official.url);
+    if(html){
+      const description=htmlMeta(html,"description")||htmlMeta(html,"og:description");
+      const title=htmlMeta(html,"og:title")||clean(html.match(/<title[^>]*>([\\s\\S]*?)<\\/title>/i)?.[1]);
+      const body=stripHtml(html).slice(0,18000);
+      if(description||title) ipo.business=clean(description||title).slice(0,700);
+      ipo.sourceUrls=[...new Set([official.url,...ipo.sourceUrls])];
+      ipo.verifiedSources=[...new Set(["Company official website",...ipo.verifiedSources])];
+      const location=body.match(/(?:headquartered|head office|registered office|corporate office)[^.;]{0,180}/i)?.[0];
+      if(location){
+        const m=location.match(/(?:in|at|,)[ ]+([A-Z][A-Za-z .-]{2,40}),[ ]+([A-Z][A-Za-z .-]{2,40})/);
+        if(m){ipo.city=ipo.city||clean(m[1]);ipo.state=ipo.state||clean(m[2]);}
+      }
+    }
+  }
+  const wiki=await duckSearch('site:wikipedia.org "'+company+'"');
+  const wikiHit=wiki.find(x=>/wikipedia\\.org\\/wiki\\//i.test(x.url));
+  if(wikiHit){
+    ipo.sourceUrls=[...new Set([...ipo.sourceUrls,wikiHit.url])];
+    ipo.verifiedSources=[...new Set(["Wikipedia (background only)",...ipo.verifiedSources])];
+    const wh=await fetchSourceText(wikiHit.url);
+    if(wh && !ipo.business){
+      const desc=htmlMeta(wh,"description");
+      if(desc)ipo.business=clean(desc).slice(0,700);
+    }
+  }
+  const lanes=[
+    '"'+company+'" DRHP RHP prospectus',
+    '"'+company+'" revenue profit EPS annual report',
+    '"'+company+'" promoter risks IPO'
+  ];
+  const laneResults=await Promise.all(lanes.map(q=>duckSearch(q)));
+  for(const list of laneResults){
+    for(const item of list.slice(0,4)){
+      if(/(nseindia|bseindia|sebi|annualreport|investor)/i.test(item.url))ipo.sourceUrls.push(item.url);
+    }
+  }
+  ipo.sourceUrls=[...new Set(ipo.sourceUrls)];
+  return ipo;
+}
+function applyMetricSearch(raw:any,ipo:Ipo){
+  const rows:{year:string;revenue:number|null;profit:number|null;eps:number|null}[]=[];
+  const walk=(x:any,depth=0)=>{
+    if(depth>7||x==null)return;
+    if(Array.isArray(x)){for(const y of x)walk(y,depth+1);return;}
+    if(typeof x!=="object")return;
+    const keys=Object.keys(x);
+    const lower=keys.map(k=>k.toLowerCase());
+    const year=String(x.year??x.financialYear??x.fy??x.period??"");
+    const revKey=lower.find(k=>/revenue|total.?income|income.?from.?operations/.test(k));
+    const profitKey=lower.find(k=>/profit.?after.?tax|profit.?for.?the.?year|pat|net.?profit/.test(k));
+    const epsKey=lower.find(k=>/(^|_)eps($|_)|earnings.?per.?share/.test(k));
+    if(year&&(revKey||profitKey||epsKey)){
+      rows.push({
+        year,
+        revenue:revKey?n(x[keys[lower.indexOf(revKey)] ]):null,
+        profit:profitKey?n(x[keys[lower.indexOf(profitKey)] ]):null,
+        eps:epsKey?n(x[keys[lower.indexOf(epsKey)] ]):null
+      });
+    }
+    for(const k of keys)walk(x[k],depth+1);
+  };
+  walk(raw);
+  const unique=new Map<string,{year:string;revenue:number|null;profit:number|null;eps:number|null}>();
+  for(const r of rows){if(r.year&&!unique.has(r.year))unique.set(r.year,r);}
+  const arr=[...unique.values()].filter(r=>/20\\d{2}|FY/i.test(r.year)).slice(-3);
+  if(arr.length){
+    ipo.revenues=arr.map(r=>({year:r.year,value:r.revenue})).filter(r=>r.value!=null);
+    ipo.profits=arr.map(r=>({year:r.year,value:r.profit})).filter(r=>r.value!=null);
+    ipo.eps=arr.map(r=>({year:r.year,value:r.eps})).filter(r=>r.value!=null);
+  }
+}
+\nfunction baseNse(r:any):Ipo{
   const issuePrice=band(r.issuePrice);
   const upperPrice=upper(issuePrice);
   const offered=n(r.noOfSharesOffered);
@@ -433,4 +529,3 @@ export const fetchOpenIposLive=createServerFn({method:"GET"}).handler(async()=>{
     return empty;
   }
 });
-
