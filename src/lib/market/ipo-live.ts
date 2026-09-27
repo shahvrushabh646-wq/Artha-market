@@ -62,6 +62,57 @@ function rowsFromNse(raw:unknown): any[]{
   if(root && root.data && Array.isArray(root.data.data)) return root.data.data;
   return [];
 }
+
+async function fetchGrowwFallback(): Promise<Ipo[]>{
+  try{
+    const controller=new AbortController();
+    const timer=setTimeout(()=>controller.abort(),9000);
+    const r=await fetch("https://groww.in/ipo",{
+      signal:controller.signal,
+      headers:{"User-Agent":HEADERS["User-Agent"],Accept:"text/html,application/xhtml+xml,text/html,*/*"},
+      cache:"no-store"
+    });
+    const html=await r.text();
+    clearTimeout(timer);
+    if(!r.ok)return [];
+    const m=html.match(/<script id="__NEXT_DATA__"[^>]*>([\\s\\S]+?)<\\/script>/);
+    if(!m)return [];
+    const next=JSON.parse(m[1]) as any;
+    const page=next?.props?.pageProps??{};
+    const rows=[...(page.openDataList??[]),...(page.upcomingDataList??[])];
+    const today=new Date().toISOString().slice(0,10);
+    const out:Ipo[]=[];
+    for(const row of rows){
+      const name=clean(row?.companyName);
+      if(!name)continue;
+      const cats=Array.isArray(row?.categories)?row.categories:[];
+      const cat=cats[0]??{};
+      const open=row?.bidStartTimestamp?new Date(Number(row.bidStartTimestamp)).toISOString().slice(0,10):null;
+      const close=row?.bidEndTimestamp?new Date(Number(row.bidEndTimestamp)).toISOString().slice(0,10):null;
+      if(close&&close<today)continue;
+      const low=n(cat?.minPrice), high=n(cat?.maxPrice);
+      const priceBand=low!=null&&high!=null?`₹${low.toLocaleString("en-IN")} - ₹${high.toLocaleString("en-IN")}`:null;
+      const lot=n(cat?.lotSize??cat?.minBidQuantity);
+      const minBid=n(cat?.minBidQuantity);
+      const minSubscription=high!=null&&minBid!=null?high*minBid:null;
+      const subscription=n(row?.overallSubscription);
+      out.push({
+        symbol:row?.symbol,exchange:"NSE India",id:slugId(name),name,type:row?.isSme?"SME":"Mainboard",
+        openDate:open,closeDate:close,listingDate:null,issueSize:n(row?.issueSize),minSubscription,
+        subscription,subscriptionAmount:null,subscriptionSource:"Groww",
+        subscriptionCategories:cats.map((x:any)=>({category:clean(x?.categoryLabel??x?.category),value:n(x?.subscriptionRate)})).filter((x:any)=>x.category),
+        gmpPct:null,gmpRs:null,gmpSources:[],gmpVerifiedSources:[],
+        city:null,state:null,business:null,countries:[],revenues:[],profits:[],eps:[],
+        priceBand,lotSize:lot,faceValue:null,sharesOffered:null,offeredToPublic:null,retailShares:null,qibShares:null,niiShares:null,
+        freshIssue:null,offerForSale:null,issueType:null,objects:[],risks:[],
+        promoterHolding:null,postIssuePromoterHolding:null,moneycontrolUrl:null,
+        detailSource:"Groww IPO dashboard",verifiedSources:["Groww"],sourceUrls:["https://groww.in/ipo"],verifiedAt:new Date().toISOString()
+      });
+    }
+    return out;
+  }catch{return []}
+}
+
 function parseInfo(rows:unknown[]){
   const out:Record<string,string>={};
   for(const row of rows as Array<{title?:string;value?:unknown}>){
@@ -322,7 +373,17 @@ async function loadNse(){
   ]);
   const today=new Date().toISOString().slice(0,10);
   const map=new Map<string,Ipo>();
-  const rows=[...rowsFromNse(current),...rowsFromNse(upcoming)];
+  let rows=[...rowsFromNse(current),...rowsFromNse(upcoming)];
+  if(!rows.length){
+    const groww=await fetchGrowwFallback();
+    if(groww.length){
+      const enriched:Ipo[]=[];
+      for(const ipo of groww){
+        try{enriched.push(await enrichGmp(ipo));}catch{enriched.push(ipo);}
+      }
+      return enriched.sort((a,b)=>(a.openDate??"").localeCompare(b.openDate??"")||a.name.localeCompare(b.name));
+    }
+  }
   for(const r of rows){
     if(!r?.companyName && !r?.symbol && !r?.company)continue;
     if(!r.companyName && r.company) r.companyName=r.company;
