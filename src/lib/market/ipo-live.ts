@@ -258,10 +258,13 @@ async function enrichGmp(ipo:Ipo){
 
 
 function htmlMeta(html:string,name:string){
-  const re=new RegExp('<meta[^>]+(?:name|property)=["\\']'+name+'["\\'][^>]+content=["\\']([^"\\']+)["\\']','i');
-  return re.exec(html)?.[1]??null;
+  const pattern=new RegExp("<meta[^>]+(?:name|property)=[\\\"']"+name+"[\\\"'][^>]+content=[\\\"']([^\\\"']+)[\\\"']","i");
+  const m=html.match(pattern);
+  return m?.[1]??null;
 }
-function stripHtml(s:string){return clean(s.replace(/<script[\\s\\S]*?<\\/script>/gi," ").replace(/<style[\\s\\S]*?<\\/style>/gi," "));}
+function stripHtml(s:string){
+  return clean(s.replace(/<script[\\s\\S]*?<\\/script>/gi," ").replace(/<style[\\s\\S]*?<\\/style>/gi," "));
+}
 async function duckSearch(query:string){
   try{
     const r=await fetch("https://html.duckduckgo.com/html/?q="+encodeURIComponent(query),{headers:{"User-Agent":HEADERS["User-Agent"],Accept:"text/html,text/plain,*/*"},cache:"no-store"});
