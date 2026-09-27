@@ -258,22 +258,88 @@ async function enrichGmp(ipo:Ipo){
 
 
 function htmlMeta(html:string,name:string){
-  const pattern=new RegExp("<meta[^>]+(?:name|property)=[\\\"']"+name+"[\\\"'][^>]+content=[\\\"']([^\\\"']+)[\\\"']","i");
-  const m=html.match(pattern);
-  return m?.[1]??null;
+  const lower=html.toLowerCase();
+  const target=name.toLowerCase();
+  const keys=["name","property"];
+  for(const key of keys){
+    let pos=0;
+    while((pos=lower.indexOf("<meta",pos))>=0){
+      const close=lower.indexOf(">",pos);
+      if(close<0)break;
+      const tag=html.slice(pos,close+1);
+      const tagLower=tag.toLowerCase();
+      const marker=key+"=";
+      const mi=tagLower.indexOf(marker);
+      if(mi>=0){
+        const rest=tag.slice(mi+marker.length).trim();
+        const quote=rest[0];
+        if(quote==="""||quote==="'"){
+          const qend=rest.indexOf(quote,1);
+          if(qend>0&&rest.slice(1,qend).toLowerCase()===target){
+            const ci=tagLower.indexOf("content=");
+            if(ci>=0){
+              const cr=tag.slice(ci+8).trim();
+              const cq=cr[0];
+              if(cq==="""||cq==="'"){
+                const ce=cr.indexOf(cq,1);
+                if(ce>0)return cr.slice(1,ce);
+              }
+            }
+          }
+        }
+      }
+      pos=close+1;
+    }
+  }
+  return null;
 }
 function stripHtml(s:string){
-  const withoutScripts=s.replace(new RegExp("<script[\\\\s\\\\S]*?</script>","gi")," ");
-  const withoutStyles=withoutScripts.replace(new RegExp("<style[\\\\s\\\\S]*?</style>","gi")," ");
-  return clean(withoutStyles);
+  let out=s;
+  while(true){
+    const a=out.toLowerCase().indexOf("<script");
+    if(a<0)break;
+    const b=out.toLowerCase().indexOf("</script>",a);
+    out=b<0?out.slice(0,a):out.slice(0,a)+" "+out.slice(b+9);
+  }
+  while(true){
+    const a=out.toLowerCase().indexOf("<style");
+    if(a<0)break;
+    const b=out.toLowerCase().indexOf("</style>",a);
+    out=b<0?out.slice(0,a):out.slice(0,a)+" "+out.slice(b+8);
+  }
+  return clean(out);
 }
 async function duckSearch(query:string){
   try{
     const r=await fetch("https://html.duckduckgo.com/html/?q="+encodeURIComponent(query),{headers:{"User-Agent":HEADERS["User-Agent"],Accept:"text/html,text/plain,*/*"},cache:"no-store"});
     if(!r.ok)return [] as Array<{title:string;url:string;snippet:string}>;
     const html=await r.text();
-    const re=new RegExp("<a[^>]+class=[\\\\\"']result__a[\\\\\"'][^>]*href=[\\\\\"']([^\\\\\"']+)[\\\\\"'][^>]*>([\\\\s\\\\S]*?)</a>","gi");
-    return [...html.matchAll(re)].slice(0,8).map(m=>({title:stripHtml(m[2]),url:m[1],snippet:""}));
+    const out:Array<{title:string;url:string;snippet:string}>=[];
+    let pos=0;
+    while(out.length<8){
+      const marker=html.indexOf("result__a",pos);
+      if(marker<0)break;
+      const a=html.lastIndexOf("<a",marker);
+      const b=html.indexOf("</a>",marker);
+      if(a<0||b<0)break;
+      const tagEnd=html.indexOf(">",a);
+      if(tagEnd<0||tagEnd>b)break;
+      const tag=html.slice(a,tagEnd+1);
+      const hrefMarker="href=";
+      const hi=tag.toLowerCase().indexOf(hrefMarker);
+      if(hi>=0){
+        const rest=tag.slice(hi+hrefMarker.length).trim();
+        const q=rest[0];
+        if(q==="""||q==="'"){
+          const qe=rest.indexOf(q,1);
+          if(qe>0){
+            out.push({title:stripHtml(html.slice(tagEnd+1,b)),url:rest.slice(1,qe),snippet:""});
+          }
+        }
+      }
+      pos=b+4;
+    }
+    return out;
   }catch{return [] as Array<{title:string;url:string;snippet:string}>}
 }
 function looksLikeCompanySite(url:string){
@@ -290,7 +356,7 @@ async function universalResearch(ipo:Ipo){
     const html=await fetchSourceText(official.url);
     if(html){
       const description=htmlMeta(html,"description")||htmlMeta(html,"og:description");
-      const title=htmlMeta(html,"og:title")||clean(html.match(new RegExp("<title[^>]*>([\\s\\S]*?)</title>","i"))?.[1]);
+      const title=htmlMeta(html,"og:title")||clean(html.slice(html.toLowerCase().indexOf("<title"),html.toLowerCase().indexOf("</title>")+8).replace(/<[^>]*>/g," "));
       const body=stripHtml(html).slice(0,18000);
       if(description||title) ipo.business=clean(description||title).slice(0,700);
       ipo.sourceUrls=[...new Set([official.url,...ipo.sourceUrls])];
