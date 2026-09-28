@@ -374,6 +374,48 @@ function looksLikeCompanySite(url:string){
     return !/(nseindia|bseindia|sebi|moneycontrol|economictimes|business-standard|financialexpress|reuters|indiatoday|linkedin|facebook|instagram|youtube|wikipedia|ipowatch|ipocentral|investorgain|gmpwatch|groww|zerodha|upstox)/.test(host);
   }catch{return false;}
 }
+
+async function enrichSamcoResearch(ipo:Ipo){
+  try{
+    const q='site:samco.in/knowledge-center/articles "'+ipo.name+'" IPO "Objects of the Offer"';
+    const hits=await duckSearch(q);
+    const hit=hits.find(x=>/samco\.in\/knowledge-center\/articles\//i.test(x.url));
+    if(!hit)return ipo;
+    const html=await fetchSourceText(hit.url);
+    if(!html)return ipo;
+    const text=stripHtml(html);
+    const section=(startLabels:string[],stopLabels:string[])=>{
+      const lower=text.toLowerCase();
+      let start=-1;
+      for(const label of startLabels){
+        const i=lower.indexOf(label.toLowerCase());
+        if(i>=0&&(start<0||i<start))start=i;
+      }
+      if(start<0)return "";
+      let end=text.length;
+      for(const label of stopLabels){
+        const i=lower.indexOf(label.toLowerCase(),start+20);
+        if(i>start&&i<end)end=i;
+      }
+      return clean(text.slice(start,end)).slice(0,3500);
+    };
+    const objectsText=section(["objects of the offer","objects of the issue","objective of the issue"],["key strengths","key risks","company financials","shareholding pattern","valuation","faq"]);
+    const risksText=section(["key risks","key risk"],["objects of the offer","objects of the issue","key strengths","company financials","shareholding pattern","valuation","faq"]);
+    const toItems=(s:string)=>{
+      if(!s)return [];
+      const body=s.replace(/^(objects of the offer|objects of the issue|objective of the issue|key risks|key risk)\s*[:|-]?\s*/i,"");
+      return [...new Set(body.split(/\s+(?=\d+\.\s)|\s+(?=•)|\s+(?=·)|(?<=\.)\s+(?=[A-Z])/).map(clean).filter(x=>x.length>20))].slice(0,6);
+    };
+    const objects=toItems(objectsText);
+    const risks=toItems(risksText);
+    if(objects.length)ipo.objects=objects;
+    if(risks.length)ipo.risks=risks;
+    ipo.sourceUrls=[...new Set([hit.url,...ipo.sourceUrls])];
+    ipo.verifiedSources=[...new Set(["Samco IPO research",...ipo.verifiedSources])];
+    return ipo;
+  }catch{return ipo}
+}
+
 async function universalResearch(ipo:Ipo){
   const company=ipo.name;
   const brokerSources=["https://www.moneycontrol.com/ipo/open-ipos/","https://zerodha.com/ipo/","https://www.angelone.in/knowledge-center/ipo"];
@@ -419,7 +461,7 @@ async function universalResearch(ipo:Ipo){
     }
   }
   ipo.sourceUrls=[...new Set(ipo.sourceUrls)];
-  return ipo;
+  return await enrichSamcoResearch(ipo);
 }
 function applyMetricSearch(raw:any,ipo:Ipo){
   const rows:{year:string;revenue:number|null;profit:number|null;eps:number|null}[]=[];
