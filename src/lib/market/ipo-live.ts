@@ -98,13 +98,17 @@ const SOURCE_RULES=[
   {name:"Chittorgarh",hosts:["chittorgarh.com"],priority:80},
   {name:"Moneycontrol",hosts:["moneycontrol.com"],priority:75},
   {name:"Economic Times",hosts:["economictimes.indiatimes.com"],priority:74},
+  {name:"Livemint",hosts:["livemint.com"],priority:74},
   {name:"Groww",hosts:["groww.in"],priority:70},
   {name:"Zerodha",hosts:["zerodha.com"],priority:70},
   {name:"Angel One",hosts:["angelone.in"],priority:70},
   {name:"Upstox",hosts:["upstox.com"],priority:70},
   {name:"InvestorGain",hosts:["investorgain.com"],priority:68},
   {name:"IPO Watch",hosts:["ipowatch.in"],priority:68},
-  {name:"IPO Central",hosts:["ipocentral.in"],priority:68}
+  {name:"IPO Central",hosts:["ipocentral.in"],priority:68},
+  {name:"NiftyTrader",hosts:["niftytrader.in"],priority:68},
+  {name:"IPOGram",hosts:["ipogram.in"],priority:68},
+  {name:"IPO Ji",hosts:["ipoji.com"],priority:68}
 ];
 function domainOf(url:string){try{return new URL(url).hostname.replace(/^www\./,"").toLowerCase();}catch{return "";}}
 function sourceName(url:string){const d=domainOf(url);const known=SOURCE_RULES.find(x=>x.hosts.some(h=>d===h||d.endsWith("."+h)));return known?.name??d;}
@@ -147,7 +151,7 @@ async function enrichGmp(ipo:Ipo){
   try{
     const name=ipo.name.replace(/\b(IPO|LIMITED|LTD\.?|PRIVATE|PVT\.?)\b/gi," ").replace(/\s+/g," ").trim();
     const urls=await researchSearch(name+" IPO GMP grey market premium");
-    const preferred=[...new Set(urls)].filter(u=>/investorgain|ipowatch|ipocentral|chittorgarh|moneycontrol|groww|economictimes/i.test(u)).slice(0,8);
+    const preferred=[...new Set(urls)].filter(u=>/investorgain|ipowatch|ipocentral|chittorgarh|moneycontrol|groww|economictimes|livemint|niftytrader|ipogram|ipoji/i.test(u)).slice(0,12);
     const sources:{source:string;url:string|null;pct:number|null;rs:number|null;asOf:string|null}[]=[];
     for(const url of preferred){
       const text=await readResearchUrl(url);
@@ -216,7 +220,7 @@ function applyResearchText(ipo:Ipo,hits:ResearchHit[]){
   if(objects.length)ipo.objects=objects;
   if(risks.length)ipo.risks=risks;
 }
-function isCompanyOfficialUrl(url:string,name:string){const d=domainOf(url);if(!d||/sebi\.gov\.in|nseindia\.com|bseindia\.com|chittorgarh\.com|moneycontrol\.com|economictimes\.indiatimes\.com|groww\.in|zerodha\.com|angelone\.in|upstox\.com|investorgain\.com|ipowatch\.in|ipocentral\.in/.test(d))return false;const tokens=name.toLowerCase().replace(/\b(limited|ltd|private|pvt|ipo)\b/g," ").split(/[^a-z0-9]+/).filter(x=>x.length>=3);return tokens.some(t=>d.includes(t));}
+function isCompanyOfficialUrl(url:string,name:string){const d=domainOf(url);if(!d||/sebi\.gov\.in|nseindia\.com|bseindia\.com|chittorgarh\.com|moneycontrol\.com|economictimes\.indiatimes\.com|livemint\.com|groww\.in|zerodha\.com|angelone\.in|upstox\.com|investorgain\.com|ipowatch\.in|ipocentral\.in|niftytrader\.in|ipogram\.in|ipoji\.com/.test(d))return false;const tokens=name.toLowerCase().replace(/\b(limited|ltd|private|pvt|ipo)\b/g," ").split(/[^a-z0-9]+/).filter(x=>x.length>=3);return tokens.some(t=>d.includes(t));}
 function prospectusTypeFromUrl(url:string,text:string){const s=(url+" "+text).toLowerCase();if(/\bdrhp\b|draft red herring/.test(s))return "DRHP" as const;if(/\brhp\b|red herring prospectus/.test(s))return "RHP" as const;if(/abridged prospectus/.test(s))return "Abridged Prospectus" as const;if(/prospectus/.test(s))return "Prospectus" as const;return null;}
 function extractOfficialAndProspectus(ipo:Ipo,hits:ResearchHit[]){const official=hits.find(h=>isCompanyOfficialUrl(h.url,ipo.name));const docs=hits.filter(h=>/sebi\.gov\.in|nseindia\.com|bseindia\.com/.test(h.domain)||/prospectus|rhp|drhp/i.test(h.url+" "+h.text));const doc=docs.sort((a,b)=>{const rank=(h:ResearchHit)=>{const t=(h.url+" "+h.text).toLowerCase();return /\bprospectus\b/.test(t)&&!/drhp|rhp/.test(t)?4:/\brhp\b|red herring/.test(t)?3:/\bdrhp\b|draft red herring/.test(t)?2:/abridged prospectus/.test(t)?1:0};return rank(b)-rank(a)||b.priority-a.priority;})[0];if(official)ipo.officialWebsite=official.url.split("/").slice(0,3).join("/");if(doc){ipo.prospectusUrl=doc.url;ipo.prospectusType=prospectusTypeFromUrl(doc.url,doc.text);}}
 async function universalResearch(ipo:Ipo){const hits=await researchHits(ipo);if(hits.length){applyResearchText(ipo,hits);extractOfficialAndProspectus(ipo,hits);ipo.verifiedSources=[...new Set(hits.map(h=>sourceName(h.url)))];ipo.sourceUrls=[...new Set(hits.map(h=>h.url))];ipo.detailSource=hits.find(h=>h.priority>=96)?.url??hits[0].url;}await enrichGmp(ipo);ipo.verifiedAt=new Date().toISOString();return ipo;}
