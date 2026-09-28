@@ -88,16 +88,74 @@ function issueSizeCr(v:string|null|undefined){
   return u.startsWith("million")?x/10:u.startsWith("lakh")?x/100:x;
 }
 
+type ResearchHit={url:string;domain:string;title:string;text:string;priority:number};
+
+const SOURCE_RULES=[
+  {name:"SEBI",hosts:["sebi.gov.in"],priority:100},
+  {name:"NSE India",hosts:["nseindia.com"],priority:98},
+  {name:"BSE India",hosts:["bseindia.com"],priority:98},
+  {name:"Company website",hosts:[],priority:96},
+  {name:"Chittorgarh",hosts:["chittorgarh.com"],priority:80},
+  {name:"Moneycontrol",hosts:["moneycontrol.com"],priority:75},
+  {name:"Economic Times",hosts:["economictimes.indiatimes.com"],priority:74},
+  {name:"Groww",hosts:["groww.in"],priority:70},
+  {name:"Zerodha",hosts:["zerodha.com"],priority:70},
+  {name:"Angel One",hosts:["angelone.in"],priority:70},
+  {name:"Upstox",hosts:["upstox.com"],priority:70}
+];
+function domainOf(url:string){try{return new URL(url).hostname.replace(/^www\\./,"").toLowerCase();}catch{return "";}}
+function sourceName(url:string){const d=domainOf(url);const known=SOURCE_RULES.find(x=>x.hosts.some(h=>d===h||d.endsWith("."+h)));return known?.name??d;}
+function sourcePriority(url:string){const d=domainOf(url);return SOURCE_RULES.find(x=>x.hosts.some(h=>d===h||d.endsWith("."+h)))?.priority??40;}
+function firstText(s:string,patterns:RegExp[]){for(const p of patterns){const m=s.match(p);if(m?.[1])return clean(m[1]);}return null;}
+function numberList(s:string,patterns:RegExp[],limit=3){for(const p of patterns){const ms=[...s.matchAll(p)];if(ms.length)return ms.slice(0,limit).map(m=>n(m[1])).filter((x):x is number=>x!=null);}return [];}
+async function researchSearch(query:string):Promise<string[]>{
+  try{
+    const u="https://r.jina.ai/http://www.google.com/search?q="+encodeURIComponent(query);
+    const r=await fetch(u,{headers:{Accept:"text/plain"},cache:"no-store"});
+    if(!r.ok)return [];
+    const t=await r.text();const urls:string[]=[];
+    for(const m of t.matchAll(/\\((https?:\\/\\/[^\\s)]+)\\)/g)){const url=m[1].replace(/&amp;/g,"&");if(!urls.includes(url))urls.push(url);}
+    return urls.slice(0,12);
+  }catch{return [];}
+}
+async function readResearchUrl(url:string):Promise<string>{try{const r=await fetch("https://r.jina.ai/"+url,{headers:{Accept:"text/plain"},cache:"no-store"});if(!r.ok)return "";return (await r.text()).slice(0,45000);}catch{return "";}}
+async function researchHits(ipo:Ipo):Promise<ResearchHit[]>{
+  const name=ipo.name.replace(/\\b(IPO|LIMITED|LTD\\.?|PRIVATE|PVT\\.?)\\b/gi," ").replace(/\\s+/g," ").trim();
+  const queries=[name+" DRHP RHP IPO SEBI",name+" IPO annual report revenue profit EPS",name+" IPO business objects risks price band lot size",name+" IPO GMP subscription"];
+  const found=(await Promise.all(queries.map(researchSearch))).flat();
+  const unique=[...new Set(found)].filter(u=>!/facebook|instagram|youtube|linkedin|x.com|twitter.com/i.test(u));
+  const preferred=unique.sort((a,b)=>sourcePriority(b)-sourcePriority(a)).slice(0,14);const hits:ResearchHit[]=[];
+  for(const url of preferred){const text=await readResearchUrl(url);if(text.length<80)continue;hits.push({url,domain:domainOf(url),title:text.split("\\n").find(x=>x.trim())?.trim()??sourceName(url),text,priority:sourcePriority(url)});if(hits.length>=8)break;}
+  return hits;
+}
+function applyResearchText(ipo:Ipo,hits:ResearchHit[]){
+  const official=hits.filter(h=>h.priority>=96);const all=hits.map(h=>h.text).join("\\n");const officialText=official.map(h=>h.text).join("\\n");const text=officialText||all;
+  const business=firstText(text,[/(?:business of the company|our business|company is engaged in|we are engaged in|business overview)[:\\s]+([^\\n]{60,500})/i,/(?:products and services|business model)[:\\s]+([^\\n]{60,500})/i]);
+  if(business)ipo.business=business;
+  const office=firstText(text,[/(?:registered office|corporate office|registered and corporate office)[:\\s]+([^\\n]{20,180})/i]);
+  if(office){const parts=office.split(",").map(x=>x.trim()).filter(Boolean);ipo.city=parts.at(-2)??parts.at(-1)??ipo.city;ipo.state=parts.at(-1)??ipo.state;}
+  const rev=numberList(all,[/(?:revenue from operations|revenue|turnover)[^\\d]{0,80}([\\d,]+(?:\\.\\d+)?)\\s*(?:crore|cr)/gi]);
+  const prof=numberList(all,[/(?:profit after tax|profit for the year|net profit|PAT)[^\\d]{0,80}([\\d,]+(?:\\.\\d+)?)\\s*(?:crore|cr)/gi]);
+  const eps=numberList(all,[/(?:basic EPS|diluted EPS|earnings per share|EPS)[^\\d]{0,60}([\\d,]+(?:\\.\\d+)?)/gi]);
+  const years=[...new Set([...all.matchAll(/\\b20(?:2[2-9]|3[0-9])\\b/g)].map(m=>m[0]))].slice(-3);
+  if(rev.length)ipo.revenues=rev.map((value,i)=>({year:years[years.length-rev.length+i]??String(i+1),value}));
+  if(prof.length)ipo.profits=prof.map((value,i)=>({year:years[years.length-prof.length+i]??String(i+1),value}));
+  if(eps.length)ipo.eps=eps.map((value,i)=>({year:years[years.length-eps.length+i]??String(i+1),value}));
+  const objects=[...all.matchAll(/(?:objects of the issue|utilisation of proceeds|use of proceeds)[^\\n:]*[:\\-]\\s*([^\\n]{40,400})/gi)].slice(0,5).map(m=>clean(m[1]));
+  const risks=[...all.matchAll(/(?:key risks|risk factors)[^\\n:]*[:\\-]\\s*([^\\n]{50,400})/gi)].slice(0,5).map(m=>clean(m[1]));
+  if(objects.length)ipo.objects=objects;if(risks.length)ipo.risks=risks;
+}
 async function enrichGmp(ipo:Ipo){
-  ipo.gmpSources=[];
-  ipo.gmpVerifiedSources=[];
-  ipo.gmpPct=null;
-  ipo.gmpRs=null;
-  return ipo;
+  const name=ipo.name.replace(/\\b(IPO|LIMITED|LTD\\.?|PRIVATE|PVT\\.?)\\b/gi," ").replace(/\\s+/g," ").trim();
+  const urls=(await Promise.all([researchSearch(name+" IPO GMP today"),researchSearch(name+" IPO grey market premium")])).flat();
+  const candidates=[...new Set(urls)].filter(u=>/chittorgarh|moneycontrol|investorgain|ipowatch|ipocentral|gmp/i.test(u));
+  const sources:{source:string;url:string|null;pct:number|null;rs:number|null;asOf:string|null}[]=[];
+  for(const url of candidates.slice(0,6)){const text=await readResearchUrl(url);const rs=firstText(text,[/(?:GMP|grey market premium)[^₹\\d]{0,50}(?:₹|Rs\\.?)[\\s]*([\\d,]+(?:\\.\\d+)?)/i]);const pct=firstText(text,[/(?:GMP|grey market premium)[^%\\d]{0,80}([+-]?[\\d,]+(?:\\.\\d+)?)\\s*%/i]);const rsn=rs?n(rs):null;const pctn=pct?n(pct):null;if(rsn!=null||pctn!=null)sources.push({source:sourceName(url),url,pct:pctn,rs:rsn,asOf:new Date().toISOString()});}
+  ipo.gmpSources=sources;ipo.gmpVerifiedSources=sources.map(s=>s.source);
+  const rsVals=sources.map(s=>s.rs).filter((x):x is number=>x!=null);const pctVals=sources.map(s=>s.pct).filter((x):x is number=>x!=null);
+  ipo.gmpRs=rsVals.length?Number((rsVals.reduce((a,b)=>a+b,0)/rsVals.length).toFixed(2)):null;ipo.gmpPct=pctVals.length?Number((pctVals.reduce((a,b)=>a+b,0)/pctVals.length).toFixed(2)):null;return ipo;
 }
-async function universalResearch(ipo:Ipo){
-  return ipo;
-}
+async function universalResearch(ipo:Ipo){const hits=await researchHits(ipo);if(hits.length){applyResearchText(ipo,hits);ipo.verifiedSources=[...new Set(hits.map(h=>sourceName(h.url)))];ipo.sourceUrls=[...new Set(hits.map(h=>h.url))];ipo.detailSource=hits.find(h=>h.priority>=96)?.url??hits[0].url;}await enrichGmp(ipo);ipo.verifiedAt=new Date().toISOString();return ipo;}
 
 function baseNse(r:any):Ipo{
   const issuePrice=band(r.issuePrice);
@@ -199,10 +257,10 @@ async function enrichNse(ipo:Ipo,cookie:string){
     const bidRows=rowsFromNse(d?.bidDetails??d?.subscriptionData??d?.biddingData);
     const bidShares=bidRows.reduce((sum,row)=>sum+(n(row?.noOfsharesBid??row?.noOfSharesBid??row?.sharesBid)??0),0);
     if(bidShares>0&&high)ipo.subscriptionAmount=Number((bidShares*high/10000000).toFixed(2));
-    ipo.subscriptionSource=null;
-    ipo.detailSource=null;
-    ipo.verifiedSources=[];
-    ipo.sourceUrls=[];
+    ipo.subscriptionSource="NSE India";
+    ipo.detailSource=NSE_PAGE;
+    ipo.verifiedSources=["NSE India"];
+    ipo.sourceUrls=[NSE_PAGE];
     ipo.verifiedAt=new Date().toISOString();
   }catch{
     // Never substitute third-party suggestions or hard-coded IPO values.
@@ -228,7 +286,8 @@ async function loadNse(){
   const result:Ipo[]=[];
   for(const ipo of map.values()){
     const enriched=await enrichNse(ipo,cookie);
-    result.push(enriched);
+    const researched=await universalResearch(enriched);
+    result.push(researched);
   }
   return result
     .filter(x=>!!x.name&&!!x.closeDate&&x.closeDate>=today)
