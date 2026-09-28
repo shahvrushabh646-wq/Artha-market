@@ -352,17 +352,37 @@ async function loadNse(){
     if(!r?.companyName && !r?.symbol && !r?.company)continue;
     if(!r.companyName && r.company) r.companyName=r.company;
     const ipo=baseNse(r);
+    // Preserve any direct minimum-application value exposed by NSE when available.
+    ipo.minSubscription=n(
+      r.minSubscription??r.minimumApplication??r.minimumInvestment??r.minInvestment??
+      r.minBidValue??r.minimumBidValue
+    )??ipo.minSubscription;
     if(ipo.closeDate&&ipo.closeDate<today)continue;
     const previous=map.get(ipo.id);
     if(!previous||r.status==="Active")map.set(ipo.id,ipo);
   }
   const base=[...map.values()].filter(x=>!!x.name&&!!x.closeDate&&x.closeDate>=today);
-  // IMPORTANT: the IPO list must come directly from the official NSE current-issue feed.
-  // Never wait for per-IPO detail enrichment here: one slow/blocked detail request must
-  // not prevent company names from rendering. Detail enrichment runs when an IPO is opened.
-  return base
+
+  // Enrich OPEN issues from NSE detail in a bounded, failure-safe way. The official
+  // current-issue feed remains the source of truth for names/subscription, while detail
+  // supplies lot size/minimum application and category data when NSE exposes it.
+  // A slow detail endpoint can never blank or block the IPO list.
+  const active=base.filter(x=>isNseOpen(x,today)&&x.symbol).slice(0,16);
+  const enriched=await Promise.all(active.map(async ipo=>{
+    try{
+      return await Promise.race([
+        enrichNse({...ipo},cookie),
+        new Promise<Ipo>(resolve=>setTimeout(()=>resolve(ipo),3500))
+      ]);
+    }catch{return ipo;}
+  }));
+  const byId=new Map(enriched.map(x=>[x.id,x]));
+  return base.map(x=>byId.get(x.id)??x)
     .filter(x=>!!x.name&&!!x.closeDate&&x.closeDate>=today)
     .sort((a,b)=>(a.openDate??"").localeCompare(b.openDate??"")||a.name.localeCompare(b.name));
+}
+function isNseOpen(ipo:Ipo,today:string){
+  return !!ipo.openDate&&ipo.openDate<=today&&!!ipo.closeDate&&ipo.closeDate>=today;
 }
 export const fetchOpenIposLive=createServerFn({method:"GET"}).handler(async()=>{
   const hit=cache.get("nse");
