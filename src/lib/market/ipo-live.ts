@@ -420,7 +420,6 @@ function parseMoneycontrolDetail(html:string,ipo:Ipo){
   }
   const fresh=pickNumber(/Fresh Issue[^₹0-9]{0,30}(?:₹\\s*)?([0-9,.]+)\\s*Cr/i);
   if(ipo.freshIssue==null&&fresh!=null)ipo.freshIssue=fresh;
-  const ofs=pickNumber(/Offer For Sale|OFS/);
   if(ipo.offerForSale==null){
     const om=text.match(/Offer[- ]For[- ]Sale[^₹0-9]{0,40}(?:₹\\s*)?([0-9,.]+)\\s*Cr/i);
     if(om)ipo.offerForSale=n(om[1]);
