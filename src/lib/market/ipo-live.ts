@@ -106,7 +106,7 @@ const SOURCE_RULES=[
   {name:"IPO Watch",hosts:["ipowatch.in"],priority:68},
   {name:"IPO Central",hosts:["ipocentral.in"],priority:68}
 ];
-function domainOf(url:string){try{return new URL(url).hostname.replace(/^www\\./,"").toLowerCase();}catch{return "";}}
+function domainOf(url:string){try{return new URL(url).hostname.replace(/^www\./,"").toLowerCase();}catch{return "";}}
 function sourceName(url:string){const d=domainOf(url);const known=SOURCE_RULES.find(x=>x.hosts.some(h=>d===h||d.endsWith("."+h)));return known?.name??d;}
 function sourcePriority(url:string){const d=domainOf(url);return SOURCE_RULES.find(x=>x.hosts.some(h=>d===h||d.endsWith("."+h)))?.priority??40;}
 function firstText(s:string,patterns:RegExp[]){for(const p of patterns){const m=s.match(p);if(m?.[1])return clean(m[1]);}return null;}
@@ -377,7 +377,7 @@ export const fetchOpenIposLive=createServerFn({method:"GET"}).handler(async()=>{
 });
 
 export const fetchIpoDetailLive=createServerFn({method:"GET"}).handler(async({data}:{data:{id:string}})=>{
-  const list=await fetchOpenIposLive({data:{}});
+  const list=await loadNse();
   const ipo=list.find(x=>x.id===data.id);
   if(!ipo)return null;
   try{
