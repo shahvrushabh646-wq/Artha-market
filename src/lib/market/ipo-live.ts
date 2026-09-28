@@ -83,7 +83,7 @@ function parseMoneycontrolIpos(html:string):Ipo[]{
   } return out;
 }
 async function fetchBrokerFallback():Promise<Ipo[]>{
-  const sources=["https://www.moneycontrol.com/ipo/open-ipos/","https://zerodha.com/ipo/","https://www.angelone.in/ipos"];
+  const sources=["https://www.moneycontrol.com/ipo/open-ipos/","https://zerodha.com/ipo/","https://www.angelone.in/ipo/nse-ipo"];
   for(const url of sources){
     const html=await fetchHtml(url); if(!html)continue;
     const rows=url.includes("moneycontrol")?parseMoneycontrolIpos(html):parseMoneycontrolIpos(html);
@@ -376,6 +376,8 @@ function looksLikeCompanySite(url:string){
 }
 async function universalResearch(ipo:Ipo){
   const company=ipo.name;
+  const brokerSources=["https://www.moneycontrol.com/ipo/open-ipos/","https://zerodha.com/ipo/","https://www.angelone.in/knowledge-center/ipo"];
+  ipo.sourceUrls=[...new Set([...ipo.sourceUrls,...brokerSources])];
   const results=await duckSearch('"'+company+'" official website India');
   const official=results.find(x=>looksLikeCompanySite(x.url));
   if(official){
