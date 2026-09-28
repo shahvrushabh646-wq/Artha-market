@@ -575,7 +575,7 @@ async function loadNse(){
     if(groww.length){
       const enriched:Ipo[]=[];
       for(const ipo of groww){
-        try{enriched.push(await enrichGmp(ipo));}catch{enriched.push(ipo);}
+        try{const g=await enrichGmp(ipo); enriched.push(await universalResearch(g));}catch{enriched.push(ipo);}
       }
       return enriched.sort((a,b)=>(a.openDate??"").localeCompare(b.openDate??"")||a.name.localeCompare(b.name));
     }
@@ -591,7 +591,7 @@ async function loadNse(){
   const result:Ipo[]=[];
   for(const ipo of map.values()){
     const enriched=await enrichNse(ipo,cookie);
-    try{ result.push(await enrichGmp(enriched)); }catch{ result.push(enriched); }
+    try{ const g=await enrichGmp(enriched); result.push(await universalResearch(g)); }catch{ result.push(enriched); }
   }
   const filtered=result
     .filter(x=>!!x.closeDate&&x.closeDate>=today)
