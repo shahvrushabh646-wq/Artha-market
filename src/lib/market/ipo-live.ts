@@ -150,23 +150,44 @@ function parseGmpValue(text:string){
 async function enrichGmp(ipo:Ipo){
   try{
     const name=ipo.name.replace(/\b(IPO|LIMITED|LTD\.?|PRIVATE|PVT\.?)\b/gi," ").replace(/\s+/g," ").trim();
-    const urls=await researchSearch(name+" IPO GMP grey market premium");
-    const preferred=[...new Set(urls)].filter(u=>/investorgain|ipowatch|ipocentral|chittorgarh|moneycontrol|groww|economictimes|livemint|niftytrader|ipogram|ipoji/i.test(u)).slice(0,12);
-    const sources:{source:string;url:string|null;pct:number|null;rs:number|null;asOf:string|null}[]=[];
-    for(const url of preferred){
+    const allowed=SOURCE_RULES.filter(x=>x.hosts.length&&/investorgain|ipowatch|ipocentral|chittorgarh|moneycontrol|economictimes|livemint|groww|niftytrader|ipogram|ipoji/i.test(x.hosts[0]));
+    // Search each requested GMP publisher separately. This avoids Google returning only
+    // the same 1-2 sites for every IPO and lets Artha collect all sources that are
+    // actually publishing a GMP for that issue.
+    const sourceResults=await Promise.all(allowed.map(async rule=>{
+      const urls=await researchSearch(name+" IPO GMP grey market premium site:"+rule.hosts[0]);
+      const candidates=[...new Set(urls)].filter(u=>{
+        const d=domainOf(u);
+        return rule.hosts.some(h=>d===h||d.endsWith("."+h));
+      }).slice(0,2);
+      for(const url of candidates){
+        const text=await readResearchUrl(url);
+        const rs=parseGmpValue(text);
+        if(rs==null)continue;
+        const high=upper(ipo.priceBand);
+        return {source:rule.name,url,pct:high?Number(((rs/high)*100).toFixed(2)):null,rs,asOf:new Date().toISOString()};
+      }
+      return null;
+    }));
+    // Broad search is a fallback for a publisher whose site-specific search did not
+    // return a crawlable page.
+    const fallbackUrls=await researchSearch(name+" IPO GMP grey market premium");
+    for(const url of [...new Set(fallbackUrls)]){
+      const source=sourceName(url);
+      if(!allowed.some(x=>x.name===source))continue;
+      if(sourceResults.some(x=>x?.source===source))continue;
       const text=await readResearchUrl(url);
       const rs=parseGmpValue(text);
       if(rs==null)continue;
       const high=upper(ipo.priceBand);
-      const pct=high?Number(((rs/high)*100).toFixed(2)):null;
-      sources.push({source:sourceName(url),url,pct,rs,asOf:new Date().toISOString()});
+      sourceResults.push({source,url,pct:high?Number(((rs/high)*100).toFixed(2)):null,rs,asOf:new Date().toISOString()});
     }
-    if(sources.length){
-      const unique=sources.filter((x,i,a)=>a.findIndex(y=>y.source===x.source)===i);
+    const unique=sourceResults.filter((x,i,a)=>x&&a.findIndex(y=>y?.source===x.source)===i) as {source:string;url:string|null;pct:number|null;rs:number|null;asOf:string|null}[];
+    if(unique.length){
       const values=unique.map(x=>x.rs).filter((x):x is number=>x!=null).sort((a,b)=>a-b);
       const median=values.length?values[Math.floor(values.length/2)]:null;
-      ipo.gmpRs=median;
       const high=upper(ipo.priceBand);
+      ipo.gmpRs=median;
       ipo.gmpPct=median!=null&&high?Number(((median/high)*100).toFixed(2)):null;
       ipo.gmpSources=unique;
       ipo.gmpVerifiedSources=unique.map(x=>x.source);
@@ -389,7 +410,21 @@ async function loadNse(){
     }catch{return ipo;}
   }));
   const byId=new Map(enriched.map(x=>[x.id,x]));
-  return base.map(x=>byId.get(x.id)??x)
+  const liveBase=base.map(x=>byId.get(x.id)??x);
+  // Populate GMP on the IPO list itself. Each source is optional: if a publisher
+  // has no GMP for an issue, it is skipped; available sources are combined and
+  // converted to a percentage using the upper price band.
+  const gmpCandidates=liveBase.filter(x=>x.symbol).slice(0,16);
+  const gmpEnriched=await Promise.all(gmpCandidates.map(async ipo=>{
+    try{
+      return await Promise.race([
+        enrichGmp({...ipo}),
+        new Promise<Ipo>(resolve=>setTimeout(()=>resolve(ipo),7000))
+      ]);
+    }catch{return ipo;}
+  }));
+  const gmpById=new Map(gmpEnriched.map(x=>[x.id,x]));
+  return liveBase.map(x=>gmpById.get(x.id)??x)
     .filter(x=>!!x.name&&!!x.closeDate&&x.closeDate>=today)
     .sort((a,b)=>(a.openDate??"").localeCompare(b.openDate??"")||a.name.localeCompare(b.name));
 }
