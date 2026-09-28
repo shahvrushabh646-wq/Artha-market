@@ -266,7 +266,25 @@ async function enrichGmp(ipo:Ipo){
     const pct=rs!=null&&upperBand?Number(((rs/upperBand)*100).toFixed(2)):null;
     return {source:s.name,url:matchedUrl,pct,rs,asOf:rs!=null?new Date().toISOString():null};
   }));
-  const valid=results.filter(x=>x.rs!=null) as Array<{source:string;url:string|null;pct:number|null;rs:number;asOf:string|null}>;
+  let valid=results.filter(x=>x.rs!=null) as Array<{source:string;url:string|null;pct:number|null;rs:number;asOf:string|null}>;
+  // Last-resort public research fallback. This never invents a value: it only
+  // accepts a GMP number when the Samco IPO page itself names this company
+  // and the GMP appears in the same nearby text.
+  if(!valid.length){
+    try{
+      const hits=await duckSearch('site:samco.in/knowledge-center/articles "'+ipo.name+'" IPO GMP');
+      const hit=hits.find(x=>/samco\.in\/knowledge-center\/articles\//i.test(x.url));
+      if(hit){
+        const html=await fetchSourceText(hit.url);
+        const rs=html?parseGmp(html,ipo.name):null;
+        if(rs!=null){
+          const pct=upperBand?Number(((rs/upperBand)*100).toFixed(2)):null;
+          valid=[{source:"Samco IPO research",url:hit.url,pct,rs,asOf:new Date().toISOString()}];
+          results.push(valid[0]);
+        }
+      }
+    }catch{}
+  }
   ipo.gmpSources=results;
   ipo.gmpVerifiedSources=valid.map(x=>x.source);
   if(valid.length>=2){
