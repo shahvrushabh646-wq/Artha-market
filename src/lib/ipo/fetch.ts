@@ -5,7 +5,7 @@ export async function loadUniverse() {
   return {
     ipos,
     fetchedAt: new Date().toISOString(),
-    sourceNotes: ["NSE India official IPO data", "NSE India issue-information"],
+    sourceNotes: [],
     errors: [],
   };
 }
