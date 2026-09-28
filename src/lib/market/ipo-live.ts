@@ -289,10 +289,18 @@ async function enrichNse(ipo:Ipo,cookie:string){
 }
 async function loadNse(){
   const cookie=await nseSession();
-  const [current,upcoming]=await Promise.all([
-    fetchNse("/api/ipo-current-issue",cookie),
-    fetchNse("/api/all-upcoming-issues?category=ipo",cookie)
-  ]);
+  let current:any=null;
+  let upcoming:any=null;
+  try{
+    [current,upcoming]=await Promise.all([
+      fetchNse("/api/ipo-current-issue",cookie),
+      fetchNse("/api/all-upcoming-issues?category=ipo",cookie)
+    ]);
+  }catch{
+    // If one NSE endpoint fails, keep trying the other endpoint instead of returning a blank IPO page.
+    try{ current=await fetchNse("/api/ipo-current-issue",cookie); }catch{}
+    try{ upcoming=await fetchNse("/api/all-upcoming-issues?category=ipo",cookie); }catch{}
+  }
   const today=new Date().toISOString().slice(0,10);
   const map=new Map<string,Ipo>();
   for(const r of [...rowsFromNse(current),...rowsFromNse(upcoming)]){
@@ -303,13 +311,19 @@ async function loadNse(){
     const previous=map.get(ipo.id);
     if(!previous||r.status==="Active")map.set(ipo.id,ipo);
   }
-  const result:Ipo[]=[];
-  for(const ipo of map.values()){
-    const enriched=await enrichNse(ipo,cookie);
-    const researched=await universalResearch(enriched);
-    result.push(researched);
-  }
-  return result
+  const base=[...map.values()].filter(x=>!!x.name&&!!x.closeDate&&x.closeDate>=today);
+  // IMPORTANT: return the official NSE list even if enrichment/research is slow or unavailable.
+  // Detail enrichment is best-effort and can never make the whole IPO page blank.
+  const enriched=await Promise.all(base.map(async ipo=>{
+    try{return await enrichNse(ipo,cookie);}catch{return ipo;}
+  }));
+  const researched=await Promise.all(enriched.map(async ipo=>{
+    try{return await Promise.race([
+      universalResearch(ipo),
+      new Promise<Ipo>(resolve=>setTimeout(()=>resolve(ipo),8000))
+    ]);}catch{return ipo;}
+  }));
+  return researched
     .filter(x=>!!x.name&&!!x.closeDate&&x.closeDate>=today)
     .sort((a,b)=>(a.openDate??"").localeCompare(b.openDate??"")||a.name.localeCompare(b.name));
 }
