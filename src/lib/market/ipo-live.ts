@@ -226,9 +226,9 @@ function baseNse(r:any):Ipo{
   const upperPrice=upper(issuePrice);
   const offered=n(r.noOfSharesOffered);
   const bid=n(r.noOfsharesBid??r.noOfSharesBid);
-  const reportedSubscription=n(r.noOfTime);
+  const reportedSubscription=n(r.noOfTime??r.noOfTimes??r.subscription??r.subscriptionRatio??r.subscriptionRate);
   const calculatedSubscription=offered&&bid?Number((bid/offered).toFixed(4)):null;
-  const subscription=reportedSubscription!=null&&reportedSubscription>0?Number(reportedSubscription.toFixed(2)):r.status==="Active"&&offered!=null&&bid!=null?Number((bid/offered).toFixed(2)):calculatedSubscription;
+  const subscription=reportedSubscription!=null&&reportedSubscription>0?Number(reportedSubscription.toFixed(2)):calculatedSubscription;
   const subscriptionAmount=bid!=null&&bid>0&&upperPrice!=null?Number((bid*upperPrice/10000000).toFixed(2)):null;
   return {
     officialWebsite:null,prospectusUrl:null,prospectusType:null,
@@ -277,15 +277,15 @@ async function enrichNse(ipo:Ipo,cookie:string){
       if(!row||row.srNo==="Sr.No.")continue;
       const label=clean(row.category??row.Category??row.investorCategory??row.name).toLowerCase();
       if(label.includes("total")&&!label.includes("qib")&&!label.includes("nii")){
-        const total=n(row.noOfTotalMeant??row.noOfTime??row.subscription??row.noOfTimes);
-        if(total!=null)ipo.subscription=Number(total.toFixed(2));
+        const total=n(row.noOfTotalMeant??row.noOfTime??row.noOfTimes??row.subscription??row.subscriptionRatio??row.subscriptionRate);
+        if(total!=null&&total>0)ipo.subscription=Number(total.toFixed(2));
         continue;
       }
       const category=label.includes("qualified")||label.includes("qib")?"QIB"
         :label.includes("non institutional")||label.includes("non-institutional")||label.includes("nii")||label.includes("hni")?"NII"
         :label.includes("retail")||label.includes("individual")?"Retail":null;
       if(!category)continue;
-      const valueRaw=n(row.noOfTotalMeant??row.noOfTime??row.subscription??row.noOfTimes);
+      const valueRaw=n(row.noOfTotalMeant??row.noOfTime??row.noOfTimes??row.subscription??row.subscriptionRatio??row.subscriptionRate);
       const rows=grouped.get(category)??[];
       rows.push({label,row,value:valueRaw==null?null:Number(valueRaw.toFixed(2))});
       grouped.set(category,rows);
@@ -314,7 +314,7 @@ async function enrichNse(ipo:Ipo,cookie:string){
       for(const row of totalRows){
         const label=clean(row?.category??row?.name).toLowerCase();
         if(label.includes("total")){
-          const value=n(row?.noOfTime??row?.subscription??row?.noOfTimes);
+          const value=n(row?.noOfTime??row?.noOfTimes??row?.subscription??row?.subscriptionRatio??row?.subscriptionRate);
           if(value!=null){ipo.subscription=Number(value.toFixed(2));break;}
         }
       }
@@ -322,6 +322,14 @@ async function enrichNse(ipo:Ipo,cookie:string){
     const bidRows=rowsFromNse(d?.bidDetails??d?.subscriptionData??d?.biddingData);
     const bidShares=bidRows.reduce((sum,row)=>sum+(n(row?.noOfsharesBid??row?.noOfSharesBid??row?.sharesBid)??0),0);
     if(bidShares>0&&high)ipo.subscriptionAmount=Number((bidShares*high/10000000).toFixed(2));
+    // Never replace a verified live total with an empty/detail value. If detail exposes
+    // the total, accept it; otherwise retain the value calculated directly from the
+    // official current-issue feed (bid shares / offered shares).
+    const directBid=n((d as any)?.noOfsharesBid??(d as any)?.noOfSharesBid??(d as any)?.sharesBid);
+    const directOffered=n((d as any)?.noOfSharesOffered??(d as any)?.sharesOffered);
+    const directMultiple=n((d as any)?.noOfTime??(d as any)?.noOfTimes??(d as any)?.subscription);
+    if(directMultiple!=null&&directMultiple>0)ipo.subscription=Number(directMultiple.toFixed(2));
+    else if(ipo.subscription==null&&directBid!=null&&directOffered!=null&&directOffered>0)ipo.subscription=Number((directBid/directOffered).toFixed(2));
     ipo.subscriptionSource="NSE India";
     ipo.detailSource=NSE_PAGE;
     ipo.verifiedSources=["NSE India"];
