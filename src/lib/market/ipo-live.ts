@@ -64,6 +64,32 @@ function rowsFromNse(raw:unknown): any[]{
   return [];
 }
 
+async function fetchHtml(url:string){
+  try{
+    const controller=new AbortController();
+    const timer=setTimeout(()=>controller.abort(),8000);
+    const r=await fetch(url,{signal:controller.signal,headers:{"User-Agent":HEADERS["User-Agent"],Accept:"text/html,application/xhtml+xml,text/plain,*/*"},cache:"no-store"});
+    const text=await r.text(); clearTimeout(timer); return r.ok?text:"";
+  }catch{return "";}
+}
+function parseMoneycontrolIpos(html:string):Ipo[]{
+  const text=clean(html); const out:Ipo[]=[];
+  const re=/([A-Z][A-Za-z0-9&().,'’ -]{2,100}?)\\s+IPO\\s+opens for subscription on\\s+(\\d{1,2}\\s+[A-Za-z]{3},\\s+\\d{4})\\s+and closes on\\s+(\\d{1,2}\\s+[A-Za-z]{3},\\s+\\d{4})\\.\\s+[^.]{0,120}?price band is set at\\s+([\\d,.]+)\\s+to\\s+([\\d,.]+)\\s+per share\\./gi;
+  let m:RegExpExecArray|null;
+  while((m=re.exec(text))!==null){
+    const name=clean(m[1]); if(!name||out.some(x=>normName(x.name)===normName(name)))continue;
+    const low=n(m[5]),high=n(m[6]);
+    out.push({symbol:undefined,exchange:"NSE India",id:slugId(name),name,type:"Mainboard",openDate:date(m[2]),closeDate:date(m[3]),listingDate:null,issueSize:null,minSubscription:null,subscription:null,subscriptionAmount:null,subscriptionSource:"Moneycontrol",subscriptionCategories:[],gmpPct:null,gmpRs:null,gmpSources:[],gmpVerifiedSources:[],city:null,state:null,business:null,countries:[],revenues:[],profits:[],eps:[],priceBand:low!=null&&high!=null?"₹"+low.toLocaleString("en-IN")+" - ₹"+high.toLocaleString("en-IN"):null,lotSize:null,faceValue:null,sharesOffered:null,offeredToPublic:null,retailShares:null,qibShares:null,niiShares:null,freshIssue:null,offerForSale:null,issueType:null,objects:[],risks:[],promoterHolding:null,postIssuePromoterHolding:null,moneycontrolUrl:"https://www.moneycontrol.com/ipo/open-ipos/",detailSource:"Moneycontrol IPO",verifiedSources:["Moneycontrol"],sourceUrls:["https://www.moneycontrol.com/ipo/open-ipos/"],verifiedAt:new Date().toISOString()});
+  } return out;
+}
+async function fetchBrokerFallback():Promise<Ipo[]>{
+  const sources=["https://www.moneycontrol.com/ipo/open-ipos/","https://zerodha.com/ipo/","https://www.angelone.in/ipos"];
+  for(const url of sources){
+    const html=await fetchHtml(url); if(!html)continue;
+    const rows=url.includes("moneycontrol")?parseMoneycontrolIpos(html):parseMoneycontrolIpos(html);
+    if(rows.length)return rows.filter(x=>!x.closeDate||x.closeDate>=new Date().toISOString().slice(0,10));
+  } return [];
+}
 async function fetchGrowwFallback(): Promise<Ipo[]>{
   try{
     const controller=new AbortController();
@@ -575,6 +601,8 @@ async function loadNse(){
   // payload. In that case the previous fallback was skipped because rows
   // existed but could not be converted into IPO records.
   if(!filtered.length){
+    const broker=await fetchBrokerFallback();
+    if(broker.length)return broker;
     const groww=await fetchGrowwFallback();
     if(groww.length){
       const enriched:Ipo[]=[];
