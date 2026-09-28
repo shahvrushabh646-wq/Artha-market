@@ -425,7 +425,8 @@ function applyMetricSearch(raw:any,ipo:Ipo){
     ipo.eps=arr.map(r=>({year:r.year,value:r.eps})).filter(r=>r.value!=null);
   }
 }
-\nfunction baseNse(r:any):Ipo{
+
+function baseNse(r:any):Ipo{
   const issuePrice=band(r.issuePrice);
   const upperPrice=upper(issuePrice);
   const offered=n(r.noOfSharesOffered);
