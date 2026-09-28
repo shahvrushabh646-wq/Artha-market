@@ -383,6 +383,18 @@ function parseMoneycontrolDetail(html:string,ipo:Ipo){
   const lot=pickNumber(/Lot Size[^0-9]{0,30}([0-9,]+)/i); if(ipo.lotSize==null&&lot!=null)ipo.lotSize=lot;
   const issue=pickNumber(/Issue Size[^₹0-9]{0,40}(?:₹\\s*)?([0-9,.]+)\\s*Cr/i); if(ipo.issueSize==null&&issue!=null)ipo.issueSize=issue;
   const face=pickNumber(/Face Value[^₹0-9]{0,30}(?:₹\\s*)?([0-9,.]+)/i); if(ipo.faceValue==null&&face!=null)ipo.faceValue=face;
+  const sub=text.match(/Total[^0-9]{0,80}([0-9]+(?:\\.[0-9]+)?)x/i);
+  if(ipo.subscription==null&&sub)ipo.subscription=n(sub[1]);
+  const qibSub=text.match(/Qualified Institutional Buyers[^\\n]{0,120}([0-9]+(?:\\.[0-9]+)?)x/i);
+  const riiSub=text.match(/Retail Individual Investor[^\\n]{0,120}([0-9]+(?:\\.[0-9]+)?)x/i);
+  const niiSub=text.match(/Non-Instituional Investor[^\\n]{0,120}([0-9]+(?:\\.[0-9]+)?)x/i);
+  if(!ipo.subscriptionCategories.length){
+    ipo.subscriptionCategories=[
+      qibSub?{category:"QIB",value:n(qibSub[1])}:null,
+      niiSub?{category:"NII",value:n(niiSub[1])}:null,
+      riiSub?{category:"Retail",value:n(riiSub[1])}:null
+    ].filter(Boolean) as {category:string;value:number|null}[];
+  }
   const pre=pickNumber(/Pre Issue Promoters Holding[^0-9]{0,20}([0-9.]+)%/i); if(ipo.promoterHolding==null&&pre!=null)ipo.promoterHolding=pre;
   const post=pickNumber(/Post Issue Promoters Holding[^0-9]{0,20}([0-9.]+)%/i); if(ipo.postIssuePromoterHolding==null&&post!=null)ipo.postIssuePromoterHolding=post;
   const open=text.match(/Open Date[^0-9]{0,20}(\\d{1,2}\\s+[A-Za-z]{3},\\s+\\d{4})/i); if(!ipo.openDate&&open)ipo.openDate=date(open[1]);
