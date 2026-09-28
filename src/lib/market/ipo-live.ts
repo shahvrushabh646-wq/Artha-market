@@ -374,144 +374,51 @@ function looksLikeCompanySite(url:string){
     return !/(nseindia|bseindia|sebi|moneycontrol|economictimes|business-standard|financialexpress|reuters|indiatoday|linkedin|facebook|instagram|youtube|wikipedia|ipowatch|ipocentral|investorgain|gmpwatch|groww|zerodha|upstox)/.test(host);
   }catch{return false;}
 }
-function parseMoneycontrolDetail(html:string,ipo:Ipo){
-  const text=stripHtml(html);
-  const put=(key:string,value:string)=>{if(!value)return;ipo.sourceUrls=[...new Set([...ipo.sourceUrls,key])];};
-  const pickNumber=(re:RegExp)=>{const m=text.match(re);return m?n(m[1]):null;};
-  const bandMatch=text.match(/Issue Price[^₹0-9]{0,40}₹?\\s*([0-9,.]+)\\s*(?:-|to|–)\\s*₹?\\s*([0-9,.]+)/i);
-  if(!ipo.priceBand&&bandMatch)ipo.priceBand="₹"+Number(bandMatch[1].replace(/,/g,"")).toLocaleString("en-IN")+" - ₹"+Number(bandMatch[2].replace(/,/g,"")).toLocaleString("en-IN");
-  const lot=pickNumber(/Lot Size[^0-9]{0,30}([0-9,]+)/i); if(ipo.lotSize==null&&lot!=null)ipo.lotSize=lot;
-  const issue=pickNumber(/Issue Size[^₹0-9]{0,40}(?:₹\\s*)?([0-9,.]+)\\s*Cr/i); if(ipo.issueSize==null&&issue!=null)ipo.issueSize=issue;
-  const face=pickNumber(/Face Value[^₹0-9]{0,30}(?:₹\\s*)?([0-9,.]+)/i); if(ipo.faceValue==null&&face!=null)ipo.faceValue=face;
-  const sub=text.match(/Total[^0-9]{0,80}([0-9]+(?:\\.[0-9]+)?)x/i);
-  if(ipo.subscription==null&&sub)ipo.subscription=n(sub[1]);
-  const qibSub=text.match(/Qualified Institutional Buyers[^\\n]{0,120}([0-9]+(?:\\.[0-9]+)?)x/i);
-  const riiSub=text.match(/Retail Individual Investor[^\\n]{0,120}([0-9]+(?:\\.[0-9]+)?)x/i);
-  const niiSub=text.match(/Non-Instituional Investor[^\\n]{0,120}([0-9]+(?:\\.[0-9]+)?)x/i);
-  if(!ipo.subscriptionCategories.length){
-    ipo.subscriptionCategories=[
-      qibSub?{category:"QIB",value:n(qibSub[1])}:null,
-      niiSub?{category:"NII",value:n(niiSub[1])}:null,
-      riiSub?{category:"Retail",value:n(riiSub[1])}:null
-    ].filter(Boolean) as {category:string;value:number|null}[];
-  }
-  const pre=pickNumber(/Pre Issue Promoters Holding[^0-9]{0,20}([0-9.]+)%/i); if(ipo.promoterHolding==null&&pre!=null)ipo.promoterHolding=pre;
-  const post=pickNumber(/Post Issue Promoters Holding[^0-9]{0,20}([0-9.]+)%/i); if(ipo.postIssuePromoterHolding==null&&post!=null)ipo.postIssuePromoterHolding=post;
-  const open=text.match(/Open Date[^0-9]{0,20}(\\d{1,2}\\s+[A-Za-z]{3},\\s+\\d{4})/i); if(!ipo.openDate&&open)ipo.openDate=date(open[1]);
-  const close=text.match(/Close Date[^0-9]{0,20}(\\d{1,2}\\s+[A-Za-z]{3},\\s+\\d{4})/i); if(!ipo.closeDate&&close)ipo.closeDate=date(close[1]);
-  const list=text.match(/Listing Date[^0-9]{0,20}(\\d{1,2}\\s+[A-Za-z]{3},\\s+\\d{4})/i); if(!ipo.listingDate&&list)ipo.listingDate=date(list[1]);
-  const business=text.match(/Company Info[\\s\\S]{0,3000}?About Product[\\s\\S]{0,1200}?((?:We|The company|It is)[^\\n]{80,900})/i);
-  if(!ipo.business){
-    const candidates=[
-      text.match(/Company Info[\\s\\S]{0,2000}?About Product[\\s\\S]{0,1200}/i)?.[0],
-      text.match(/(?:operates|engaged in|provides|offers|is a)[^.!?]{80,700}[.!?]/i)?.[0]
-    ].filter(Boolean) as string[];
-    if(candidates.length)ipo.business=clean(candidates[0]).slice(-700);
-  }
-  const objective=text.match(/Objective of Issue[\\s\\S]{0,1800}?(?:Industry Overview|Managing Director|Promoters|Registrar)/i)?.[0];
-  if(objective){
-    const items=[...objective.matchAll(/(?:^|[.\\n])\\s*(?:[0-9]+[.)]|[•-])\\s*([^\\n]{20,350})/g)].map(x=>clean(x[1])).filter(Boolean);
-    if(items.length)ipo.objects=[...new Set(items)].slice(0,8);
-  }
-  const risks=text.match(/(?:Key Risks|Risk Factors|Risks)[\\s\\S]{0,2500}?(?:Financials|Company Info|Objective of Issue|Industry Overview)/i)?.[0];
-  if(risks){
-    const items=[...risks.matchAll(/(?:[0-9]+[.)]|[•-])\\s*([^\\n]{25,450})/g)].map(x=>clean(x[1])).filter(Boolean);
-    if(items.length)ipo.risks=[...new Set(items)].slice(0,8);
-  }
-  const fresh=pickNumber(/Fresh Issue[^₹0-9]{0,30}(?:₹\\s*)?([0-9,.]+)\\s*Cr/i);
-  if(ipo.freshIssue==null&&fresh!=null)ipo.freshIssue=fresh;
-  if(ipo.offerForSale==null){
-    const om=text.match(/Offer[- ]For[- ]Sale[^₹0-9]{0,40}(?:₹\\s*)?([0-9,.]+)\\s*Cr/i);
-    if(om)ipo.offerForSale=n(om[1]);
-  }
-  if(!ipo.issueType){
-    const im=text.match(/Issue Type[^\\n]{0,100}/i)?.[0];
-    if(im)ipo.issueType=clean(im.replace(/Issue Type/i,""));
-  }
-  const retail=text.match(/Retail[^\\n]{0,100}?([0-9,]+)\\s*\\(/i); if(ipo.retailShares==null&&retail)ipo.retailShares=n(retail[1]);
-  const qib=text.match(/Qualified Institutional Buyers[^\\n]{0,100}?([0-9,]+)\\s*\\(/i); if(ipo.qibShares==null&&qib)ipo.qibShares=n(qib[1]);
-  const nii=text.match(/Non-Instituional Investor[^\\n]{0,100}?([0-9,]+)\\s*\\(/i); if(ipo.niiShares==null&&nii)ipo.niiShares=n(nii[1]);
-
-  const finRows:{year:string;revenue:number|null;profit:number|null;eps:number|null}[]=[];
-  const finRe=/(?:Revenue|Revenue from operations|Net Profit|Profit)[^0-9]{0,80}(?:for|in)?\\s*(20\\d{2})[^₹0-9]{0,80}(?:Rs\\.?|₹)\\s*([0-9,.]+)\\s*Cr/gi;
-  for(const m of text.matchAll(finRe)){finRows.push({year:m[1],revenue:/Revenue/i.test(m[0])?n(m[2]):null,profit:/Profit/i.test(m[0])?n(m[2]):null,eps:null});}
-  const years=[...new Set(finRows.map(x=>x.year))];
-  if(finRows.length){
-    const map=new Map<string,{year:string;revenue:number|null;profit:number|null;eps:number|null}>();
-    for(const r of finRows){const x=map.get(r.year)??{year:r.year,revenue:null,profit:null,eps:null};x.revenue=x.revenue??r.revenue;x.profit=x.profit??r.profit;map.set(r.year,x);}
-    const arr=[...map.values()].sort((a,b)=>a.year.localeCompare(b.year)).slice(-3);
-    ipo.revenues=arr.map(x=>({year:x.year,value:x.revenue})).filter(x=>x.value!=null);
-    ipo.profits=arr.map(x=>({year:x.year,value:x.profit})).filter(x=>x.value!=null);
-  }
-  const epsMatches=[...text.matchAll(/EPS[^₹0-9]{0,50}(?:Rs\\.?|₹)?\\s*([0-9,.]+)/gi)].slice(0,8);
-  if(epsMatches.length&&ipo.eps.length===0){
-    const yrs=[...new Set((text.match(/20\\d{2}/g)??[]))].slice(-3);
-    ipo.eps=epsMatches.slice(-3).map((m,i)=>({year:yrs[i]??"Reported",value:n(m[1])})).filter(x=>x.value!=null);
-  }
-  if(ipo.issueSize==null){
-    const total=pickNumber(/(?:Issue Size|public offer)[^₹0-9]{0,50}(?:₹\\s*)?([0-9,.]+)\\s*crore/i); if(total!=null)ipo.issueSize=total;
-  }
-  if(ipo.lotSize!=null&&ipo.priceBand&&ipo.minSubscription==null){
-    const low=ipo.priceBand.match(/₹([0-9,.]+)/)?.[1]; if(low)ipo.minSubscription=Number(low.replace(/,/g,""))*ipo.lotSize;
-  }
-  if(ipo.business||ipo.issueSize||ipo.priceBand||ipo.lotSize||ipo.revenues.length||ipo.objects.length||ipo.risks.length){
-    ipo.verifiedSources=[...new Set(["Moneycontrol IPO",...ipo.verifiedSources])];
-    ipo.detailSource=ipo.detailSource??"NSE India official + Moneycontrol IPO";
-  }
-}
-
 async function universalResearch(ipo:Ipo){
   const company=ipo.name;
   const brokerSources=["https://www.moneycontrol.com/ipo/open-ipos/","https://zerodha.com/ipo/","https://www.angelone.in/knowledge-center/ipo"];
   ipo.sourceUrls=[...new Set([...ipo.sourceUrls,...brokerSources])];
-
-  const searches=await Promise.all([
-    duckSearch('"'+company+'" Moneycontrol IPO'),
-    duckSearch('"'+company+'" Zerodha IPO'),
-    duckSearch('"'+company+'" Angel One IPO'),
-    duckSearch('"'+company+'" official website India'),
-    duckSearch('"'+company+'" DRHP RHP revenue profit EPS promoter risks')
-  ]);
-
-  for(const list of searches){
-    for(const item of list.slice(0,6)){
-      if(item.url)ipo.sourceUrls.push(item.url);
-    }
-  }
-
-  const detailCandidates=[
-    ...searches[0].filter(x=>/moneycontrol\\.com\\/ipo\\/.*ipodetail/i.test(x.url)),
-    ...searches[1].filter(x=>/zerodha\\.com\\/ipo/i.test(x.url)),
-    ...searches[2].filter(x=>/angelone\\.in\\/ipo/i.test(x.url))
-  ];
-  for(const item of detailCandidates.slice(0,6)){
-    const html=await fetchSourceText(item.url);
-    if(!html)continue;
-    ipo.sourceUrls=[...new Set([...ipo.sourceUrls,item.url])];
-    if(/moneycontrol\\.com/i.test(item.url))parseMoneycontrolDetail(html,ipo);
-    const description=htmlMeta(html,"description")||htmlMeta(html,"og:description");
-    if(!ipo.business&&description)ipo.business=clean(description).slice(0,700);
-    if(/zerodha\\.com/i.test(item.url))ipo.verifiedSources=[...new Set(["Zerodha IPO",...ipo.verifiedSources])];
-    if(/angelone\\.in/i.test(item.url))ipo.verifiedSources=[...new Set(["Angel One IPO",...ipo.verifiedSources])];
-  }
-
-  const official=searches[3].find(x=>looksLikeCompanySite(x.url));
+  const results=await duckSearch('"'+company+'" official website India');
+  const official=results.find(x=>looksLikeCompanySite(x.url));
   if(official){
     const html=await fetchSourceText(official.url);
     if(html){
       const description=htmlMeta(html,"description")||htmlMeta(html,"og:description");
-      const title=htmlMeta(html,"og:title");
-      if(!ipo.business&&(description||title))ipo.business=clean(description||title).slice(0,700);
+      const title=htmlMeta(html,"og:title")||clean(html.slice(html.toLowerCase().indexOf("<title"),html.toLowerCase().indexOf("</title>")+8).replace(/<[^>]*>/g," "));
+      const body=stripHtml(html).slice(0,18000);
+      if(description||title) ipo.business=clean(description||title).slice(0,700);
       ipo.sourceUrls=[...new Set([official.url,...ipo.sourceUrls])];
       ipo.verifiedSources=[...new Set(["Company official website",...ipo.verifiedSources])];
+      const location=body.match(/(?:headquartered|head office|registered office|corporate office)[^.;]{0,180}/i)?.[0];
+      if(location){
+        const m=location.match(/(?:in|at|,)[ ]+([A-Z][A-Za-z .-]{2,40}),[ ]+([A-Z][A-Za-z .-]{2,40})/);
+        if(m){ipo.city=ipo.city||clean(m[1]);ipo.state=ipo.state||clean(m[2]);}
+      }
     }
   }
-
-  // Do not fabricate geography or financials. If a reliable structured source
-  // gives them, keep them; otherwise the UI explicitly says the information
-  // was not found.
+  const wiki=await duckSearch('site:wikipedia.org "'+company+'"');
+  const wikiHit=wiki.find(x=>/wikipedia\.org\/wiki\//i.test(x.url));
+  if(wikiHit){
+    ipo.sourceUrls=[...new Set([...ipo.sourceUrls,wikiHit.url])];
+    ipo.verifiedSources=[...new Set(["Wikipedia (background only)",...ipo.verifiedSources])];
+    const wh=await fetchSourceText(wikiHit.url);
+    if(wh && !ipo.business){
+      const desc=htmlMeta(wh,"description");
+      if(desc)ipo.business=clean(desc).slice(0,700);
+    }
+  }
+  const lanes=[
+    '"'+company+'" DRHP RHP prospectus',
+    '"'+company+'" revenue profit EPS annual report',
+    '"'+company+'" promoter risks IPO'
+  ];
+  const laneResults=await Promise.all(lanes.map(q=>duckSearch(q)));
+  for(const list of laneResults){
+    for(const item of list.slice(0,4)){
+      if(/(nseindia|bseindia|sebi|annualreport|investor)/i.test(item.url))ipo.sourceUrls.push(item.url);
+    }
+  }
   ipo.sourceUrls=[...new Set(ipo.sourceUrls)];
-  ipo.verifiedAt=new Date().toISOString();
   return ipo;
 }
 function applyMetricSearch(raw:any,ipo:Ipo){
