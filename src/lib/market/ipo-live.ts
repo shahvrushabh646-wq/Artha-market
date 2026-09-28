@@ -101,7 +101,10 @@ const SOURCE_RULES=[
   {name:"Groww",hosts:["groww.in"],priority:70},
   {name:"Zerodha",hosts:["zerodha.com"],priority:70},
   {name:"Angel One",hosts:["angelone.in"],priority:70},
-  {name:"Upstox",hosts:["upstox.com"],priority:70}
+  {name:"Upstox",hosts:["upstox.com"],priority:70},
+  {name:"InvestorGain",hosts:["investorgain.com"],priority:68},
+  {name:"IPO Watch",hosts:["ipowatch.in"],priority:68},
+  {name:"IPO Central",hosts:["ipocentral.in"],priority:68}
 ];
 function domainOf(url:string){try{return new URL(url).hostname.replace(/^www\\./,"").toLowerCase();}catch{return "";}}
 function sourceName(url:string){const d=domainOf(url);const known=SOURCE_RULES.find(x=>x.hosts.some(h=>d===h||d.endsWith("."+h)));return known?.name??d;}
@@ -130,6 +133,44 @@ async function readResearchUrl(url:string):Promise<string>{
     if(!r.ok)return "";
     return (await r.text()).slice(0,45000);
   }catch{return "";}
+}
+function parseGmpValue(text:string){
+  const s=clean(text);
+  const patterns=[
+    /(?:grey market premium|gmp)[^₹0-9]{0,80}(?:₹|rs\.?\s*)?([\d,]+(?:\.\d+)?)/i,
+    /(?:gmp)[^₹0-9]{0,30}(?:₹|rs\.?\s*)?([\d,]+(?:\.\d+)?)\s*(?:per share)?/i
+  ];
+  for(const p of patterns){const m=s.match(p);const value=n(m?.[1]);if(value!=null)return value;}
+  return null;
+}
+async function enrichGmp(ipo:Ipo){
+  try{
+    const name=ipo.name.replace(/\b(IPO|LIMITED|LTD\.?|PRIVATE|PVT\.?)\b/gi," ").replace(/\s+/g," ").trim();
+    const urls=await researchSearch(name+" IPO GMP grey market premium");
+    const preferred=[...new Set(urls)].filter(u=>/investorgain|ipowatch|ipocentral|chittorgarh|moneycontrol|groww|economictimes/i.test(u)).slice(0,8);
+    const sources:{source:string;url:string|null;pct:number|null;rs:number|null;asOf:string|null}[]=[];
+    for(const url of preferred){
+      const text=await readResearchUrl(url);
+      const rs=parseGmpValue(text);
+      if(rs==null)continue;
+      const high=upper(ipo.priceBand);
+      const pct=high?Number(((rs/high)*100).toFixed(2)):null;
+      sources.push({source:sourceName(url),url,pct,rs,asOf:new Date().toISOString()});
+    }
+    if(sources.length){
+      const unique=sources.filter((x,i,a)=>a.findIndex(y=>y.source===x.source)===i);
+      const values=unique.map(x=>x.rs).filter((x):x is number=>x!=null).sort((a,b)=>a-b);
+      const median=values.length?values[Math.floor(values.length/2)]:null;
+      ipo.gmpRs=median;
+      const high=upper(ipo.priceBand);
+      ipo.gmpPct=median!=null&&high?Number(((median/high)*100).toFixed(2)):null;
+      ipo.gmpSources=unique;
+      ipo.gmpVerifiedSources=unique.map(x=>x.source);
+    }
+  }catch{
+    // GMP is unofficial; failure must never block official IPO data.
+  }
+  return ipo;
 }
 async function researchHits(ipo:Ipo):Promise<ResearchHit[]>{
   const name=ipo.name.replace(/\b(IPO|LIMITED|LTD\.?|PRIVATE|PVT\.?)\b/gi," ").replace(/\s+/g," ").trim();
@@ -317,13 +358,7 @@ async function loadNse(){
   const enriched=await Promise.all(base.map(async ipo=>{
     try{return await enrichNse(ipo,cookie);}catch{return ipo;}
   }));
-  const researched=await Promise.all(enriched.map(async ipo=>{
-    try{return await Promise.race([
-      universalResearch(ipo),
-      new Promise<Ipo>(resolve=>setTimeout(()=>resolve(ipo),8000))
-    ]);}catch{return ipo;}
-  }));
-  return researched
+  return enriched
     .filter(x=>!!x.name&&!!x.closeDate&&x.closeDate>=today)
     .sort((a,b)=>(a.openDate??"").localeCompare(b.openDate??"")||a.name.localeCompare(b.name));
 }
@@ -339,4 +374,16 @@ export const fetchOpenIposLive=createServerFn({method:"GET"}).handler(async()=>{
     cache.set("nse",{expires:Date.now()+2000,value:empty});
     return empty;
   }
+});
+
+export const fetchIpoDetailLive=createServerFn({method:"GET"}).handler(async({data}:{data:{id:string}})=>{
+  const list=await fetchOpenIposLive({data:{}});
+  const ipo=list.find(x=>x.id===data.id);
+  if(!ipo)return null;
+  try{
+    return await Promise.race([
+      universalResearch(ipo),
+      new Promise<Ipo>(resolve=>setTimeout(()=>resolve(ipo),15000))
+    ]);
+  }catch{return ipo;}
 });
