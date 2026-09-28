@@ -114,7 +114,7 @@ async function researchSearch(query:string):Promise<string[]>{
     const r=await fetch(u,{headers:{Accept:"text/plain"},cache:"no-store"});
     if(!r.ok)return [];
     const t=await r.text();const urls:string[]=[];
-    for(const m of t.matchAll(/\\((https?:\\/\\/[^\\s)]+)\\)/g)){const url=m[1].replace(/&amp;/g,"&");if(!urls.includes(url))urls.push(url);}
+    for(const m of t.matchAll(/\((https?:\/\/[^\s)]+)\)/g)){const url=m[1].replace(/&amp;/g,"&");if(!urls.includes(url))urls.push(url);}
     return urls.slice(0,12);
   }catch{return [];}
 }
@@ -133,7 +133,7 @@ function applyResearchText(ipo:Ipo,hits:ResearchHit[]){
   const business=firstText(text,[/(?:business of the company|our business|company is engaged in|we are engaged in|business overview)[:\\s]+([^\\n]{60,500})/i,/(?:products and services|business model)[:\\s]+([^\\n]{60,500})/i]);
   if(business)ipo.business=business;
   const office=firstText(text,[/(?:registered office|corporate office|registered and corporate office)[:\\s]+([^\\n]{20,180})/i]);
-  if(office){const parts=office.split(",").map(x=>x.trim()).filter(Boolean);ipo.city=parts.at(-2)??parts.at(-1)??ipo.city;ipo.state=parts.at(-1)??ipo.state;}
+  if(office){const parts=office.split(",").map(x=>x.trim()).filter(Boolean);ipo.city=parts.length>1?parts[parts.length-2]:parts[parts.length-1]??ipo.city;ipo.state=parts[parts.length-1]??ipo.state;}
   const rev=numberList(all,[/(?:revenue from operations|revenue|turnover)[^\\d]{0,80}([\\d,]+(?:\\.\\d+)?)\\s*(?:crore|cr)/gi]);
   const prof=numberList(all,[/(?:profit after tax|profit for the year|net profit|PAT)[^\\d]{0,80}([\\d,]+(?:\\.\\d+)?)\\s*(?:crore|cr)/gi]);
   const eps=numberList(all,[/(?:basic EPS|diluted EPS|earnings per share|EPS)[^\\d]{0,60}([\\d,]+(?:\\.\\d+)?)/gi]);
