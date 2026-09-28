@@ -357,12 +357,10 @@ async function loadNse(){
     if(!previous||r.status==="Active")map.set(ipo.id,ipo);
   }
   const base=[...map.values()].filter(x=>!!x.name&&!!x.closeDate&&x.closeDate>=today);
-  // IMPORTANT: return the official NSE list even if enrichment/research is slow or unavailable.
-  // Detail enrichment is best-effort and can never make the whole IPO page blank.
-  const enriched=await Promise.all(base.map(async ipo=>{
-    try{return await enrichNse(ipo,cookie);}catch{return ipo;}
-  }));
-  return enriched
+  // IMPORTANT: the IPO list must come directly from the official NSE current-issue feed.
+  // Never wait for per-IPO detail enrichment here: one slow/blocked detail request must
+  // not prevent company names from rendering. Detail enrichment runs when an IPO is opened.
+  return base
     .filter(x=>!!x.name&&!!x.closeDate&&x.closeDate>=today)
     .sort((a,b)=>(a.openDate??"").localeCompare(b.openDate??"")||a.name.localeCompare(b.name));
 }
