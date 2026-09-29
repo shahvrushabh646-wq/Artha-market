@@ -567,15 +567,20 @@ async function loadNse(){
     d.setUTCDate(d.getUTCDate()-30);
     return d.toISOString().slice(0,10);
   })();
-  const base=[...map.values()].filter(x=>
-    !!x.name&&!!x.closeDate&&x.closeDate>=recentClosedCutoff
-  );
+  const base=[...map.values()].filter(x=>{
+    if(!x.name)return false;
+    // Keep every usable NSE record. Upcoming/current issues normally have a close
+    // date, but NSE can temporarily publish an issue with only an open date while
+    // the remaining fields are still being populated. Do not hide such records.
+    if(x.closeDate)return x.closeDate>=recentClosedCutoff;
+    return !!x.openDate;
+  });
 
   // Enrich OPEN issues from NSE detail in a bounded, failure-safe way. The official
   // current-issue feed remains the source of truth for names/subscription, while detail
   // supplies lot size/minimum application and category data when NSE exposes it.
   // A slow detail endpoint can never blank or block the IPO list.
-  const active=base.filter(x=>isNseOpen(x,today)&&x.symbol).slice(0,8);
+  const active=base.filter(x=>isNseOpen(x,today)&&x.symbol).slice(0,20);
   const enriched=await Promise.all(active.map(async ipo=>{
     try{
       return await Promise.race([
@@ -589,7 +594,7 @@ async function loadNse(){
   // Populate GMP on the IPO list itself. Each source is optional: if a publisher
   // has no GMP for an issue, it is skipped; available sources are combined and
   // converted to a percentage using the upper price band.
-  const gmpCandidates=liveBase.filter(x=>x.symbol&&isNseOpen(x,today)).slice(0,6);
+  const gmpCandidates=liveBase.filter(x=>x.symbol&&isNseOpen(x,today)).slice(0,10);
   const gmpEnriched=await Promise.all(gmpCandidates.map(async ipo=>{
     try{
       return await Promise.race([
