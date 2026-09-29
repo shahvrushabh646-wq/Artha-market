@@ -2,10 +2,7 @@ import type { ReactNode } from "react";
 import { Panel } from "@/components/widgets";
 import { cn } from "@/lib/utils";
 import {
-  formatGmp,
-  formatMinApplication,
   formatSubscriptionAmount,
-  formatSubscriptionMultiple,
   processIpoData,
   type FormattedField,
 } from "@/lib/utils/ipo-formatters";
