@@ -6,7 +6,25 @@ const cache=new Map<string,{expires:number;value:Ipo[]}>();
 const CACHE_MS=30000;
 function clean(v:unknown){return String(v??"").replace(/<[^>]*>/g," ").replace(/\s+/g," ").trim();}
 function n(v:unknown){if(v==null||v==="")return null;const x=Number(String(v).replace(/,/g,"").replace(/%/g,"").trim());return Number.isFinite(x)?x:null;}
-function date(v:unknown){const s=clean(v);if(!s)return null;const m=s.match(/^(\d{1,2})[-\/](\w{3,})[-\/](\d{4})$/i);if(m){const months=["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"];const mi=months.indexOf(m[2].slice(0,3).toLowerCase());if(mi>=0)return m[3]+"-"+String(mi+1).padStart(2,"0")+"-"+String(Number(m[1])).padStart(2,"0");}const d=new Date(s);return Number.isNaN(d.getTime())?null:d.toISOString().slice(0,10);}
+function date(v:unknown){
+  const s=clean(v);
+  if(!s)return null;
+  const iso=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if(iso)return iso[1]+"-"+String(Number(iso[2])).padStart(2,"0")+"-"+String(Number(iso[3])).padStart(2,"0");
+  const dmy=s.match(/^(\d{1,2})[-\\/ ](\w{3,})[-\\/ ](\d{4})$/i);
+  if(dmy){
+    const months=["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"];
+    const mi=months.indexOf(dmy[2].slice(0,3).toLowerCase());
+    if(mi>=0)return dmy[3]+"-"+String(mi+1).padStart(2,"0")+"-"+String(Number(dmy[1])).padStart(2,"0");
+  }
+  const d=s.match(/^(\d{1,2})[-\\/](\d{1,2})[-\\/](\d{4})$/);
+  if(d)return d[3]+"-"+String(Number(d[2])).padStart(2,"0")+"-"+String(Number(d[1])).padStart(2,"0");
+  const parsed=new Date(s);
+  return Number.isNaN(parsed.getTime())?null:parsed.toISOString().slice(0,10);
+}
+function indiaDateKey(now=new Date()){
+  return new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Kolkata",year:"numeric",month:"2-digit",day:"2-digit"}).format(now);
+}
 function band(v:unknown){const s=clean(v);const m=s.match(/(?:Rs\.?|₹)\s*([\d,.]+)\s*(?:-|to|–)\s*(?:Rs\.?|₹)?\s*([\d,.]+)/i);return m?"₹"+Number(m[1].replace(/,/g,"")).toLocaleString("en-IN")+" - ₹"+Number(m[2].replace(/,/g,"")).toLocaleString("en-IN"):s||null;}
 function upper(v:unknown){const s=clean(v);const m=s.match(/(?:-|to|–)\s*(?:Rs\.?|₹)?\s*([\d,.]+)/i);return m?n(m[1]):null;}
 function slugId(v:string){return clean(v).toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"")||"ipo";}
