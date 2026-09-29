@@ -3,7 +3,7 @@ type Ipo={nseSymbol?:string|null;bseScripCode?:string|null;bseSymbol?:string|nul
 const NSE = "https://www.nseindia.com";
 const NSE_PAGE = "https://www.nseindia.com/market-data/all-upcoming-issues-ipo";
 const cache=new Map<string,{expires:number;value:Ipo[]}>();
-const CACHE_MS=5000;
+const CACHE_MS=30000;
 function clean(v:unknown){return String(v??"").replace(/<[^>]*>/g," ").replace(/\s+/g," ").trim();}
 function n(v:unknown){if(v==null||v==="")return null;const x=Number(String(v).replace(/,/g,"").replace(/%/g,"").trim());return Number.isFinite(x)?x:null;}
 function date(v:unknown){const s=clean(v);if(!s)return null;const m=s.match(/^(\d{1,2})[-\/](\w{3,})[-\/](\d{4})$/i);if(m){const months=["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"];const mi=months.indexOf(m[2].slice(0,3).toLowerCase());if(mi>=0)return m[3]+"-"+String(mi+1).padStart(2,"0")+"-"+String(Number(m[1])).padStart(2,"0");}const d=new Date(s);return Number.isNaN(d.getTime())?null:d.toISOString().slice(0,10);}
@@ -49,27 +49,27 @@ function sameCompanyIssue(a:Ipo,b:Ipo){
     !!a.issueDateKey&&!!b.issueDateKey&&a.issueDateKey===b.issueDateKey;
 }
 function mergeIpoRecords(existing:Ipo,incoming:Ipo):Ipo{
+  const merged:{[key:string]:any}={...existing};
+  for(const [key,value] of Object.entries(incoming as Record<string,unknown>)){
+    if(value===null||value===undefined)continue;
+    if(Array.isArray(value)&&value.length===0)continue;
+    merged[key]=value;
+  }
   const exchanges=[...(existing.exchanges??[]),...(incoming.exchanges??[])];
   const hasNse=!!(existing.nseSymbol||incoming.nseSymbol);
   const hasBse=!!(existing.bseScripCode||incoming.bseScripCode||existing.bseSymbol||incoming.bseSymbol);
-  return {
-    ...existing,...incoming,
-    id:existing.id,
-    name:existing.name||incoming.name,
-    nseSymbol:existing.nseSymbol||incoming.nseSymbol,
-    bseScripCode:existing.bseScripCode||incoming.bseScripCode,
-    bseSymbol:existing.bseSymbol||incoming.bseSymbol,
-    normalizedName:existing.normalizedName||incoming.normalizedName,
-    issueDateKey:existing.issueDateKey||incoming.issueDateKey,
-    exchanges:[...new Set(exchanges)],
-    exchange:hasNse&&hasBse?"BOTH":(hasNse?"NSE India":hasBse?"BSE India":"UNKNOWN"),
-    // Never let a sparse secondary exchange record erase verified primary values.
-    subscription:incoming.subscription??existing.subscription,
-    subscriptionAmount:incoming.subscriptionAmount??existing.subscriptionAmount,
-    sharesOffered:incoming.sharesOffered??existing.sharesOffered,
-    verifiedSources:[...new Set([...(existing.verifiedSources??[]),...(incoming.verifiedSources??[])])],
-    sourceUrls:[...new Set([...(existing.sourceUrls??[]),...(incoming.sourceUrls??[])])]
-  };
+  merged.id=existing.id;
+  merged.name=existing.name||incoming.name;
+  merged.nseSymbol=existing.nseSymbol||incoming.nseSymbol;
+  merged.bseScripCode=existing.bseScripCode||incoming.bseScripCode;
+  merged.bseSymbol=existing.bseSymbol||incoming.bseSymbol;
+  merged.normalizedName=existing.normalizedName||incoming.normalizedName;
+  merged.issueDateKey=existing.issueDateKey||incoming.issueDateKey;
+  merged.exchanges=[...new Set(exchanges)];
+  merged.exchange=hasNse&&hasBse?"BOTH":(hasNse?"NSE India":hasBse?"BSE India":"UNKNOWN");
+  merged.verifiedSources=[...new Set([...(existing.verifiedSources??[]),...(incoming.verifiedSources??[])])];
+  merged.sourceUrls=[...new Set([...(existing.sourceUrls??[]),...(incoming.sourceUrls??[])])];
+  return merged as Ipo;
 }
 function scoreCandidateArray(arr:unknown[],expectedFields:string[]){
   if(!Array.isArray(arr)||arr.length===0)return 0;
@@ -359,7 +359,7 @@ function applyResearchText(ipo:Ipo,hits:ResearchHit[]){
 function isCompanyOfficialUrl(url:string,name:string){const d=domainOf(url);if(!d||/sebi\.gov\.in|nseindia\.com|bseindia\.com|chittorgarh\.com|moneycontrol\.com|economictimes\.indiatimes\.com|livemint\.com|groww\.in|zerodha\.com|angelone\.in|upstox\.com|investorgain\.com|ipowatch\.in|ipocentral\.in|niftytrader\.in|ipogram\.in|ipoji\.com/.test(d))return false;const tokens=name.toLowerCase().replace(/\b(limited|ltd|private|pvt|ipo)\b/g," ").split(/[^a-z0-9]+/).filter(x=>x.length>=3);return tokens.some(t=>d.includes(t));}
 function prospectusTypeFromUrl(url:string,text:string){const s=(url+" "+text).toLowerCase();if(/\bdrhp\b|draft red herring/.test(s))return "DRHP" as const;if(/\brhp\b|red herring prospectus/.test(s))return "RHP" as const;if(/abridged prospectus/.test(s))return "Abridged Prospectus" as const;if(/prospectus/.test(s))return "Prospectus" as const;return null;}
 function extractOfficialAndProspectus(ipo:Ipo,hits:ResearchHit[]){const official=hits.find(h=>isCompanyOfficialUrl(h.url,ipo.name));const docs=hits.filter(h=>/sebi\.gov\.in|nseindia\.com|bseindia\.com/.test(h.domain)||/prospectus|rhp|drhp/i.test(h.url+" "+h.text));const doc=docs.sort((a,b)=>{const rank=(h:ResearchHit)=>{const t=(h.url+" "+h.text).toLowerCase();return /\bprospectus\b/.test(t)&&!/drhp|rhp/.test(t)?4:/\brhp\b|red herring/.test(t)?3:/\bdrhp\b|draft red herring/.test(t)?2:/abridged prospectus/.test(t)?1:0};return rank(b)-rank(a)||b.priority-a.priority;})[0];if(official)ipo.officialWebsite=official.url.split("/").slice(0,3).join("/");if(doc){ipo.prospectusUrl=doc.url;ipo.prospectusType=prospectusTypeFromUrl(doc.url,doc.text);if(ipo.prospectusType==="RHP")ipo.rhpStatus="DISCOVERED_UNPARSED";}}
-async function universalResearch(ipo:Ipo){const hits=await researchHits(ipo);if(hits.length){applyResearchText(ipo,hits);extractOfficialAndProspectus(ipo,hits);ipo.verifiedSources=[...new Set(hits.map(h=>sourceName(h.url)))];ipo.sourceUrls=[...new Set(hits.map(h=>h.url))];ipo.detailSource=hits.find(h=>h.priority>=96)?.url??hits[0].url;}await enrichGmp(ipo);ipo.verifiedAt=new Date().toISOString();return ipo;}
+async function universalResearch(ipo:Ipo){const hits=await researchHits(ipo);if(hits.length){applyResearchText(ipo,hits);extractOfficialAndProspectus(ipo,hits);ipo.verifiedSources=[...new Set([...(ipo.verifiedSources??[]),...hits.map(h=>sourceName(h.url))])];ipo.sourceUrls=[...new Set(hits.map(h=>h.url))];ipo.detailSource=hits.find(h=>h.priority>=96)?.url??hits[0].url;}await enrichGmp(ipo);ipo.verifiedAt=new Date().toISOString();return ipo;}
 
 function baseNse(r:any):Ipo{
   const issuePrice=band(r.issuePrice);
@@ -375,7 +375,7 @@ function baseNse(r:any):Ipo{
   const fallbackMinimum=rawMinimum??(rawLot!=null&&upperPrice!=null?Number((rawLot*upperPrice).toFixed(2)):null);
   return {
     officialWebsite:null,prospectusUrl:null,prospectusType:null,
-    symbol:r.symbol??undefined,nseSymbol:r.isBse==="1"?undefined:(r.symbol??undefined),bseScripCode:r.scripCode??r.scripcode??undefined,bseSymbol:r.isBse==="1"?(r.symbol??undefined):undefined,exchange:r.isBse==="1"?"BSE India":"NSE India",exchanges:[r.isBse==="1"?"BSE India":"NSE India"],id:slugId(r.companyName||r.symbol||"ipo"),
+    symbol:r.symbol??undefined,nseSymbol:r.isBse==="1"?undefined:(r.symbol??undefined),bseScripCode:r.scripCode??r.scripcode??undefined,bseSymbol:r.isBse==="1"?(r.symbol??undefined):undefined,exchange:r.isBse==="1"?"BSE India":"NSE India",exchanges:[r.isBse==="1"?"BSE India":"NSE India"],id:"ipo-"+slugId(normalizeCompanyName(r.companyName||r.symbol||"ipo"))+"-"+slugId(date(r.issueStartDate)??date(r.issueEndDate)??r.symbol??"no-date"),
     name:clean(r.companyName||r.symbol||"IPO"),
     normalizedName:normalizeCompanyName(r.companyName||r.symbol||"IPO"),
     issueDateKey:issueDateKey(date(r.issueStartDate),date(r.issueEndDate)),
@@ -509,7 +509,7 @@ async function loadNse(){
     try{ current=await fetchNse("/api/ipo-current-issue",cookie); }catch{}
     try{ upcoming=await fetchNse("/api/all-upcoming-issues?category=ipo",cookie); }catch{}
   }
-  const today=new Date().toISOString().slice(0,10);
+  const today=indiaDateKey();
   const map=new Map<string,Ipo>();
   const canonicalRecords:Ipo[]=[];
   for(const r of [...rowsFromNse(current),...rowsFromNse(upcoming)]){
@@ -547,7 +547,7 @@ async function loadNse(){
   // current-issue feed remains the source of truth for names/subscription, while detail
   // supplies lot size/minimum application and category data when NSE exposes it.
   // A slow detail endpoint can never blank or block the IPO list.
-  const active=base.filter(x=>isNseOpen(x,today)&&x.symbol).slice(0,16);
+  const active=base.filter(x=>isNseOpen(x,today)&&x.symbol).slice(0,8);
   const enriched=await Promise.all(active.map(async ipo=>{
     try{
       return await Promise.race([
@@ -561,7 +561,7 @@ async function loadNse(){
   // Populate GMP on the IPO list itself. Each source is optional: if a publisher
   // has no GMP for an issue, it is skipped; available sources are combined and
   // converted to a percentage using the upper price band.
-  const gmpCandidates=liveBase.filter(x=>x.symbol);
+  const gmpCandidates=liveBase.filter(x=>x.symbol&&isNseOpen(x,today)).slice(0,6);
   const gmpEnriched=await Promise.all(gmpCandidates.map(async ipo=>{
     try{
       return await Promise.race([
@@ -586,8 +586,10 @@ export const fetchOpenIposLive=createServerFn({method:"GET"}).handler(async()=>{
     cache.set("nse",{expires:Date.now()+CACHE_MS,value});
     return value;
   }catch{
+    // Keep the last verified payload during a transient exchange/API failure.
+    if(hit?.value?.length) return hit.value;
     const empty:Ipo[]=[];
-    cache.set("nse",{expires:Date.now()+2000,value:empty});
+    cache.set("nse",{expires:Date.now()+5000,value:empty});
     return empty;
   }
 });
