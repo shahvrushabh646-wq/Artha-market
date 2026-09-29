@@ -215,14 +215,14 @@ async function readResearchUrl(url:string):Promise<string>{
   }catch{return "";}
 }
 function parseGmpValue(text:string){
-  const blocks=clean(text).split(/[\\n\\r.!?]+/).filter(Boolean);
-  const strict=/\\b(gmp|grey\\s*market|kotak\\s*gmp|ipo\\s*premium|expected\\s*premium)\\b/i;
-  const value=/([+-]?\\s*₹?\\s*[\\d,]+(?:\\.\\d+)?)/;
+  const blocks=clean(text).split(/[\n\r.!?]+/).filter(Boolean);
+  const strict=/\b(gmp|grey\s*market|kotak\s*gmp|ipo\s*premium|expected\s*premium)\b/i;
+  const value=/([+-]?\s*₹?\s*[\d,]+(?:\.\d+)?)/;
   for(const block of blocks){
     if(!strict.test(block))continue;
     const m=block.match(value);
     if(m){
-      const parsed=n(m[1].replace(/[₹\\s]/g,""));
+      const parsed=n(m[1].replace(/[₹\s]/g,""));
       if(parsed!=null)return parsed;
     }
   }
@@ -327,13 +327,13 @@ function applyResearchText(ipo:Ipo,hits:ResearchHit[]){
   if(risks.length)ipo.risks=risks;
 
   const promoters = [
-    ...[...all.matchAll(/(?:promoters?|promoter group)[^\\n:]*[:\\-]\\s*([^\\n]{20,500})/gi)].slice(0,3).map(m=>clean(m[1]))
+    ...[...all.matchAll(/(?:promoters?|promoter group)[^\n:]*[:\-]\s*([^\n]{20,500})/gi)].slice(0,3).map(m=>clean(m[1]))
   ];
   const segments = [
-    ...[...all.matchAll(/(?:business segments?|segments?)[^\\n:]*[:\\-]\\s*([^\\n]{20,500})/gi)].slice(0,3).map(m=>clean(m[1]))
+    ...[...all.matchAll(/(?:business segments?|segments?)[^\n:]*[:\-]\s*([^\n]{20,500})/gi)].slice(0,3).map(m=>clean(m[1]))
   ];
   const competitors = [
-    ...[...all.matchAll(/(?:competitors?|competitive landscape)[^\\n:]*[:\\-]\\s*([^\\n]{20,500})/gi)].slice(0,3).map(m=>clean(m[1]))
+    ...[...all.matchAll(/(?:competitors?|competitive landscape)[^\n:]*[:\-]\s*([^\n]{20,500})/gi)].slice(0,3).map(m=>clean(m[1]))
   ];
   if(promoters.length)ipo.promoters=[...new Set(promoters)];
   if(segments.length)ipo.segments=[...new Set(segments)];
