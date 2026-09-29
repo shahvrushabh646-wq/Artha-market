@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-type Ipo={officialWebsite?:string|null;prospectusUrl?:string|null;prospectusType?:"DRHP"|"RHP"|"Prospectus"|"Abridged Prospectus"|null;symbol?:string;exchange?:"NSE India"|"BSE India";id:string;name:string;type:"Mainboard"|"SME";openDate:string|null;closeDate:string|null;listingDate:string|null;issueSize:number|null;minSubscription:number|null;subscription:number|null;subscriptionAmount:number|null;subscriptionSource:string|null;subscriptionCategories:{category:string;value:number|null}[];gmpPct:number|null;gmpRs:number|null;gmpSources:{source:string;url:string|null;pct:number|null;rs:number|null;asOf:string|null}[];gmpVerifiedSources:string[];city:string|null;state:string|null;business:string|null;countries:{country:string;business:string;salesPct:number|null}[];revenues:{year:string;value:number|null}[];profits:{year:string;value:number|null}[];eps:{year:string;value:number|null}[];priceBand:string|null;lotSize:number|null;faceValue:number|null;sharesOffered:number|null;offeredToPublic:number|null;retailShares:number|null;qibShares:number|null;niiShares:number|null;freshIssue:number|null;offerForSale:number|null;issueType:string|null;objects:string[];risks:string[];promoterHolding:number|null;postIssuePromoterHolding:number|null;moneycontrolUrl:string|null;detailSource:string|null;verifiedSources:string[];sourceUrls:string[];verifiedAt:string};
+type Ipo={officialWebsite?:string|null;prospectusUrl?:string|null;prospectusType?:"DRHP"|"RHP"|"Prospectus"|"Abridged Prospectus"|null;symbol?:string;exchange?:"NSE India"|"BSE India";id:string;name:string;type:"Mainboard"|"SME";openDate:string|null;closeDate:string|null;listingDate:string|null;issueSize:number|null;minSubscription:number|null;subscription:number|null;subscriptionAmount:number|null;subscriptionSource:string|null;subscriptionCategories:{category:string;value:number|null}[];gmpPct:number|null;gmpRs:number|null;gmpSources:{source:string;url:string|null;pct:number|null;rs:number|null;asOf:string|null}[];gmpVerifiedSources:string[];city:string|null;state:string|null;business:string|null;promoters:string[];segments:string[];competitors:string[];countries:{country:string;business:string;salesPct:number|null}[];revenues:{year:string;value:number|null}[];profits:{year:string;value:number|null}[];eps:{year:string;value:number|null}[];priceBand:string|null;lotSize:number|null;faceValue:number|null;sharesOffered:number|null;offeredToPublic:number|null;retailShares:number|null;qibShares:number|null;niiShares:number|null;freshIssue:number|null;offerForSale:number|null;issueType:string|null;objects:string[];risks:string[];promoterHolding:number|null;postIssuePromoterHolding:number|null;moneycontrolUrl:string|null;detailSource:string|null;verifiedSources:string[];sourceUrls:string[];verifiedAt:string};
 const NSE = "https://www.nseindia.com";
 const NSE_PAGE = "https://www.nseindia.com/market-data/all-upcoming-issues-ipo";
 const cache=new Map<string,{expires:number;value:Ipo[]}>();
@@ -244,6 +244,19 @@ function applyResearchText(ipo:Ipo,hits:ResearchHit[]){
   const risks=[...all.matchAll(/(?:key risks|risk factors)[^\n:]*[:\-]\s*([^\n]{50,400})/gi)].slice(0,5).map(m=>clean(m[1]));
   if(objects.length)ipo.objects=objects;
   if(risks.length)ipo.risks=risks;
+
+  const promoters = [
+    ...[...all.matchAll(/(?:promoters?|promoter group)[^\\n:]*[:\\-]\\s*([^\\n]{20,500})/gi)].slice(0,3).map(m=>clean(m[1]))
+  ];
+  const segments = [
+    ...[...all.matchAll(/(?:business segments?|segments?)[^\\n:]*[:\\-]\\s*([^\\n]{20,500})/gi)].slice(0,3).map(m=>clean(m[1]))
+  ];
+  const competitors = [
+    ...[...all.matchAll(/(?:competitors?|competitive landscape)[^\\n:]*[:\\-]\\s*([^\\n]{20,500})/gi)].slice(0,3).map(m=>clean(m[1]))
+  ];
+  if(promoters.length)ipo.promoters=[...new Set(promoters)];
+  if(segments.length)ipo.segments=[...new Set(segments)];
+  if(competitors.length)ipo.competitors=[...new Set(competitors)];
 }
 function isCompanyOfficialUrl(url:string,name:string){const d=domainOf(url);if(!d||/sebi\.gov\.in|nseindia\.com|bseindia\.com|chittorgarh\.com|moneycontrol\.com|economictimes\.indiatimes\.com|livemint\.com|groww\.in|zerodha\.com|angelone\.in|upstox\.com|investorgain\.com|ipowatch\.in|ipocentral\.in|niftytrader\.in|ipogram\.in|ipoji\.com/.test(d))return false;const tokens=name.toLowerCase().replace(/\b(limited|ltd|private|pvt|ipo)\b/g," ").split(/[^a-z0-9]+/).filter(x=>x.length>=3);return tokens.some(t=>d.includes(t));}
 function prospectusTypeFromUrl(url:string,text:string){const s=(url+" "+text).toLowerCase();if(/\bdrhp\b|draft red herring/.test(s))return "DRHP" as const;if(/\brhp\b|red herring prospectus/.test(s))return "RHP" as const;if(/abridged prospectus/.test(s))return "Abridged Prospectus" as const;if(/prospectus/.test(s))return "Prospectus" as const;return null;}
@@ -267,7 +280,7 @@ function baseNse(r:any):Ipo{
     openDate:date(r.issueStartDate),closeDate:date(r.issueEndDate),listingDate:null,
     issueSize:null,minSubscription:null,subscription,subscriptionAmount,subscriptionSource:r.isBse==="1"?"BSE India":"NSE India",
     subscriptionCategories:[],gmpPct:null,gmpRs:null,gmpSources:[],gmpVerifiedSources:[],
-    city:null,state:null,business:null,countries:[],revenues:[],profits:[],eps:[],
+    city:null,state:null,business:null,promoters:[],segments:[],competitors:[],countries:[],revenues:[],profits:[],eps:[],
     priceBand:band(r.issuePrice),lotSize:null,faceValue:null,
     sharesOffered:n(r.noOfSharesOffered),offeredToPublic:null,retailShares:null,qibShares:null,niiShares:null,
     freshIssue:null,offerForSale:null,issueType:null,objects:[],risks:[],
