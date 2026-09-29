@@ -65,3 +65,7 @@ export function IpoCompanyFaqSection({ companyName, metadata }: CompanyFaqProps)
     </section>
   );
 }
+
+// Backward-compatible export for deployments built from the immediately previous route commit.
+// The current route uses IpoCompanyFaqSection and does not render this legacy component.
+export function IpoFaqAccordion() { return null; }
