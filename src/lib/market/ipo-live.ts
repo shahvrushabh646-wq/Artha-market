@@ -563,14 +563,14 @@ export const fetchOpenIposLive=createServerFn({method:"GET"}).handler(async()=>{
   }
 });
 
-export const fetchIpoDetailFast=createServerFn({method:"GET"}).handler(async({data}:{data:{id:string}})=>{
+export const fetchIpoDetailFast=createServerFn({method:"GET"}).inputValidator((data:{id:string})=>data).handler(async({data}:{data:{id:string}})=>{
   const list=await loadNse();
   const ipo=list.find(x=>x.id===data.id);
   if(!ipo)return null;
   return {...ipo,rhpStatus:ipo.rhpStatus??"NOT_FOUND"};
 });
 
-export const fetchIpoDetailLive=createServerFn({method:"GET"}).handler(async({data}:{data:{id:string}})=>{
+export const fetchIpoDetailLive=createServerFn({method:"GET"}).inputValidator((data:{id:string})=>data).handler(async({data}:{data:{id:string}})=>{
   const list=await loadNse();
   const ipo=list.find(x=>x.id===data.id);
   if(!ipo)return null;
