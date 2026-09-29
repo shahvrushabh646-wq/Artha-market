@@ -19,6 +19,7 @@ const HEADERS={
 
 
 const EXTERNAL_TIMEOUT_MS=3000;
+const RESEARCH_TIMEOUT_MS=8000;
 async function fetchWithTimeout(url:string,init:RequestInit={},timeoutMs=EXTERNAL_TIMEOUT_MS):Promise<Response>{
   const controller=new AbortController();
   const timer=setTimeout(()=>controller.abort(),timeoutMs);
@@ -194,7 +195,7 @@ function numberList(s:string,patterns:RegExp[],limit=3){for(const p of patterns)
 async function researchSearch(query:string):Promise<string[]>{
   try{
     const u="https://r.jina.ai/http://www.google.com/search?q="+encodeURIComponent(query);
-    const r=await fetchWithTimeout(u,{headers:{Accept:"text/plain"},cache:"no-store"});
+    const r=await fetchWithTimeout(u,{headers:{Accept:"text/plain"},cache:"no-store"},RESEARCH_TIMEOUT_MS);
     if(!r.ok)return [];
     const t=await r.text();const urls:string[]=[];
     const add=(value:string)=>{
@@ -209,22 +210,32 @@ async function researchSearch(query:string):Promise<string[]>{
 }
 async function readResearchUrl(url:string):Promise<string>{
   try{
-    const r=await fetchWithTimeout("https://r.jina.ai/"+url,{headers:{Accept:"text/plain"},cache:"no-store"});
+    const r=await fetchWithTimeout("https://r.jina.ai/"+url,{headers:{Accept:"text/plain"},cache:"no-store"},RESEARCH_TIMEOUT_MS);
     if(!r.ok)return "";
     return (await r.text()).slice(0,45000);
   }catch{return "";}
 }
 function parseGmpValue(text:string){
-  const blocks=clean(text).split(/[\n\r.!?]+/).filter(Boolean);
-  const strict=/\b(gmp|grey\s*market|kotak\s*gmp|ipo\s*premium|expected\s*premium)\b/i;
-  const value=/([+-]?\s*₹?\s*[\d,]+(?:\.\d+)?)/;
-  for(const block of blocks){
-    if(!strict.test(block))continue;
-    const m=block.match(value);
-    if(m){
-      const parsed=n(m[1].replace(/[₹\s]/g,""));
-      if(parsed!=null)return parsed;
-    }
+  const s=String(text??"").replace(/\u00a0/g," ").replace(/\s+/g," ");
+  const amount=/([+-]?\s*₹?\s*[\d,]+(?:\.\d+)?)/;
+  const patterns=[
+    /\b(?:gmp|grey\s*market\s*premium|kotak\s*gmp|ipo\s*premium|expected\s*premium)\b[^₹\d+\-]{0,120}([+-]?\s*₹?\s*[\d,]+(?:\.\d+)?)/i,
+    /([+-]?\s*₹?\s*[\d,]+(?:\.\d+)?)[^.!?]{0,120}\b(?:gmp|grey\s*market\s*premium|kotak\s*gmp|ipo\s*premium)\b/i
+  ];
+  for(const pattern of patterns){
+    const m=s.match(pattern);
+    if(!m)continue;
+    const raw=m[1].replace(/[₹\s]/g,"");
+    const parsed=n(raw);
+    if(parsed==null)continue;
+    if(parsed>=1900&&parsed<=2100)continue;
+    return parsed;
+  }
+  const fallback=s.match(/\bGMP\b[^.!?]{0,80}/i);
+  if(fallback){
+    const m=fallback[0].match(amount);
+    const parsed=m?n(m[1].replace(/[₹\s]/g,"")):null;
+    if(parsed!=null)return parsed;
   }
   return null;
 }
@@ -240,7 +251,7 @@ async function enrichGmp(ipo:Ipo){
       const candidates=[...new Set(urls)].filter(u=>{
         const d=domainOf(u);
         return rule.hosts.some(h=>d===h||d.endsWith("."+h));
-      }).slice(0,2);
+      }).slice(0,1);
       for(const url of candidates){
         const text=await readResearchUrl(url);
         const rs=parseGmpValue(text);
@@ -383,14 +394,14 @@ async function enrichNse(ipo:Ipo,cookie:string){
     const period=info["Issue Period"]?.match(/(\d{2}-\w{3}-\d{4})\s*to\s*(\d{2}-\w{3}-\d{4})/i);
     if(period){ipo.openDate=date(period[1]);ipo.closeDate=date(period[2]);}
     ipo.priceBand=band(info["Price Range"])||ipo.priceBand;
-    const lot=info["Bid Lot"]?.match(/([\d,]+)\s*Equity Shares/i);
+    const lot=info["Bid Lot"]?.match(/([\d,]+)\s*(?:Equity\s+Shares|shares)/i)??info["Bid Lot"]?.match(/([\d,]+)/i);
     ipo.lotSize=n(lot?.[1])??ipo.lotSize;
     ipo.faceValue=n(info["Face Value"]?.match(/[\d,.]+/)?.[0])??ipo.faceValue;
     ipo.issueSize=issueSizeCr(info["Issue Size"])??ipo.issueSize;
     const high=upper(info["Price Range"]);
     const low=clean(info["Price Range"]).match(/(?:Rs\.?|₹)?\s*([\d,.]+)\s*(?:-|to|–)/i);
     const lowPrice=n(low?.[1]);
-    const applicationPrice=lowPrice??high;
+    const applicationPrice=high??lowPrice;
     if(ipo.lotSize&&applicationPrice){
       const lotValue=ipo.lotSize*applicationPrice;
       // SME individual applications require at least 2 lots and a bid value above ₹2 lakh.
@@ -523,7 +534,7 @@ async function loadNse(){
     try{
       return await Promise.race([
         enrichNse({...ipo},cookie),
-        new Promise<Ipo>(resolve=>setTimeout(()=>resolve(ipo),3500))
+        new Promise<Ipo>(resolve=>setTimeout(()=>resolve(ipo),9000))
       ]);
     }catch{return ipo;}
   }));
@@ -537,7 +548,7 @@ async function loadNse(){
     try{
       return await Promise.race([
         enrichGmp({...ipo}),
-        new Promise<Ipo>(resolve=>setTimeout(()=>resolve(ipo),7000))
+        new Promise<Ipo>(resolve=>setTimeout(()=>resolve(ipo),30000))
       ]);
     }catch{return ipo;}
   }));
