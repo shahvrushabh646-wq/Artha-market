@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-type Ipo={nseSymbol?:string|null;bseScripCode?:string|null;bseSymbol?:string|null;normalizedName:string;issueDateKey:string|null;rhpStatus:"NOT_FOUND"|"DISCOVERED_UNPARSED"|"PARSED"|"PARSE_FAILED";officialWebsite?:string|null;prospectusUrl?:string|null;prospectusType?:"DRHP"|"RHP"|"Prospectus"|"Abridged Prospectus"|null;symbol?:string;exchange?:"NSE India"|"BSE India"|"BOTH"|"UNKNOWN";exchanges:string[];id:string;name:string;type:"Mainboard"|"SME";openDate:string|null;closeDate:string|null;listingDate:string|null;issueSize:number|null;minSubscription:number|null;subscription:number|null;subscriptionAmount:number|null;subscriptionSource:string|null;subscriptionCategories:{category:string;value:number|null}[];gmpPct:number|null;gmpRs:number|null;gmpSources:{source:string;url:string|null;pct:number|null;rs:number|null;asOf:string|null}[];gmpVerifiedSources:string[];city:string|null;state:string|null;business:string|null;promoters:string[];segments:string[];competitors:string[];countries:{country:string;business:string;salesPct:number|null}[];revenues:{year:string;value:number|null}[];profits:{year:string;value:number|null}[];eps:{year:string;value:number|null}[];priceBand:string|null;lotSize:number|null;faceValue:number|null;sharesOffered:number|null;offeredToPublic:number|null;retailShares:number|null;qibShares:number|null;niiShares:number|null;freshIssue:number|null;offerForSale:number|null;issueType:string|null;objects:string[];risks:string[];promoterHolding:number|null;postIssuePromoterHolding:number|null;moneycontrolUrl:string|null;detailSource:string|null;verifiedSources:string[];sourceUrls:string[];verifiedAt:string};
+type Ipo={nseSymbol?:string|null;bseScripCode?:string|null;bseSymbol?:string|null;normalizedName:string;issueDateKey:string|null;rhpStatus:"NOT_FOUND"|"DISCOVERED_UNPARSED"|"PARSED"|"PARSE_FAILED";officialWebsite?:string|null;prospectusUrl?:string|null;prospectusType?:"DRHP"|"RHP"|"Prospectus"|"Abridged Prospectus"|null;symbol?:string;exchange?:"NSE India"|"BSE India"|"BOTH"|"UNKNOWN";exchanges:string[];id:string;name:string;type:"Mainboard"|"SME";openDate:string|null;closeDate:string|null;listingDate:string|null;issueSize:number|null;minSubscription:number|null;verifiedMinApplication:number|null;subscription:number|null;subscriptionAmount:number|null;subscriptionSource:string|null;subscriptionCategories:{category:string;value:number|null}[];gmpPct:number|null;gmpRs:number|null;gmpSources:{source:string;url:string|null;pct:number|null;rs:number|null;asOf:string|null}[];gmpVerifiedSources:string[];city:string|null;state:string|null;business:string|null;promoters:string[];segments:string[];competitors:string[];countries:{country:string;business:string;salesPct:number|null}[];revenues:{year:string;value:number|null}[];profits:{year:string;value:number|null}[];eps:{year:string;value:number|null}[];priceBand:string|null;lotSize:number|null;faceValue:number|null;sharesOffered:number|null;offeredToPublic:number|null;retailShares:number|null;qibShares:number|null;niiShares:number|null;freshIssue:number|null;offerForSale:number|null;issueType:string|null;objects:string[];risks:string[];promoterHolding:number|null;postIssuePromoterHolding:number|null;moneycontrolUrl:string|null;detailSource:string|null;verifiedSources:string[];sourceUrls:string[];verifiedAt:string};
 const NSE = "https://www.nseindia.com";
 const NSE_PAGE = "https://www.nseindia.com/market-data/all-upcoming-issues-ipo";
 const cache=new Map<string,{expires:number;value:Ipo[]}>();
@@ -400,7 +400,7 @@ function baseNse(r:any):Ipo{
     rhpStatus:"NOT_FOUND",
     type:r.series==="SME"?"SME":"Mainboard",
     openDate:date(r.issueStartDate),closeDate:date(r.issueEndDate),listingDate:null,
-    issueSize:null,minSubscription:fallbackMinimum,subscription,subscriptionAmount,subscriptionSource:r.isBse==="1"?"BSE India":"NSE India",
+    issueSize:null,minSubscription:fallbackMinimum,verifiedMinApplication:rawMinimum,subscription,subscriptionAmount,subscriptionSource:r.isBse==="1"?"BSE India":"NSE India",
     subscriptionCategories:[],gmpPct:null,gmpRs:null,gmpSources:[],gmpVerifiedSources:[],
     city:null,state:null,business:null,promoters:[],segments:[],competitors:[],countries:[],revenues:[],profits:[],eps:[],
     priceBand:band(r.issuePrice),lotSize:rawLot,faceValue:null,
@@ -434,11 +434,13 @@ async function enrichNse(ipo:Ipo,cookie:string){
       info["Minimum Bid Value"]??info["Min Bid Value"]
     );
     if(reportedMinimum!=null&&reportedMinimum>0){
+      ipo.verifiedMinApplication=reportedMinimum;
       ipo.minSubscription=reportedMinimum;
     }else if(ipo.lotSize&&applicationPrice){
       // Artha's list fallback is deliberately deterministic:
       // upper price band × one lot, exactly matching the UI note.
       ipo.minSubscription=Number((ipo.lotSize*applicationPrice).toFixed(2));
+      ipo.verifiedMinApplication=null;
     }
     const cats=rowsFromCategory(d?.activeCat);
     const grouped=new Map<string,Array<{label:string;row:any;value:number|null}>>();
