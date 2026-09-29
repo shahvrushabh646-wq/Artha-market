@@ -2,8 +2,10 @@ import type { ReactNode } from "react";
 import { Panel } from "@/components/widgets";
 import { cn } from "@/lib/utils";
 import {
+  formatGmp,
+  formatMinApplication,
   formatSubscriptionAmount,
-  processIpoData,
+  formatSubscriptionMultiple,
   type FormattedField,
 } from "@/lib/utils/ipo-formatters";
 
@@ -54,32 +56,15 @@ function renderFieldValue(field: FormattedField): ReactNode {
 }
 
 export function IpoCard({ data, onSelect, isSelected }: IpoCardProps) {
-  const processed = processIpoData({
-    id: data.id,
-    companyName: data.name,
-    type: data.type === "MAINBOARD" ? "Mainboard" : data.type,
-    status: data.status,
-    maxPrice: data.maxPrice ?? undefined,
-    lotSize: data.lotSize ?? undefined,
-    minApplicationAmount: data.verifiedMinApplication,
-    subscriptionRatio: data.subscription ?? undefined,
-    gmpAmount: data.gmpRs,
-    closeDate: data.closeDate ?? undefined,
-  });
-
-  const minApp: FormattedField = {
-    text: processed.calculatedMinInvestment,
-    isAvailable: processed.calculatedMinInvestment !== "ચકાસણી હેઠળ",
-  };
-  const subMultiple: FormattedField = {
-    text: processed.formattedSubscription.replace(/x$/, " ગણું"),
-    isAvailable: processed.formattedSubscription !== "માહિતી ઉપલબ્ધ નથી",
-  };
+  const minApp = formatMinApplication(
+    data.verifiedMinApplication,
+    data.maxPrice,
+    data.lotSize,
+    data.calculatedMinApplication
+  );
+  const subMultiple = formatSubscriptionMultiple(data.subscription);
   const subAmount = formatSubscriptionAmount(data.subscriptionAmountCr);
-  const gmp: FormattedField = {
-    text: processed.formattedGmp,
-    isAvailable: processed.formattedGmp !== "ઉપલબ્ધ નથી",
-  };
+  const gmp = formatGmp(data.gmpRs, data.gmpPct);
 
   return (
     <button
