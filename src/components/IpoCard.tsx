@@ -15,6 +15,7 @@ export interface IpoCardData {
   type: "Mainboard" | "SME" | "MAINBOARD" | "SME";
   status: "OPEN" | "UPCOMING" | "CLOSED";
   closeDate?: string | null;
+  priceBand?: string | null;
   minPrice?: number | null;
   maxPrice?: number | null;
   lotSize?: number | null;
@@ -24,6 +25,8 @@ export interface IpoCardData {
   subscriptionAmountCr?: number | null;
   gmpRs?: number | null;
   gmpPct?: number | null;
+  source?: string | null;
+  verifiedAt?: string | null;
 }
 
 interface IpoCardProps {
@@ -109,6 +112,8 @@ export function IpoCard({ data, onSelect, isSelected }: IpoCardProps) {
         </div>
 
         <div className="mt-4 grid grid-cols-3 gap-2">
+          <Mini label="પ્રાઇસ બેન્ડ" value={data.priceBand ?? "માહિતી ઉપલબ્ધ નથી"} />
+          <Mini label="લોટ સાઇઝ" value={data.lotSize != null ? data.lotSize.toLocaleString("en-IN") : "માહિતી ઉપલબ્ધ નથી"} />
           <Mini label="લઘુત્તમ અરજી" value={renderFieldValue(minApp)} />
           <Mini label="સબ્સ્ક્રિપ્શન" value={renderFieldValue(subMultiple)} />
           <Mini label="સબ્સ્ક્રિપ્શન રકમ" value={renderFieldValue(subAmount)} />
@@ -117,6 +122,10 @@ export function IpoCard({ data, onSelect, isSelected }: IpoCardProps) {
             value={renderFieldValue(gmp)}
             green={gmp.isAvailable && (data.gmpRs ?? 0) > 0}
           />
+        </div>
+        <div className="mt-3 flex items-center justify-between gap-2 text-[10px] text-subtle">
+          <span>સ્ત્રોત: {data.source ?? "માહિતી ઉપલબ્ધ નથી"}</span>
+          {data.verifiedAt && <span>ચકાસણી: {new Date(data.verifiedAt).toLocaleString("gu-IN")}</span>}
         </div>
       </Panel>
     </button>
