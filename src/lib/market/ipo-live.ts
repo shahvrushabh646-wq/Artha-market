@@ -27,9 +27,9 @@ async function fetchWithTimeout(url:string,init:RequestInit={},timeoutMs=EXTERNA
 }
 function normalizeCompanyName(v:unknown){
   return clean(v).toLowerCase()
-    .replace(/\\b(limited|ltd|private|pvt|company|corporation|inc)\\b/g," ")
+    .replace(/\b(limited|ltd|private|pvt|company|corporation|inc)\b/g," ")
     .replace(/[^a-z0-9]+/g," ")
-    .replace(/\\s+/g," ").trim();
+    .replace(/\s+/g," ").trim();
 }
 function issueDateKey(openDate:string|null,closeDate:string|null){
   return openDate??closeDate??null;
@@ -141,12 +141,7 @@ async function fetchNse(path:string,cookie:string){
 }
 
 function rowsFromNse(raw:unknown): any[]{
-  if(Array.isArray(raw)) return raw;
-  const root=raw as any;
-  if(root && Array.isArray(root.data)) return root.data;
-  if(root && Array.isArray(root.records)) return root.records;
-  if(root && root.data && Array.isArray(root.data.data)) return root.data.data;
-  return [];
+  return deepFindScoredRecordArray(raw,["companyName","symbol","issueStartDate","issueEndDate","issuePrice","noOfSharesOffered"]);
 }
 
 function parseInfo(rows:unknown[]){
