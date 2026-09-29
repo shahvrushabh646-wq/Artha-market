@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { loadIpoEnriched, loadIpoFast, loadIpoUniverse } from "@/lib/ipo/engine";
 type Ipo={nseSymbol?:string|null;bseScripCode?:string|null;bseSymbol?:string|null;normalizedName:string;issueDateKey:string|null;rhpStatus:"NOT_FOUND"|"DISCOVERED_UNPARSED"|"PARSED"|"PARSE_FAILED";officialWebsite?:string|null;prospectusUrl?:string|null;prospectusType?:"DRHP"|"RHP"|"Prospectus"|"Abridged Prospectus"|null;symbol?:string;exchange?:"NSE India"|"BSE India"|"BOTH"|"UNKNOWN";exchanges:string[];id:string;name:string;type:"Mainboard"|"SME";openDate:string|null;closeDate:string|null;listingDate:string|null;issueSize:number|null;minSubscription:number|null;verifiedMinApplication:number|null;subscription:number|null;subscriptionAmount:number|null;subscriptionSource:string|null;subscriptionCategories:{category:string;value:number|null}[];gmpPct:number|null;gmpRs:number|null;gmpSources:{source:string;url:string|null;pct:number|null;rs:number|null;asOf:string|null}[];gmpVerifiedSources:string[];city:string|null;state:string|null;business:string|null;promoters:string[];segments:string[];competitors:string[];countries:{country:string;business:string;salesPct:number|null}[];revenues:{year:string;value:number|null}[];profits:{year:string;value:number|null}[];eps:{year:string;value:number|null}[];priceBand:string|null;lotSize:number|null;faceValue:number|null;sharesOffered:number|null;offeredToPublic:number|null;retailShares:number|null;qibShares:number|null;niiShares:number|null;freshIssue:number|null;offerForSale:number|null;issueType:string|null;objects:string[];risks:string[];promoterHolding:number|null;postIssuePromoterHolding:number|null;moneycontrolUrl:string|null;detailSource:string|null;verifiedSources:string[];sourceUrls:string[];verifiedAt:string};
 const NSE = "https://www.nseindia.com";
 const NSE_PAGE = "https://www.nseindia.com/market-data/all-upcoming-issues-ipo";
@@ -605,13 +606,17 @@ async function loadNse(){
   }));
   const gmpById=new Map(gmpEnriched.map(x=>[x.id,x]));
   return liveBase.map(x=>gmpById.get(x.id)??x)
-    .filter(x=>!!x.name&&!!x.closeDate&&x.closeDate>=recentClosedCutoff)
+    .filter(x=>!!x.name&&((x.closeDate&&x.closeDate>=recentClosedCutoff)||(!x.closeDate&&x.openDate)))
     .sort((a,b)=>(a.openDate??"").localeCompare(b.openDate??"")||a.name.localeCompare(b.name));
 }
 function isNseOpen(ipo:Ipo,today:string){
   return !!ipo.openDate&&ipo.openDate<=today&&!!ipo.closeDate&&ipo.closeDate>=today;
 }
 export const fetchOpenIposLive=createServerFn({method:"GET"}).handler(async()=>{
+  try{
+    const universe=await loadIpoUniverse();
+    if(universe.length)return universe;
+  }catch{}
   const hit=cache.get("nse");
   if(hit&&hit.expires>Date.now())return hit.value;
   try{
@@ -628,6 +633,10 @@ export const fetchOpenIposLive=createServerFn({method:"GET"}).handler(async()=>{
 });
 
 export const fetchIpoDetailFast=createServerFn({method:"GET"}).inputValidator((data:{id:string})=>data).handler(async({data}:{data:{id:string}})=>{
+  try{
+    const ipo=await loadIpoFast(data.id);
+    if(ipo)return ipo;
+  }catch{}
   const list=await loadNse();
   const ipo=list.find(x=>x.id===data.id);
   if(!ipo)return null;
@@ -635,6 +644,10 @@ export const fetchIpoDetailFast=createServerFn({method:"GET"}).inputValidator((d
 });
 
 export const fetchIpoDetailLive=createServerFn({method:"GET"}).inputValidator((data:{id:string})=>data).handler(async({data}:{data:{id:string}})=>{
+  try{
+    const enriched=await loadIpoEnriched(data.id);
+    if(enriched)return enriched;
+  }catch{}
   const list=await loadNse();
   const ipo=list.find(x=>x.id===data.id);
   if(!ipo)return null;
