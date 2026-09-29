@@ -185,7 +185,11 @@ async function enrichGmp(ipo:Ipo){
     const unique=sourceResults.filter((x,i,a)=>x&&a.findIndex(y=>y?.source===x.source)===i) as {source:string;url:string|null;pct:number|null;rs:number|null;asOf:string|null}[];
     if(unique.length){
       const values=unique.map(x=>x.rs).filter((x):x is number=>x!=null).sort((a,b)=>a-b);
-      const median=values.length?values[Math.floor(values.length/2)]:null;
+      const median=values.length
+        ? values.length % 2 === 1
+          ? values[Math.floor(values.length / 2)]
+          : Number(((values[values.length / 2 - 1] + values[values.length / 2]) / 2).toFixed(2))
+        : null;
       const high=upper(ipo.priceBand);
       ipo.gmpRs=median;
       ipo.gmpPct=median!=null&&high?Number(((median/high)*100).toFixed(2)):null;
