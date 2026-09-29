@@ -9,7 +9,7 @@ import {
 export function useIpoEngine(requestedId?: string) {
   const universeQuery = useQuery({
     queryKey: ["open-ipos-live", "nse-official-v4"],
-    queryFn: () => fetchOpenIposLive({ data: {} }),
+    queryFn: () => fetchOpenIposLive(),
     refetchInterval: 60000,
     staleTime: 0,
     refetchOnMount: "always",
