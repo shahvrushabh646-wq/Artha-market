@@ -19,6 +19,7 @@ export interface IpoCardData {
   maxPrice?: number | null;
   lotSize?: number | null;
   verifiedMinApplication?: number | null;
+  calculatedMinApplication?: number | null;
   subscription?: number | null;
   subscriptionAmountCr?: number | null;
   gmpRs?: number | null;
@@ -58,7 +59,8 @@ export function IpoCard({ data, onSelect, isSelected }: IpoCardProps) {
   const minApp = formatMinApplication(
     data.verifiedMinApplication,
     data.maxPrice,
-    data.lotSize
+    data.lotSize,
+    data.calculatedMinApplication
   );
   const subMultiple = formatSubscriptionMultiple(data.subscription);
   const subAmount = formatSubscriptionAmount(data.subscriptionAmountCr);
