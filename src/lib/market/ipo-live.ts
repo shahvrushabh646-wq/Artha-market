@@ -540,7 +540,6 @@ async function loadNse(){
       r.minSubscription??r.minimumApplication??r.minimumInvestment??r.minInvestment??
       r.minBidValue??r.minimumBidValue
     )??ipo.minSubscription;
-    if(ipo.closeDate&&ipo.closeDate<today)continue;
 
     const key=buildCanonicalKey(ipo);
     const exact=map.get(key);
