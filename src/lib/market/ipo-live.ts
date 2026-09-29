@@ -644,19 +644,19 @@ export const fetchIpoDetailFast=createServerFn({method:"GET"}).inputValidator((d
 });
 
 export const fetchIpoDetailLive=createServerFn({method:"GET"}).inputValidator((data:{id:string})=>data).handler(async({data}:{data:{id:string}})=>{
-  try{
-    const enriched=await loadIpoEnriched(data.id);
-    if(enriched)return enriched;
-  }catch{}
+  let enriched:Ipo|null=null;
+  try{enriched=await loadIpoEnriched(data.id);}catch{}
   const list=await loadNse();
-  const ipo=list.find(x=>x.id===data.id);
-  if(!ipo)return null;
+  const fallback=list.find(x=>x.id===data.id);
+  const base=enriched??fallback;
+  if(!base)return null;
   try{
-    // Enrichment is explicitly non-critical. The fast endpoint above supplies the
-    // primary exchange data immediately; this tier hydrates GMP/RHP/research fields.
+    // Always run the universal research layer after official/secondary enrichment.
+    // This is what makes Q1-Q10 work automatically for new future IPOs instead of
+    // relying only on one secondary website.
     return await Promise.race([
-      universalResearch({...ipo}),
-      new Promise<Ipo>(resolve=>setTimeout(()=>resolve(ipo),9000))
+      universalResearch({...base}),
+      new Promise<Ipo>(resolve=>setTimeout(()=>resolve(base),15000))
     ]);
-  }catch{return ipo;}
+  }catch{return base;}
 });
