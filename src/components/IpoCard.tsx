@@ -23,6 +23,8 @@ export interface IpoCardData {
   calculatedMinApplication?: number | null;
   subscription?: number | null;
   subscriptionAmountCr?: number | null;
+  issueSize?: number | null;
+  symbol?: string | null;
   gmpRs?: number | null;
   gmpPct?: number | null;
   source?: string | null;
@@ -116,6 +118,7 @@ export function IpoCard({ data, onSelect, isSelected }: IpoCardProps) {
           <Mini label="લોટ સાઇઝ" value={data.lotSize != null ? data.lotSize.toLocaleString("en-IN") : "માહિતી ઉપલબ્ધ નથી"} />
           <Mini label="લઘુત્તમ અરજી" value={renderFieldValue(minApp)} />
           <Mini label="સબ્સ્ક્રિપ્શન" value={renderFieldValue(subMultiple)} />
+          <Mini label="ઇશ્યૂ સાઇઝ" value={data.issueSize != null ? `₹${data.issueSize.toLocaleString("en-IN",{maximumFractionDigits:2})} કરોડ` : "માહિતી ઉપલબ્ધ નથી"} />
           <Mini label="સબ્સ્ક્રિપ્શન રકમ" value={renderFieldValue(subAmount)} />
           <Mini
             label="GMP (અનૌપચારિક)"
