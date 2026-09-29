@@ -197,7 +197,8 @@ const SOURCE_RULES=[
   {name:"Livemint",hosts:["livemint.com"],priority:74},
   {name:"Groww",hosts:["groww.in"],priority:70},
   {name:"Zerodha",hosts:["zerodha.com"],priority:70},
-  {name:"Angel One",hosts:["angelone.in"],priority:70},
+  {name:"Angel One",hosts:["angelone.in"],priority:72},
+  {name:"Yahoo Finance",hosts:["finance.yahoo.com"],priority:72},
   {name:"Upstox",hosts:["upstox.com"],priority:70},
   {name:"InvestorGain",hosts:["investorgain.com"],priority:68},
   {name:"IPO Watch",hosts:["ipowatch.in"],priority:68},
@@ -322,13 +323,17 @@ async function researchHits(ipo:Ipo):Promise<ResearchHit[]>{
   const name=ipo.name.replace(/\b(IPO|LIMITED|LTD\.?|PRIVATE|PVT\.?)\b/gi," ").replace(/\s+/g," ").trim();
   const queries=[
     name+" IPO official RHP DRHP NSE registrar lead manager",
-    name+" IPO business products sector location countries",
-    name+" IPO revenue profit EPS financials objects risks",
-    name+" IPO price band lot size issue size allocation subscription GMP"
+    name+" IPO business products sector location countries exports sales",
+    name+" IPO revenue profit EPS financials 2026 2025 2024",
+    name+" IPO price band lot size issue size allocation subscription GMP",
+    name+" IPO details site:zerodha.com/ipo",
+    name+" IPO details site:angelone.in/ipo",
+    name+" IPO financials business risks site:finance.yahoo.com",
+    name+" IPO financials business risks site:moneycontrol.com"
   ];
   const found=(await Promise.all(queries.map(researchSearch))).flat();
   const unique=[...new Set(found)].filter(u=>!/facebook|instagram|youtube|linkedin|x\.com|twitter\.com/i.test(u));
-  const preferred=unique.sort((a,b)=>sourcePriority(b)-sourcePriority(a)).slice(0,8);
+  const preferred=unique.sort((a,b)=>sourcePriority(b)-sourcePriority(a)).slice(0,12);
   const texts=await Promise.all(preferred.map(async url=>({url,text:await readResearchUrl(url)})));
   return texts.filter(x=>x.text.length>=80).slice(0,8).map(x=>({
     url:x.url,domain:domainOf(x.url),
@@ -341,14 +346,18 @@ function applyResearchText(ipo:Ipo,hits:ResearchHit[]){
   const all=hits.map(h=>h.text).join("\n");
   const officialText=official.map(h=>h.text).join("\n");
   const text=officialText||all;
-  const business=firstText(text,[/(?:business of the company|our business|company is engaged in|we are engaged in|business overview)[:\s]+([^\n]{60,500})/i,/(?:products and services|business model)[:\s]+([^\n]{60,500})/i]);
+  const business=firstText(all,[/(?:business of the company|our business|company is engaged in|we are engaged in|business overview)[:\s]+([^\n]{60,700})/i,/(?:about [^\n]{0,80}|products and services|business model)[:\s]+([^\n]{60,700})/i]);
   if(business)ipo.business=business;
-  const office=firstText(text,[/(?:registered office|corporate office|registered and corporate office)[:\s]+([^\n]{20,180})/i]);
+  const office=firstText(officialText||all,[/(?:registered office|corporate office|registered and corporate office)[:\s]+([^\n]{20,220})/i]);
   if(office){
     const parts=office.split(",").map(x=>x.trim()).filter(Boolean);
     if(parts.length>1)ipo.city=parts[parts.length-2]||ipo.city;
     ipo.state=parts[parts.length-1]||ipo.state;
   }
+  const sector=firstText(all,[/(?:industry|sector|industry classification)[:\s]+([^\n]{10,160})/i]);
+  if(sector && !ipo.segments.length)ipo.segments=[sector];
+  const productText=firstText(all,[/(?:products?|product portfolio|product range|key products?)[:\s]+([^\n]{20,500})/i]);
+  if(productText)ipo.segments=[...new Set([...ipo.segments,productText])];
   const rev=numberList(all,[/(?:revenue from operations|revenue|turnover)[^\d]{0,80}([\d,]+(?:\.\d+)?)\s*(?:crore|cr)/gi]);
   const prof=numberList(all,[/(?:profit after tax|profit for the year|net profit|PAT)[^\d]{0,80}([\d,]+(?:\.\d+)?)\s*(?:crore|cr)/gi]);
   const eps=numberList(all,[/(?:basic EPS|diluted EPS|earnings per share|EPS)[^\d]{0,60}([\d,]+(?:\.\d+)?)/gi]);
@@ -356,10 +365,12 @@ function applyResearchText(ipo:Ipo,hits:ResearchHit[]){
   if(rev.length)ipo.revenues=rev.map((value,i)=>({year:years[years.length-rev.length+i]??String(i+1),value}));
   if(prof.length)ipo.profits=prof.map((value,i)=>({year:years[years.length-prof.length+i]??String(i+1),value}));
   if(eps.length)ipo.eps=eps.map((value,i)=>({year:years[years.length-eps.length+i]??String(i+1),value}));
-  const objects=[...all.matchAll(/(?:objects of the issue|utilisation of proceeds|use of proceeds)[^\n:]*[:\-]\s*([^\n]{40,400})/gi)].slice(0,5).map(m=>clean(m[1]));
-  const risks=[...all.matchAll(/(?:key risks|risk factors)[^\n:]*[:\-]\s*([^\n]{50,400})/gi)].slice(0,5).map(m=>clean(m[1]));
-  if(objects.length)ipo.objects=objects;
-  if(risks.length)ipo.risks=risks;
+  const objects=[...all.matchAll(/(?:objects of the issue|utilisation of proceeds|use of proceeds|objects of offer)(?:.|\\n){0,80}?(?:₹|Rs\.?)[^\\n]{0,80}?([^\\n]{20,500})/gi)].slice(0,8).map(m=>clean(m[1]));
+  const objectHead=all.match(/(?:objects of the issue|utilisation of proceeds|use of proceeds|objects of offer)([\\s\\S]{0,1800})/i);
+  if(objectHead?.[1])objects.push(...objectHead[1].split(/\\n/).map(clean).filter(x=>x.length>25&&/₹|Rs\.?|capital|corporate|facility|repay|working capital/i.test(x)).slice(0,8));
+  const risks=[...all.matchAll(/(?:key risks|risk factors|risk factors and mitigation)([\\s\\S]{0,1200})/gi)].slice(0,4).flatMap(m=>m[1].split(/\\n/).map(clean).filter(x=>x.length>35)).slice(0,8);
+  if(objects.length)ipo.objects=[...new Set(objects)].slice(0,8);
+  if(risks.length)ipo.risks=[...new Set(risks)].slice(0,8);
 
   const promoters = [
     ...[...all.matchAll(/(?:promoters?|promoter group)[^\n:]*[:\-]\s*([^\n]{20,500})/gi)].slice(0,3).map(m=>clean(m[1]))
@@ -380,9 +391,14 @@ function applyResearchText(ipo:Ipo,hits:ResearchHit[]){
   if(managers.length)ipo.leadManagers=[...new Set(managers)];
   if(registrar)(ipo as any).registrar=registrar;
   if(sponsorBank)(ipo as any).sponsorBank=sponsorBank;
+  const promoterPct=firstText(all,[/(?:promoter(?:s)?(?:'s)?|promoter group)[^\\d%]{0,100}(\\d+(?:\\.\\d+)?)\\s*%/i]);
+  if(promoterPct)(ipo as any).promoterHolding=n(promoterPct);
 
-  const countryMatch=all.match(/(?:operate|operates|present|presence|export|exports|serves|serve)[^\\n]{0,100}?(?:in|to|across|over)[^\\n]{0,40}?(\\d{1,3})\\s+(?:countries|country)/i);
+  const countryMatch=all.match(/(?:operate|operates|present|presence|export|exports|serves|serve)[^\\n]{0,120}?(?:in|to|across|over)[^\\n]{0,60}?(\\d{1,3})\\s+(?:countries|country)/i);
+  const countryNames=[...new Set((all.match(/\\b(?:China|Kuwait|United States|USA|U\.S\.|Malaysia|United Kingdom|UK|U\.K\.|India|Vietnam|UAE|United Arab Emirates|Saudi Arabia|Qatar|Singapore|Bangladesh|Nepal|Oman|Canada|Australia|Japan|South Korea|Thailand)\\b/gi)??[]).map(x=>x.replace(/U\\.S\\./i,"United States").replace(/U\\.K\\./i,"United Kingdom")))];
   if(countryMatch)(ipo as any).countryCount=Number(countryMatch[1]);
+  else if(countryNames.length)(ipo as any).countryCount=countryNames.length;
+  if(countryNames.length)(ipo as any).countries=countryNames.map(country=>({country,business:"Export / international business",salesPct:null}));
 }
 function isCompanyOfficialUrl(url:string,name:string){const d=domainOf(url);if(!d||/sebi\.gov\.in|nseindia\.com|bseindia\.com|chittorgarh\.com|moneycontrol\.com|economictimes\.indiatimes\.com|livemint\.com|groww\.in|zerodha\.com|angelone\.in|upstox\.com|investorgain\.com|ipowatch\.in|ipocentral\.in|niftytrader\.in|ipogram\.in|ipoji\.com/.test(d))return false;const tokens=name.toLowerCase().replace(/\b(limited|ltd|private|pvt|ipo)\b/g," ").split(/[^a-z0-9]+/).filter(x=>x.length>=3);return tokens.some(t=>d.includes(t));}
 function prospectusTypeFromUrl(url:string,text:string){const s=(url+" "+text).toLowerCase();if(/\bdrhp\b|draft red herring/.test(s))return "DRHP" as const;if(/\brhp\b|red herring prospectus/.test(s))return "RHP" as const;if(/abridged prospectus/.test(s))return "Abridged Prospectus" as const;if(/prospectus/.test(s))return "Prospectus" as const;return null;}
