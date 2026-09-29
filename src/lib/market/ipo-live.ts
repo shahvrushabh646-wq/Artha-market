@@ -321,21 +321,56 @@ async function enrichGmp(ipo:Ipo){
 }
 async function researchHits(ipo:Ipo):Promise<ResearchHit[]>{
   const name=ipo.name.replace(/\b(IPO|LIMITED|LTD\.?|PRIVATE|PVT\.?)\b/gi," ").replace(/\s+/g," ").trim();
+
+  // Q1-Q9 source aggregation: official exchange/prospectus sources remain highest
+  // priority, while Yahoo Finance, Angel One and Zerodha are explicitly fetched
+  // for every IPO. Their usable data is merged into the same Q1-Q9 model; one
+  // publisher failing or not covering an SME IPO must not block the others.
   const queries=[
     name+" IPO official RHP DRHP NSE registrar lead manager",
     name+" IPO business products sector location countries exports sales",
     name+" IPO revenue profit EPS financials 2026 2025 2024",
     name+" IPO price band lot size issue size allocation subscription GMP",
     name+" IPO details site:zerodha.com/ipo",
+    name+" IPO price band lot size issue size business financials risks site:zerodha.com/ipo",
     name+" IPO details site:angelone.in/ipo",
+    name+" IPO price band lot size issue size business financials risks site:angelone.in/ipo",
     name+" IPO financials business risks site:finance.yahoo.com",
+    name+" IPO price band lot size issue size business financials risks site:finance.yahoo.com",
     name+" IPO financials business risks site:moneycontrol.com"
   ];
   const found=(await Promise.all(queries.map(researchSearch))).flat();
   const unique=[...new Set(found)].filter(u=>!/facebook|instagram|youtube|linkedin|x\.com|twitter\.com/i.test(u));
-  const preferred=unique.sort((a,b)=>sourcePriority(b)-sourcePriority(a)).slice(0,12);
+
+  const sourceHosts=[
+    {name:"Yahoo Finance",host:"finance.yahoo.com"},
+    {name:"Angel One",host:"angelone.in"},
+    {name:"Zerodha",host:"zerodha.com"}
+  ];
+
+  // Keep at least one crawlable result from each of the three requested sources
+  // whenever that source actually publishes a page for the IPO. Then fill the
+  // remaining research slots by source priority.
+  const bySource:Record<string,string[]>={};
+  for(const source of sourceHosts){
+    bySource[source.name]=unique.filter(u=>{
+      const d=domainOf(u);
+      return d===source.host||d.endsWith("."+source.host);
+    }).slice(0,2);
+  }
+  const mandatory=sourceHosts
+    .flatMap(source=>bySource[source.name]??[])
+    .filter((u,i,a)=>a.indexOf(u)===i);
+
+  const preferredRest=unique
+    .filter(u=>!mandatory.includes(u))
+    .sort((a,b)=>sourcePriority(b)-sourcePriority(a));
+
+  // 12 source pages is enough to retain all three requested publishers plus
+  // official/secondary evidence without making detail loading excessively slow.
+  const preferred=[...mandatory,...preferredRest].slice(0,12);
   const texts=await Promise.all(preferred.map(async url=>({url,text:await readResearchUrl(url)})));
-  return texts.filter(x=>x.text.length>=80).slice(0,8).map(x=>({
+  return texts.filter(x=>x.text.length>=80).slice(0,12).map(x=>({
     url:x.url,domain:domainOf(x.url),
     title:x.text.split("\n").find(line=>line.trim())?.trim()??sourceName(x.url),
     text:x.text,priority:sourcePriority(x.url)
