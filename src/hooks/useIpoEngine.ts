@@ -18,7 +18,7 @@ export function useIpoEngine(requestedId?: string) {
 
   const selectedId = useMemo(() => {
     const universe = universeQuery.data ?? [];
-    if (requestedId && universe.some((ipo) => ipo.id === requestedId)) {
+    if (requestedId) {
       return requestedId;
     }
     return universe[0]?.id;
