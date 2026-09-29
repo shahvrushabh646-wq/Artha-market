@@ -18,7 +18,8 @@ function validNumber(value: unknown): value is number {
 export function formatMinApplication(
   verifiedMinApp?: number | null,
   maxPrice?: number | null,
-  lotSize?: number | null
+  lotSize?: number | null,
+  calculatedMinApp?: number | null
 ): FormattedField {
   if (validPositiveNumber(verifiedMinApp)) {
     return {
@@ -31,6 +32,13 @@ export function formatMinApplication(
     const calculated = maxPrice * lotSize;
     return {
       text: `₹${calculated.toLocaleString("en-IN")}`,
+      isAvailable: true,
+    };
+  }
+
+  if (validPositiveNumber(calculatedMinApp)) {
+    return {
+      text: `₹${calculatedMinApp.toLocaleString("en-IN")}`,
       isAvailable: true,
     };
   }
