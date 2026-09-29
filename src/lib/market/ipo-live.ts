@@ -37,8 +37,8 @@ const HEADERS={
 };
 
 
-const EXTERNAL_TIMEOUT_MS=3000;
-const RESEARCH_TIMEOUT_MS=8000;
+const EXTERNAL_TIMEOUT_MS=5000;
+const RESEARCH_TIMEOUT_MS=5000;
 async function fetchWithTimeout(url:string,init:RequestInit={},timeoutMs=EXTERNAL_TIMEOUT_MS):Promise<Response>{
   const controller=new AbortController();
   const timer=setTimeout(()=>controller.abort(),timeoutMs);
@@ -321,15 +321,14 @@ async function enrichGmp(ipo:Ipo){
 async function researchHits(ipo:Ipo):Promise<ResearchHit[]>{
   const name=ipo.name.replace(/\b(IPO|LIMITED|LTD\.?|PRIVATE|PVT\.?)\b/gi," ").replace(/\s+/g," ").trim();
   const queries=[
-    name+" official website investor relations IPO prospectus",
-    name+" DRHP RHP prospectus SEBI",
-    name+" IPO annual report revenue profit EPS",
-    name+" IPO business objects risks price band lot size",
-    name+" IPO GMP subscription"
+    name+" IPO official RHP DRHP NSE registrar lead manager",
+    name+" IPO business products sector location countries",
+    name+" IPO revenue profit EPS financials objects risks",
+    name+" IPO price band lot size issue size allocation subscription GMP"
   ];
   const found=(await Promise.all(queries.map(researchSearch))).flat();
   const unique=[...new Set(found)].filter(u=>!/facebook|instagram|youtube|linkedin|x\.com|twitter\.com/i.test(u));
-  const preferred=unique.sort((a,b)=>sourcePriority(b)-sourcePriority(a)).slice(0,12);
+  const preferred=unique.sort((a,b)=>sourcePriority(b)-sourcePriority(a)).slice(0,8);
   const texts=await Promise.all(preferred.map(async url=>({url,text:await readResearchUrl(url)})));
   return texts.filter(x=>x.text.length>=80).slice(0,8).map(x=>({
     url:x.url,domain:domainOf(x.url),
@@ -666,7 +665,7 @@ export const fetchIpoDetailLive=createServerFn({method:"GET"}).inputValidator((d
     // relying only on one secondary website.
     return await Promise.race([
       universalResearch({...base}),
-      new Promise<Ipo>(resolve=>setTimeout(()=>resolve(base),15000))
+      new Promise<Ipo>(resolve=>setTimeout(()=>resolve(base),30000))
     ]);
   }catch{return base;}
 });
