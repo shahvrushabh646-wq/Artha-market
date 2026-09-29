@@ -374,6 +374,13 @@ function applyResearchText(ipo:Ipo,hits:ResearchHit[]){
   if(promoters.length)ipo.promoters=[...new Set(promoters)];
   if(segments.length)ipo.segments=[...new Set(segments)];
   if(competitors.length)ipo.competitors=[...new Set(competitors)];
+
+  const managers=[...all.matchAll(/(?:book running lead managers?|lead managers?|BRLMs?|merchant bankers?)[^\n:\\-]*[:\\-]\s*([^\n]{10,500})/gi)].slice(0,5).map(m=>clean(m[1]));
+  const registrar=firstText(all,[/(?:registrar to the issue|registrar)[^\n:]*[:\\-]\s*([^\n]{5,180})/i]);
+  const sponsorBank=firstText(all,[/(?:sponsor bank|sponsor banks?)[^\n:]*[:\\-]\s*([^\n]{5,180})/i]);
+  if(managers.length)ipo.leadManagers=[...new Set(managers)];
+  if(registrar)ipo.registrarWebsite=ipo.registrarWebsite??registrar;
+  if(sponsorBank)(ipo as any).sponsorBank=sponsorBank;
 }
 function isCompanyOfficialUrl(url:string,name:string){const d=domainOf(url);if(!d||/sebi\.gov\.in|nseindia\.com|bseindia\.com|chittorgarh\.com|moneycontrol\.com|economictimes\.indiatimes\.com|livemint\.com|groww\.in|zerodha\.com|angelone\.in|upstox\.com|investorgain\.com|ipowatch\.in|ipocentral\.in|niftytrader\.in|ipogram\.in|ipoji\.com/.test(d))return false;const tokens=name.toLowerCase().replace(/\b(limited|ltd|private|pvt|ipo)\b/g," ").split(/[^a-z0-9]+/).filter(x=>x.length>=3);return tokens.some(t=>d.includes(t));}
 function prospectusTypeFromUrl(url:string,text:string){const s=(url+" "+text).toLowerCase();if(/\bdrhp\b|draft red herring/.test(s))return "DRHP" as const;if(/\brhp\b|red herring prospectus/.test(s))return "RHP" as const;if(/abridged prospectus/.test(s))return "Abridged Prospectus" as const;if(/prospectus/.test(s))return "Prospectus" as const;return null;}
