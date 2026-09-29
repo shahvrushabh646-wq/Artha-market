@@ -414,8 +414,57 @@ async function researchQuestion(ipo:Ipo,key:ResearchQuestionKey):Promise<Researc
 
 async function researchHitsByQuestion(ipo:Ipo):Promise<Record<ResearchQuestionKey,ResearchHit[]>>{
   const keys:ResearchQuestionKey[]=["Q1","Q2","Q3","Q4","Q5","Q6","Q7","Q8","Q9"];
-  const pairs=await Promise.all(keys.map(async key=>[key,await researchQuestion(ipo,key)] as const));
-  return Object.fromEntries(pairs) as Record<ResearchQuestionKey,ResearchHit[]>;
+  const result={} as Record<ResearchQuestionKey,ResearchHit[]>;
+  // Deliberately sequential: finish the complete source matrix for Q1 before
+  // starting Q2, then Q3 ... Q9. Each question gets its own independent evidence.
+  for(const key of keys) result[key]=await researchQuestion(ipo,key);
+  return result;
+}
+
+function applyQuestionResearch(ipo:Ipo,key:ResearchQuestionKey,hits:ResearchHit[]){
+  if(!hits.length)return;
+  // Run the existing robust extractor against this question's evidence only,
+  // then copy back ONLY fields belonging to that question. This prevents a
+  // Q2 business page from silently overwriting Q5 financials, etc.
+  const draft={...ipo,
+    promoters:[...ipo.promoters],segments:[...ipo.segments],competitors:[...ipo.competitors],
+    leadManagers:[...ipo.leadManagers],documents:[...ipo.documents],
+    countries:[...ipo.countries],revenues:[...ipo.revenues],profits:[...ipo.profits],eps:[...ipo.eps],
+    objects:[...ipo.objects],risks:[...ipo.risks]
+  };
+  applyResearchText(draft,hits);
+  switch(key){
+    case "Q1":
+      ipo.city=draft.city; ipo.state=draft.state; ipo.promoters=draft.promoters;
+      break;
+    case "Q2":
+      ipo.city=draft.city; ipo.state=draft.state; ipo.segments=draft.segments;
+      break;
+    case "Q3":
+      ipo.business=draft.business; ipo.promoters=draft.promoters; ipo.competitors=draft.competitors;
+      break;
+    case "Q4":
+      ipo.countryCount=draft.countryCount; ipo.countries=draft.countries;
+      ipo.revenues=draft.revenues;
+      break;
+    case "Q5":
+      ipo.revenues=draft.revenues; ipo.profits=draft.profits; ipo.eps=draft.eps;
+      break;
+    case "Q6":
+      ipo.promoterHolding=draft.promoterHolding;
+      break;
+    case "Q7":
+      ipo.objects=draft.objects; ipo.risks=draft.risks;
+      break;
+    case "Q8":
+      // GMP has its own dedicated multi-source enrichment below.
+      break;
+    case "Q9":
+      ipo.leadManagers=draft.leadManagers;
+      ipo.registrar=draft.registrar; ipo.registrarEmail=draft.registrarEmail;
+      ipo.registrarPhone=draft.registrarPhone; ipo.sponsorBank=draft.sponsorBank;
+      break;
+  }
 }
 
 function flattenQuestionHits(byQuestion:Record<ResearchQuestionKey,ResearchHit[]>):ResearchHit[]{
@@ -513,7 +562,7 @@ async function universalResearch(ipo:Ipo){
   // never starve a later question of its own source search.
   for(const key of keys){
     const hits=byQuestion[key]??[];
-    if(hits.length)applyResearchText(ipo,hits);
+    if(hits.length)applyQuestionResearch(ipo,key,hits);
   }
   const hits=flattenQuestionHits(byQuestion);
   if(hits.length){
