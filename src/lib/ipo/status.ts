@@ -1,0 +1,6 @@
+import { indiaToday, parseDate } from "./text";
+import type { IpoStatus } from "./types";
+export function ipoStatus(ipo:{openDate?:string|null;closeDate?:string|null},today=indiaToday()):IpoStatus{const open=parseDate(ipo.openDate)??ipo.openDate??null,close=parseDate(ipo.closeDate)??ipo.closeDate??null;if(open&&today<open)return"UPCOMING";if(close&&today>close)return"CLOSED";if(open&&close&&open<=today&&close>=today)return"OPEN";if(open&&!close)return today<open?"UPCOMING":"OPEN";if(!open&&close)return today>close?"CLOSED":"UPCOMING";return"UPCOMING";}
+export function daysAgoIso(days:number,today=indiaToday()):string{const[y,m,d]=today.split("-").map(Number);const dt=new Date(Date.UTC(y,m-1,d));dt.setUTCDate(dt.getUTCDate()-days);return dt.toISOString().slice(0,10);}
+export function isRecentlyClosed(closeDate:string|null,today=indiaToday(),windowDays=45):boolean{if(!closeDate)return false;const close=parseDate(closeDate)??closeDate;return close<=today&&close>=daysAgoIso(windowDays,today);}
+export function shouldKeepInUniverse(ipo:{name?:string|null;openDate?:string|null;closeDate?:string|null},today=indiaToday()):boolean{if(!ipo.name)return false;const status=ipoStatus(ipo,today);return status==="OPEN"||status==="UPCOMING"||isRecentlyClosed(ipo.closeDate??null,today);}
