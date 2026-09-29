@@ -185,7 +185,10 @@ const SOURCE_RULES=[
   {name:"IPO Central",hosts:["ipocentral.in"],priority:68},
   {name:"NiftyTrader",hosts:["niftytrader.in"],priority:68},
   {name:"IPOGram",hosts:["ipogram.in"],priority:68},
-  {name:"IPO Ji",hosts:["ipoji.com"],priority:68}
+  {name:"IPO Ji",hosts:["ipoji.com"],priority:68},
+  {name:"IPO Guru",hosts:["ipoguru.in"],priority:67},
+  {name:"IPOinfo",hosts:["ipoinfo.ai"],priority:67},
+  {name:"IPO Markets",hosts:["ipomarkets.com"],priority:67}
 ];
 function domainOf(url:string){try{return new URL(url).hostname.replace(/^www\./,"").toLowerCase();}catch{return "";}}
 function sourceName(url:string){const d=domainOf(url);const known=SOURCE_RULES.find(x=>x.hosts.some(h=>d===h||d.endsWith("."+h)));return known?.name??d;}
@@ -205,7 +208,10 @@ async function researchSearch(query:string):Promise<string[]>{
     for(const m of t.matchAll(/\[[^\]]*\]\((https?:\/\/[^\s)]+)\)/g))add(m[1]);
     for(const m of t.matchAll(/\((https?:\/\/[^\s)]+)\)/g))add(m[1]);
     for(const m of t.matchAll(/https?:\/\/[^\s)\]">]+/g))add(m[0]);
-    return urls.slice(0,16);
+    for(const m of t.matchAll(/(?:url\?q=|q=)(https?:\/\/[^&\s)\]">]+)/gi)){
+      try{add(decodeURIComponent(m[1]));}catch{add(m[1]);}
+    }
+    return urls.slice(0,24);
   }catch{return [];}
 }
 async function readResearchUrl(url:string):Promise<string>{
@@ -219,7 +225,7 @@ function parseGmpValue(text:string){
   const s=String(text??"").replace(/\u00a0/g," ").replace(/\s+/g," ");
   const amount=/([+-]?\s*₹?\s*[\d,]+(?:\.\d+)?)/;
   const patterns=[
-    /\b(?:gmp|grey\s*market\s*premium|kotak\s*gmp|ipo\s*premium|expected\s*premium)\b[^₹\d+\-]{0,120}([+-]?\s*₹?\s*[\d,]+(?:\.\d+)?)/i,
+    /\b(?:gmp|gmp\s*today|latest\s*gmp|grey\s*market\s*premium|kotak\s*gmp|ipo\s*premium|expected\s*premium)\b[^₹\d+\-]{0,180}([+-]?\s*₹?\s*[\d,]+(?:\.\d+)?)/i,
     /([+-]?\s*₹?\s*[\d,]+(?:\.\d+)?)[^.!?]{0,120}\b(?:gmp|grey\s*market\s*premium|kotak\s*gmp|ipo\s*premium)\b/i
   ];
   for(const pattern of patterns){
@@ -242,7 +248,7 @@ function parseGmpValue(text:string){
 async function enrichGmp(ipo:Ipo){
   try{
     const name=ipo.name.replace(/\b(IPO|LIMITED|LTD\.?|PRIVATE|PVT\.?)\b/gi," ").replace(/\s+/g," ").trim();
-    const allowed=SOURCE_RULES.filter(x=>x.hosts.length&&/investorgain|ipowatch|ipocentral|chittorgarh|moneycontrol|economictimes|livemint|groww|niftytrader|ipogram|ipoji/i.test(x.hosts[0]));
+    const allowed=SOURCE_RULES.filter(x=>x.hosts.length&&/investorgain|ipowatch|ipocentral|chittorgarh|moneycontrol|economictimes|livemint|groww|niftytrader|ipogram|ipoji|ipoguru|ipoinfo|ipomarkets/i.test(x.hosts[0]));
     // Search each requested GMP publisher separately. This avoids Google returning only
     // the same 1-2 sites for every IPO and lets Artha collect all sources that are
     // actually publishing a GMP for that issue.
@@ -364,6 +370,9 @@ function baseNse(r:any):Ipo{
   const calculatedSubscription=offered&&bid?Number((bid/offered).toFixed(4)):null;
   const subscription=reportedSubscription!=null&&reportedSubscription>0?Number(reportedSubscription.toFixed(2)):calculatedSubscription;
   const subscriptionAmount=bid!=null&&bid>0&&upperPrice!=null?Number((bid*upperPrice/10000000).toFixed(2)):null;
+  const rawLot=n(r.lotSize??r.bidLot??r.bidLotSize??r.lot??r.marketLot);
+  const rawMinimum=n(r.minSubscription??r.minimumApplication??r.minimumInvestment??r.minInvestment??r.minBidValue??r.minimumBidValue);
+  const fallbackMinimum=rawMinimum??(rawLot!=null&&upperPrice!=null?Number((rawLot*upperPrice).toFixed(2)):null);
   return {
     officialWebsite:null,prospectusUrl:null,prospectusType:null,
     symbol:r.symbol??undefined,nseSymbol:r.isBse==="1"?undefined:(r.symbol??undefined),bseScripCode:r.scripCode??r.scripcode??undefined,bseSymbol:r.isBse==="1"?(r.symbol??undefined):undefined,exchange:r.isBse==="1"?"BSE India":"NSE India",exchanges:[r.isBse==="1"?"BSE India":"NSE India"],id:slugId(r.companyName||r.symbol||"ipo"),
@@ -373,10 +382,10 @@ function baseNse(r:any):Ipo{
     rhpStatus:"NOT_FOUND",
     type:r.series==="SME"?"SME":"Mainboard",
     openDate:date(r.issueStartDate),closeDate:date(r.issueEndDate),listingDate:null,
-    issueSize:null,minSubscription:null,subscription,subscriptionAmount,subscriptionSource:r.isBse==="1"?"BSE India":"NSE India",
+    issueSize:null,minSubscription:fallbackMinimum,subscription,subscriptionAmount,subscriptionSource:r.isBse==="1"?"BSE India":"NSE India",
     subscriptionCategories:[],gmpPct:null,gmpRs:null,gmpSources:[],gmpVerifiedSources:[],
     city:null,state:null,business:null,promoters:[],segments:[],competitors:[],countries:[],revenues:[],profits:[],eps:[],
-    priceBand:band(r.issuePrice),lotSize:null,faceValue:null,
+    priceBand:band(r.issuePrice),lotSize:rawLot,faceValue:null,
     sharesOffered:n(r.noOfSharesOffered),offeredToPublic:null,retailShares:null,qibShares:null,niiShares:null,
     freshIssue:null,offerForSale:null,issueType:null,objects:[],risks:[],
     promoterHolding:null,postIssuePromoterHolding:null,moneycontrolUrl:null,
@@ -402,11 +411,16 @@ async function enrichNse(ipo:Ipo,cookie:string){
     const low=clean(info["Price Range"]).match(/(?:Rs\.?|₹)?\s*([\d,.]+)\s*(?:-|to|–)/i);
     const lowPrice=n(low?.[1]);
     const applicationPrice=high??lowPrice;
-    if(ipo.lotSize&&applicationPrice){
-      const lotValue=ipo.lotSize*applicationPrice;
-      // SME individual applications require at least 2 lots and a bid value above ₹2 lakh.
-      const minimumLots=ipo.type==="SME"?Math.max(2,Math.ceil(200000/lotValue)):1;
-      ipo.minSubscription=ipo.lotSize*minimumLots*applicationPrice;
+    const reportedMinimum=n(
+      info["Minimum Application"]??info["Minimum Investment"]??info["Min Investment"]??
+      info["Minimum Bid Value"]??info["Min Bid Value"]
+    );
+    if(reportedMinimum!=null&&reportedMinimum>0){
+      ipo.minSubscription=reportedMinimum;
+    }else if(ipo.lotSize&&applicationPrice){
+      // Artha's list fallback is deliberately deterministic:
+      // upper price band × one lot, exactly matching the UI note.
+      ipo.minSubscription=Number((ipo.lotSize*applicationPrice).toFixed(2));
     }
     const cats=rowsFromCategory(d?.activeCat);
     const grouped=new Map<string,Array<{label:string;row:any;value:number|null}>>();
@@ -459,6 +473,10 @@ async function enrichNse(ipo:Ipo,cookie:string){
     const bidRows=rowsFromNse(d?.bidDetails??d?.subscriptionData??d?.biddingData);
     const bidShares=bidRows.reduce((sum,row)=>sum+(n(row?.noOfsharesBid??row?.noOfSharesBid??row?.sharesBid)??0),0);
     if(bidShares>0&&high)ipo.subscriptionAmount=Number((bidShares*high/10000000).toFixed(2));
+    if(ipo.subscriptionAmount==null&&ipo.subscription!=null&&ipo.sharesOffered!=null&&high){
+      const estimatedBidShares=ipo.sharesOffered*ipo.subscription;
+      ipo.subscriptionAmount=Number((estimatedBidShares*high/10000000).toFixed(2));
+    }
     // Never replace a verified live total with an empty/detail value. If detail exposes
     // the total, accept it; otherwise retain the value calculated directly from the
     // official current-issue feed (bid shares / offered shares).
@@ -543,7 +561,7 @@ async function loadNse(){
   // Populate GMP on the IPO list itself. Each source is optional: if a publisher
   // has no GMP for an issue, it is skipped; available sources are combined and
   // converted to a percentage using the upper price band.
-  const gmpCandidates=liveBase.filter(x=>x.symbol).slice(0,16);
+  const gmpCandidates=liveBase.filter(x=>x.symbol);
   const gmpEnriched=await Promise.all(gmpCandidates.map(async ipo=>{
     try{
       return await Promise.race([
