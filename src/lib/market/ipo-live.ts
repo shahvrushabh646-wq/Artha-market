@@ -215,7 +215,7 @@ async function readResearchUrl(url:string):Promise<string>{
   }catch{return "";}
 }
 function parseGmpValue(text:string){
-  const blocks=clean(text).split(/(?:\\n|\\r|[.!?])+/).filter(Boolean);
+  const blocks=clean(text).split(/[\\n\\r.!?]+/).filter(Boolean);
   const strict=/\\b(gmp|grey\\s*market|kotak\\s*gmp|ipo\\s*premium|expected\\s*premium)\\b/i;
   const value=/([+-]?\\s*₹?\\s*[\\d,]+(?:\\.\\d+)?)/;
   for(const block of blocks){
