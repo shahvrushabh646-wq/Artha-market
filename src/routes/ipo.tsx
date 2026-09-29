@@ -143,7 +143,7 @@ function IpoDetail({id,ipo,loading,onRefresh}:{id:string;ipo:any;loading:boolean
     <div className="text-xs font-medium text-fg">Data sources checked</div>
     <div className="mt-1 text-xs leading-5 text-muted">{ipo.verifiedSources?.length?ipo.verifiedSources.join(" • "):"ચકાસાયેલ source ઉપલબ્ધ નથી"}</div>
   </div>
-</Section></Section><IpoCompanyFaqSection companyName={ipo.name} metadata={{
+</Section><IpoCompanyFaqSection companyName={ipo.name} metadata={{
   description: ipo.business ?? undefined,
   objectsOfIssue: ipo.objects?.length ? ipo.objects : undefined,
   issueStructure: [
