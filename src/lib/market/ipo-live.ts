@@ -346,7 +346,12 @@ function applyResearchText(ipo:Ipo,hits:ResearchHit[]){
   const all=hits.map(h=>h.text).join("\n");
   const officialText=official.map(h=>h.text).join("\n");
   const text=officialText||all;
-  const business=firstText(all,[/(?:business of the company|our business|company is engaged in|we are engaged in|business overview)[:\s]+([^\n]{60,700})/i,/(?:about [^\n]{0,80}|products and services|business model)[:\s]+([^\n]{60,700})/i]);
+  const business=firstText(all,[
+    /(?:business of the company|our business|company is engaged in|we are engaged in|business overview|nature of business|principal business activities?)[:\s]+([^\n]{40,900})/i,
+    /(?:the company|our company|company)\s+(?:is|are)\s+(?:primarily\s+|mainly\s+|principally\s+)?engaged\s+in\s+([^\n.]{40,900})/i,
+    /(?:the company|our company|company)\s+(?:operates|functions)\s+as\s+(?:an?\s+)?([^\n.]{40,700})/i,
+    /(?:about [^\n]{0,100}|products and services|business model|what the company does)[:\s]+([^\n]{40,900})/i
+  ]);
   if(business)ipo.business=business;
   const office=firstText(officialText||all,[/(?:registered office|corporate office|registered and corporate office)[:\s]+([^\n]{20,220})/i]);
   if(office){
@@ -384,6 +389,21 @@ function applyResearchText(ipo:Ipo,hits:ResearchHit[]){
   if(promoters.length)ipo.promoters=[...new Set(promoters)];
   if(segments.length)ipo.segments=[...new Set(segments)];
   if(competitors.length)ipo.competitors=[...new Set(competitors)];
+
+  // Universal Q3 fallback: every IPO should get a useful main-business summary
+  // whenever reliable research exposes sector/product/segment information. Never
+  // invent a business description; derive it only from fields already extracted.
+  if(!ipo.business){
+    const sectorValue=sector ? clean(sector) : "";
+    const productValue=productText ? clean(productText) : "";
+    const segmentValue=segments.length ? clean(segments.slice(0,3).join("; ")) : "";
+    const pieces=[sectorValue,productValue,segmentValue].filter(Boolean);
+    if(pieces.length){
+      ipo.business=pieces.length===1
+        ? pieces[0]
+        : "The company operates in " + pieces[0] + ". Its main products/services or business segments include " + pieces.slice(1).join("; ") + ".";
+    }
+  }
 
   const managers=[...all.matchAll(/(?:book running lead managers?|lead managers?|BRLMs?|merchant bankers?)[^\n:\\-]*[:\\-]\s*([^\n]{10,500})/gi)].slice(0,5).map(m=>clean(m[1]));
   const registrar=firstText(all,[/(?:registrar to the issue|registrar)[^\n:]*[:\\-]\s*([^\n]{5,180})/i]);
