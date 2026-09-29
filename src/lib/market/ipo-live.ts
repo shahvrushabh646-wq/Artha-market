@@ -565,14 +565,23 @@ export const fetchOpenIposLive=createServerFn({method:"GET"}).handler(async()=>{
   }
 });
 
+export const fetchIpoDetailFast=createServerFn({method:"GET"}).handler(async({data}:{data:{id:string}})=>{
+  const list=await loadNse();
+  const ipo=list.find(x=>x.id===data.id);
+  if(!ipo)return null;
+  return {...ipo,rhpStatus:ipo.rhpStatus??"NOT_FOUND"};
+});
+
 export const fetchIpoDetailLive=createServerFn({method:"GET"}).handler(async({data}:{data:{id:string}})=>{
   const list=await loadNse();
   const ipo=list.find(x=>x.id===data.id);
   if(!ipo)return null;
   try{
+    // Enrichment is explicitly non-critical. The fast endpoint above supplies the
+    // primary exchange data immediately; this tier hydrates GMP/RHP/research fields.
     return await Promise.race([
-      universalResearch(ipo),
-      new Promise<Ipo>(resolve=>setTimeout(()=>resolve(ipo),15000))
+      universalResearch({...ipo}),
+      new Promise<Ipo>(resolve=>setTimeout(()=>resolve(ipo),9000))
     ]);
   }catch{return ipo;}
 });
