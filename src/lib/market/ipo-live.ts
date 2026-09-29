@@ -330,89 +330,99 @@ async function enrichGmp(ipo:Ipo){
   }
   return ipo;
 }
-async function researchHits(ipo:Ipo):Promise<ResearchHit[]>{
-  const name=ipo.name.replace(/\b(IPO|LIMITED|LTD\.?|PRIVATE|PVT\.?)\b/gi," ").replace(/\s+/g," ").trim();
+type ResearchQuestionKey="Q1"|"Q2"|"Q3"|"Q4"|"Q5"|"Q6"|"Q7"|"Q8"|"Q9";
 
-  // Q1-Q9 source aggregation: official exchange/prospectus sources remain highest
-  // priority, while Yahoo Finance, Angel One and Zerodha are explicitly fetched
-  // for every IPO. Their usable data is merged into the same Q1-Q9 model; one
-  // publisher failing or not covering an SME IPO must not block the others.
-  const queries=[
-    name+" IPO official RHP DRHP NSE registrar lead manager",
-    name+" IPO business products sector location countries exports sales",
-    name+" IPO revenue profit EPS financials 2026 2025 2024",
-    name+" IPO price band lot size issue size allocation subscription GMP",
-    name+" IPO details site:zerodha.com/ipo",
-    name+" IPO price band lot size issue size business financials risks site:zerodha.com/ipo",
-    name+" IPO details site:angelone.in/ipo",
-    name+" IPO price band lot size issue size business financials risks site:angelone.in/ipo",
-    name+" IPO financials business risks site:finance.yahoo.com",
-    name+" IPO price band lot size issue size business financials risks site:finance.yahoo.com",
-    name+" IPO details price band lot size business financials site:groww.in/ipo",
-    name+" IPO details price band lot size business financials site:upstox.com/ipo",
-    name+" IPO details price band lot size business financials site:5paisa.com",
-    name+" IPO details price band lot size business financials site:icicidirect.com",
-    name+" IPO details price band lot size business financials site:hdfcsec.com",
-    name+" IPO details price band lot size business financials site:kotaksecurities.com",
-    name+" IPO details price band lot size business financials site:motilaloswal.com",
-    name+" IPO details price band lot size business financials site:iifl.com",
-    name+" IPO details price band lot size business financials site:sbisecurities.in",
-    name+" IPO details price band lot size business financials site:sharekhan.com",
-    name+" IPO details price band lot size business financials site:nuvamawealth.com",
-    name+" IPO details price band lot size business financials site:dhan.co",
-    name+" IPO details price band lot size business financials site:paytmmoney.com",
-    name+" IPO financials business risks site:moneycontrol.com"
-  ];
-  const found=(await Promise.all(queries.map(researchSearch))).flat();
-  const unique=[...new Set(found)].filter(u=>!/facebook|instagram|youtube|linkedin|x\.com|twitter\.com/i.test(u));
+const QUESTION_QUERIES:Record<ResearchQuestionKey,string[]>={
+  Q1:["IPO company overview official offer details RHP DRHP company profile"],
+  Q2:["IPO registered office location sector products services business segments"],
+  Q3:["IPO main business what company does products services customers revenue model"],
+  Q4:["IPO countries exports domestic sales geographic revenue country wise sales"],
+  Q5:["IPO financials FY2026 FY2025 FY2024 revenue profit EPS restated financial statements"],
+  Q6:["IPO price band lot size issue size fresh issue OFS allocation promoter holding subscription"],
+  Q7:["IPO objects of issue use of proceeds capex risks risk factors"],
+  Q8:["IPO GMP grey market premium latest GMP today"],
+  Q9:["IPO registrar lead manager BRLM sponsor bank market maker contact details"]
+};
 
-  const sourceHosts=[
-    {name:"Yahoo Finance",host:"finance.yahoo.com"},
-    {name:"Angel One",host:"angelone.in"},
-    {name:"Zerodha",host:"zerodha.com"},
-    {name:"Groww",host:"groww.in"},
-    {name:"Upstox",host:"upstox.com"},
-    {name:"5paisa",host:"5paisa.com"},
-    {name:"ICICI Direct",host:"icicidirect.com"},
-    {name:"HDFC Securities",host:"hdfcsec.com"},
-    {name:"Kotak Neo",host:"kotaksecurities.com"},
-    {name:"Motilal Oswal",host:"motilaloswal.com"},
-    {name:"IIFL Securities",host:"iifl.com"},
-    {name:"SBI Securities",host:"sbisecurities.in"},
-    {name:"Sharekhan",host:"sharekhan.com"},
-    {name:"Nuvama",host:"nuvamawealth.com"},
-    {name:"Dhan",host:"dhan.co"},
-    {name:"Paytm Money",host:"paytmmoney.com"}
-  ];
+const QUESTION_SOURCE_RULES=SOURCE_RULES.filter(x=>x.hosts.length).map(x=>({
+  ...x,
+  // One canonical host per source brand keeps the matrix complete without
+  // multiplying requests for the same publisher.
+  host:x.hosts[0]
+}));
 
-  // Keep at least one crawlable result from each of the three requested sources
-  // whenever that source actually publishes a page for the IPO. Then fill the
-  // remaining research slots by source priority.
-  const bySource:Record<string,string[]>={};
-  for(const source of sourceHosts){
-    bySource[source.name]=unique.filter(u=>{
-      const d=domainOf(u);
-      return d===source.host||d.endsWith("."+source.host);
-    }).slice(0,2);
-  }
-  const mandatory=sourceHosts
-    .flatMap(source=>bySource[source.name]??[])
-    .filter((u,i,a)=>a.indexOf(u)===i);
-
-  const preferredRest=unique
-    .filter(u=>!mandatory.includes(u))
-    .sort((a,b)=>sourcePriority(b)-sourcePriority(a));
-
-  // 12 source pages is enough to retain all three requested publishers plus
-  // official/secondary evidence without making detail loading excessively slow.
-  const preferred=[...mandatory,...preferredRest].slice(0,20);
-  const texts=await Promise.all(preferred.map(async url=>({url,text:await readResearchUrl(url)})));
-  return texts.filter(x=>x.text.length>=80).slice(0,20).map(x=>({
-    url:x.url,domain:domainOf(x.url),
-    title:x.text.split("\n").find(line=>line.trim())?.trim()??sourceName(x.url),
-    text:x.text,priority:sourcePriority(x.url)
-  }));
+async function mapWithConcurrency<T,R>(items:T[],limit:number,fn:(item:T)=>Promise<R>):Promise<R[]>{
+  const out:R[]=new Array(items.length);
+  let cursor=0;
+  const worker=async()=>{
+    while(true){
+      const i=cursor++;
+      if(i>=items.length)return;
+      try{out[i]=await fn(items[i]);}catch{out[i]=null as R;}
+    }
+  };
+  await Promise.all(Array.from({length:Math.min(limit,items.length)},()=>worker()));
+  return out;
 }
+
+async function researchQuestion(ipo:Ipo,key:ResearchQuestionKey):Promise<ResearchHit[]>{
+  const name=ipo.name.replace(/\b(IPO|LIMITED|LTD\.?|PRIVATE|PVT\.?)\b/gi," ").replace(/\s+/g," ").trim();
+  const suffix=QUESTION_QUERIES[key][0];
+  // QUESTION-FIRST MATRIX:
+  // Q1 is independently sent to every source, then Q2 is independently sent
+  // to every source, and so on through Q9. We do not first build one pooled
+  // page list and then try to answer all nine questions from that cap.
+  const jobs=QUESTION_SOURCE_RULES.map(rule=>({
+    rule,
+    query:name+" "+suffix+" site:"+rule.host
+  }));
+  const found=await mapWithConcurrency(jobs,12,async job=>{
+    const urls=await researchSearch(job.query);
+    const candidates=[...new Set(urls)].filter(u=>{
+      const d=domainOf(u);
+      return d===job.rule.host||d.endsWith("."+job.rule.host);
+    }).slice(0,1);
+    for(const url of candidates){
+      const text=await readResearchUrl(url);
+      if(text.length>=80)return {
+        url,domain:domainOf(url),
+        title:text.split("\\n").find(line=>line.trim())?.trim()??job.rule.name,
+        text,priority:job.rule.priority
+      } as ResearchHit;
+    }
+    return null;
+  });
+  const hits=found.filter((x):x is ResearchHit=>!!x);
+  // Also ask the web-wide index for the same question. This catches an issuer
+  // page or a secondary source that is not indexed under one of the named
+  // publisher domains, while the source matrix above remains the primary path.
+  const broad=await researchSearch(name+" "+suffix);
+  const extra=await mapWithConcurrency([...new Set(broad)].slice(0,10),4,async url=>{
+    if(/facebook|instagram|youtube|linkedin|x\\.com|twitter\\.com/i.test(url))return null;
+    const text=await readResearchUrl(url);
+    return text.length>=80?{
+      url,domain:domainOf(url),
+      title:text.split("\\n").find(line=>line.trim())?.trim()??sourceName(url),
+      text,priority:sourcePriority(url)
+    } as ResearchHit:null;
+  });
+  for(const h of extra.filter((x):x is ResearchHit=>!!x)){
+    if(!hits.some(x=>x.url===h.url))hits.push(h);
+  }
+  return hits.sort((a,b)=>b.priority-a.priority);
+}
+
+async function researchHitsByQuestion(ipo:Ipo):Promise<Record<ResearchQuestionKey,ResearchHit[]>>{
+  const keys:ResearchQuestionKey[]=["Q1","Q2","Q3","Q4","Q5","Q6","Q7","Q8","Q9"];
+  const pairs=await Promise.all(keys.map(async key=>[key,await researchQuestion(ipo,key)] as const));
+  return Object.fromEntries(pairs) as Record<ResearchQuestionKey,ResearchHit[]>;
+}
+
+function flattenQuestionHits(byQuestion:Record<ResearchQuestionKey,ResearchHit[]>):ResearchHit[]{
+  const all=Object.values(byQuestion).flat();
+  return [...new Map(all.map(h=>[h.url,h])).values()].sort((a,b)=>b.priority-a.priority);
+}
+
 function applyResearchText(ipo:Ipo,hits:ResearchHit[]){
   const official=hits.filter(h=>h.priority>=96);
   const all=hits.map(h=>h.text).join("\n");
