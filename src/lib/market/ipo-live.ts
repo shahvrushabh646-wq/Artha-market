@@ -37,8 +37,8 @@ const HEADERS={
 };
 
 
-const EXTERNAL_TIMEOUT_MS=5000;
-const RESEARCH_TIMEOUT_MS=5000;
+const EXTERNAL_TIMEOUT_MS=7000;
+const RESEARCH_TIMEOUT_MS=8000;
 async function fetchWithTimeout(url:string,init:RequestInit={},timeoutMs=EXTERNAL_TIMEOUT_MS):Promise<Response>{
   const controller=new AbortController();
   const timer=setTimeout(()=>controller.abort(),timeoutMs);
@@ -200,6 +200,17 @@ const SOURCE_RULES=[
   {name:"Angel One",hosts:["angelone.in"],priority:72},
   {name:"Yahoo Finance",hosts:["finance.yahoo.com"],priority:72},
   {name:"Upstox",hosts:["upstox.com"],priority:70},
+  {name:"5paisa",hosts:["5paisa.com"],priority:69},
+  {name:"ICICI Direct",hosts:["icicidirect.com"],priority:69},
+  {name:"HDFC Securities",hosts:["hdfcsec.com"],priority:69},
+  {name:"Kotak Neo",hosts:["kotaksecurities.com","kotakneo.com"],priority:69},
+  {name:"Motilal Oswal",hosts:["motilaloswal.com"],priority:69},
+  {name:"IIFL Securities",hosts:["indiainfoline.com","iifl.com"],priority:69},
+  {name:"SBI Securities",hosts:["sbisecurities.in"],priority:69},
+  {name:"Sharekhan",hosts:["sharekhan.com"],priority:69},
+  {name:"Nuvama",hosts:["nuvamawealth.com"],priority:69},
+  {name:"Dhan",hosts:["dhan.co"],priority:69},
+  {name:"Paytm Money",hosts:["paytmmoney.com"],priority:69},
   {name:"InvestorGain",hosts:["investorgain.com"],priority:68},
   {name:"IPO Watch",hosts:["ipowatch.in"],priority:68},
   {name:"IPO Central",hosts:["ipocentral.in"],priority:68},
@@ -337,6 +348,19 @@ async function researchHits(ipo:Ipo):Promise<ResearchHit[]>{
     name+" IPO price band lot size issue size business financials risks site:angelone.in/ipo",
     name+" IPO financials business risks site:finance.yahoo.com",
     name+" IPO price band lot size issue size business financials risks site:finance.yahoo.com",
+    name+" IPO details price band lot size business financials site:groww.in/ipo",
+    name+" IPO details price band lot size business financials site:upstox.com/ipo",
+    name+" IPO details price band lot size business financials site:5paisa.com",
+    name+" IPO details price band lot size business financials site:icicidirect.com",
+    name+" IPO details price band lot size business financials site:hdfcsec.com",
+    name+" IPO details price band lot size business financials site:kotaksecurities.com",
+    name+" IPO details price band lot size business financials site:motilaloswal.com",
+    name+" IPO details price band lot size business financials site:iifl.com",
+    name+" IPO details price band lot size business financials site:sbisecurities.in",
+    name+" IPO details price band lot size business financials site:sharekhan.com",
+    name+" IPO details price band lot size business financials site:nuvamawealth.com",
+    name+" IPO details price band lot size business financials site:dhan.co",
+    name+" IPO details price band lot size business financials site:paytmmoney.com",
     name+" IPO financials business risks site:moneycontrol.com"
   ];
   const found=(await Promise.all(queries.map(researchSearch))).flat();
@@ -345,7 +369,20 @@ async function researchHits(ipo:Ipo):Promise<ResearchHit[]>{
   const sourceHosts=[
     {name:"Yahoo Finance",host:"finance.yahoo.com"},
     {name:"Angel One",host:"angelone.in"},
-    {name:"Zerodha",host:"zerodha.com"}
+    {name:"Zerodha",host:"zerodha.com"},
+    {name:"Groww",host:"groww.in"},
+    {name:"Upstox",host:"upstox.com"},
+    {name:"5paisa",host:"5paisa.com"},
+    {name:"ICICI Direct",host:"icicidirect.com"},
+    {name:"HDFC Securities",host:"hdfcsec.com"},
+    {name:"Kotak Neo",host:"kotaksecurities.com"},
+    {name:"Motilal Oswal",host:"motilaloswal.com"},
+    {name:"IIFL Securities",host:"iifl.com"},
+    {name:"SBI Securities",host:"sbisecurities.in"},
+    {name:"Sharekhan",host:"sharekhan.com"},
+    {name:"Nuvama",host:"nuvamawealth.com"},
+    {name:"Dhan",host:"dhan.co"},
+    {name:"Paytm Money",host:"paytmmoney.com"}
   ];
 
   // Keep at least one crawlable result from each of the three requested sources
@@ -368,9 +405,9 @@ async function researchHits(ipo:Ipo):Promise<ResearchHit[]>{
 
   // 12 source pages is enough to retain all three requested publishers plus
   // official/secondary evidence without making detail loading excessively slow.
-  const preferred=[...mandatory,...preferredRest].slice(0,12);
+  const preferred=[...mandatory,...preferredRest].slice(0,20);
   const texts=await Promise.all(preferred.map(async url=>({url,text:await readResearchUrl(url)})));
-  return texts.filter(x=>x.text.length>=80).slice(0,12).map(x=>({
+  return texts.filter(x=>x.text.length>=80).slice(0,20).map(x=>({
     url:x.url,domain:domainOf(x.url),
     title:x.text.split("\n").find(line=>line.trim())?.trim()??sourceName(x.url),
     text:x.text,priority:sourcePriority(x.url)
@@ -736,7 +773,7 @@ export const fetchIpoDetailLive=createServerFn({method:"GET"}).inputValidator((d
     // relying only on one secondary website.
     return await Promise.race([
       universalResearch({...base}),
-      new Promise<Ipo>(resolve=>setTimeout(()=>resolve(base),30000))
+      new Promise<Ipo>(resolve=>setTimeout(()=>resolve(base),60000))
     ]);
   }catch{return base;}
 });
