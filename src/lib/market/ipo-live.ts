@@ -561,7 +561,16 @@ async function loadNse(){
       canonicalRecords.push(ipo);
     }
   }
-  const base=[...map.values()].filter(x=>!!x.name&&!!x.closeDate&&x.closeDate>=today);
+  // Keep current/upcoming issues plus a bounded recent-closed window so the IPO page can
+  // truthfully show OPEN, UPCOMING and CLOSED instead of relabelling closed issues as upcoming.
+  const recentClosedCutoff=(() => {
+    const d=new Date(today+"T00:00:00Z");
+    d.setUTCDate(d.getUTCDate()-30);
+    return d.toISOString().slice(0,10);
+  })();
+  const base=[...map.values()].filter(x=>
+    !!x.name&&!!x.closeDate&&x.closeDate>=recentClosedCutoff
+  );
 
   // Enrich OPEN issues from NSE detail in a bounded, failure-safe way. The official
   // current-issue feed remains the source of truth for names/subscription, while detail
@@ -592,7 +601,7 @@ async function loadNse(){
   }));
   const gmpById=new Map(gmpEnriched.map(x=>[x.id,x]));
   return liveBase.map(x=>gmpById.get(x.id)??x)
-    .filter(x=>!!x.name&&!!x.closeDate&&x.closeDate>=today)
+    .filter(x=>!!x.name&&!!x.closeDate&&x.closeDate>=recentClosedCutoff)
     .sort((a,b)=>(a.openDate??"").localeCompare(b.openDate??"")||a.name.localeCompare(b.name));
 }
 function isNseOpen(ipo:Ipo,today:string){
