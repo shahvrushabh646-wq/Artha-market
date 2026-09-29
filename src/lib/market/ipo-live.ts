@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-type Ipo={officialWebsite?:string|null;prospectusUrl?:string|null;prospectusType?:"DRHP"|"RHP"|"Prospectus"|"Abridged Prospectus"|null;symbol?:string;exchange?:"NSE India"|"BSE India";id:string;name:string;type:"Mainboard"|"SME";openDate:string|null;closeDate:string|null;listingDate:string|null;issueSize:number|null;minSubscription:number|null;subscription:number|null;subscriptionAmount:number|null;subscriptionSource:string|null;subscriptionCategories:{category:string;value:number|null}[];gmpPct:number|null;gmpRs:number|null;gmpSources:{source:string;url:string|null;pct:number|null;rs:number|null;asOf:string|null}[];gmpVerifiedSources:string[];city:string|null;state:string|null;business:string|null;promoters:string[];segments:string[];competitors:string[];countries:{country:string;business:string;salesPct:number|null}[];revenues:{year:string;value:number|null}[];profits:{year:string;value:number|null}[];eps:{year:string;value:number|null}[];priceBand:string|null;lotSize:number|null;faceValue:number|null;sharesOffered:number|null;offeredToPublic:number|null;retailShares:number|null;qibShares:number|null;niiShares:number|null;freshIssue:number|null;offerForSale:number|null;issueType:string|null;objects:string[];risks:string[];promoterHolding:number|null;postIssuePromoterHolding:number|null;moneycontrolUrl:string|null;detailSource:string|null;verifiedSources:string[];sourceUrls:string[];verifiedAt:string};
+type Ipo={nseSymbol?:string|null;bseScripCode?:string|null;bseSymbol?:string|null;normalizedName:string;issueDateKey:string|null;rhpStatus:"NOT_FOUND"|"DISCOVERED_UNPARSED"|"PARSED"|"PARSE_FAILED";officialWebsite?:string|null;prospectusUrl?:string|null;prospectusType?:"DRHP"|"RHP"|"Prospectus"|"Abridged Prospectus"|null;symbol?:string;exchange?:"NSE India"|"BSE India"|"BOTH"|"UNKNOWN";exchanges:string[];id:string;name:string;type:"Mainboard"|"SME";openDate:string|null;closeDate:string|null;listingDate:string|null;issueSize:number|null;minSubscription:number|null;subscription:number|null;subscriptionAmount:number|null;subscriptionSource:string|null;subscriptionCategories:{category:string;value:number|null}[];gmpPct:number|null;gmpRs:number|null;gmpSources:{source:string;url:string|null;pct:number|null;rs:number|null;asOf:string|null}[];gmpVerifiedSources:string[];city:string|null;state:string|null;business:string|null;promoters:string[];segments:string[];competitors:string[];countries:{country:string;business:string;salesPct:number|null}[];revenues:{year:string;value:number|null}[];profits:{year:string;value:number|null}[];eps:{year:string;value:number|null}[];priceBand:string|null;lotSize:number|null;faceValue:number|null;sharesOffered:number|null;offeredToPublic:number|null;retailShares:number|null;qibShares:number|null;niiShares:number|null;freshIssue:number|null;offerForSale:number|null;issueType:string|null;objects:string[];risks:string[];promoterHolding:number|null;postIssuePromoterHolding:number|null;moneycontrolUrl:string|null;detailSource:string|null;verifiedSources:string[];sourceUrls:string[];verifiedAt:string};
 const NSE = "https://www.nseindia.com";
 const NSE_PAGE = "https://www.nseindia.com/market-data/all-upcoming-issues-ipo";
 const cache=new Map<string,{expires:number;value:Ipo[]}>();
@@ -17,9 +17,96 @@ const HEADERS={
   Referer:NSE_PAGE
 };
 
+
+const EXTERNAL_TIMEOUT_MS=3000;
+async function fetchWithTimeout(url:string,init:RequestInit={},timeoutMs=EXTERNAL_TIMEOUT_MS):Promise<Response>{
+  const controller=new AbortController();
+  const timer=setTimeout(()=>controller.abort(),timeoutMs);
+  try{return await fetch(url,{...init,signal:controller.signal});}
+  finally{clearTimeout(timer);}
+}
+function normalizeCompanyName(v:unknown){
+  return clean(v).toLowerCase()
+    .replace(/\\b(limited|ltd|private|pvt|company|corporation|inc)\\b/g," ")
+    .replace(/[^a-z0-9]+/g," ")
+    .replace(/\\s+/g," ").trim();
+}
+function issueDateKey(openDate:string|null,closeDate:string|null){
+  return openDate??closeDate??null;
+}
+function buildCanonicalKey(item:Pick<Ipo,"nseSymbol"|"bseScripCode"|"bseSymbol"|"normalizedName"|"issueDateKey">){
+  if(item.nseSymbol)return "NSE:"+item.nseSymbol.toUpperCase();
+  if(item.bseScripCode)return "BSE_CODE:"+item.bseScripCode;
+  if(item.bseSymbol)return "BSE_SYM:"+item.bseSymbol.toUpperCase();
+  return "NAME_DATE:"+item.normalizedName+"_"+(item.issueDateKey||"NODATE");
+}
+function sameCompanyIssue(a:Ipo,b:Ipo){
+  if(a.nseSymbol&&b.nseSymbol)return a.nseSymbol.toUpperCase()===b.nseSymbol.toUpperCase();
+  if(a.bseScripCode&&b.bseScripCode)return a.bseScripCode===b.bseScripCode;
+  if(a.bseSymbol&&b.bseSymbol)return a.bseSymbol.toUpperCase()===b.bseSymbol.toUpperCase();
+  return !!a.normalizedName&&a.normalizedName===b.normalizedName&&
+    !!a.issueDateKey&&!!b.issueDateKey&&a.issueDateKey===b.issueDateKey;
+}
+function mergeIpoRecords(existing:Ipo,incoming:Ipo):Ipo{
+  const exchanges=[...(existing.exchanges??[]),...(incoming.exchanges??[])];
+  const hasNse=!!(existing.nseSymbol||incoming.nseSymbol);
+  const hasBse=!!(existing.bseScripCode||incoming.bseScripCode||existing.bseSymbol||incoming.bseSymbol);
+  return {
+    ...existing,...incoming,
+    id:existing.id,
+    name:existing.name||incoming.name,
+    nseSymbol:existing.nseSymbol||incoming.nseSymbol,
+    bseScripCode:existing.bseScripCode||incoming.bseScripCode,
+    bseSymbol:existing.bseSymbol||incoming.bseSymbol,
+    normalizedName:existing.normalizedName||incoming.normalizedName,
+    issueDateKey:existing.issueDateKey||incoming.issueDateKey,
+    exchanges:[...new Set(exchanges)],
+    exchange:hasNse&&hasBse?"BOTH":(hasNse?"NSE India":hasBse?"BSE India":"UNKNOWN"),
+    // Never let a sparse secondary exchange record erase verified primary values.
+    subscription:incoming.subscription??existing.subscription,
+    subscriptionAmount:incoming.subscriptionAmount??existing.subscriptionAmount,
+    sharesOffered:incoming.sharesOffered??existing.sharesOffered,
+    verifiedSources:[...new Set([...(existing.verifiedSources??[]),...(incoming.verifiedSources??[])])],
+    sourceUrls:[...new Set([...(existing.sourceUrls??[]),...(incoming.sourceUrls??[])])]
+  };
+}
+function scoreCandidateArray(arr:unknown[],expectedFields:string[]){
+  if(!Array.isArray(arr)||arr.length===0)return 0;
+  const sample=arr.slice(0,5);
+  let total=0,count=0;
+  for(const item of sample){
+    if(!item||typeof item!=="object"||Array.isArray(item))continue;
+    const keys=Object.keys(item as Record<string,unknown>);
+    const matched=expectedFields.filter(k=>k in (item as Record<string,unknown>)).length;
+    const coverage=matched/Math.max(1,expectedFields.length);
+    const density=matched/Math.max(1,keys.length);
+    const noise=Math.max(0,(keys.length-matched)/Math.max(1,keys.length));
+    total += coverage*70 + density*30 - noise*20;
+    count++;
+  }
+  return count?total/count:0;
+}
+function deepFindScoredRecordArray(raw:unknown,expectedFields:string[],maxDepth=3):any[]{
+  const candidates:Array<{arr:any[];score:number;depth:number}>=[];
+  const visit=(value:unknown,depth:number)=>{
+    if(depth>maxDepth||value==null)return;
+    if(Array.isArray(value)){
+      const arr=value.filter(x=>x&&typeof x==="object"&&!Array.isArray(x));
+      if(arr.length)candidates.push({arr,score:scoreCandidateArray(arr,expectedFields)-depth*5,depth});
+      for(const item of value.slice(0,8))visit(item,depth+1);
+      return;
+    }
+    if(typeof value==="object"){
+      for(const child of Object.values(value as Record<string,unknown>))visit(child,depth+1);
+    }
+  };
+  visit(raw,0);
+  candidates.sort((a,b)=>b.score-a.score||a.depth-b.depth);
+  return candidates[0]?.arr??[];
+}
 async function nseSession(){
   try{
-    const r=await fetch(NSE,{headers:HEADERS,cache:"no-store"});
+    const r=await fetchWithTimeout(NSE,{headers:HEADERS,cache:"no-store"});
     const h=r.headers as Headers & {getSetCookie?:()=>string[]};
     const direct=h.getSetCookie?.()??[];
     if(direct.length) return direct.map(x=>x.split(";")[0]).join("; ");
@@ -42,12 +129,12 @@ async function parseProxyJson(text:string){
 }
 async function fetchNse(path:string,cookie:string){
   try{
-    const r=await fetch(NSE+path,{headers:{...HEADERS,Cookie:cookie},cache:"no-store"});
+    const r=await fetchWithTimeout(NSE+path,{headers:{...HEADERS,Cookie:cookie},cache:"no-store"});
     if(!r.ok) throw new Error("NSE HTTP "+r.status);
     return await r.json();
   }catch{
     const proxy="https://r.jina.ai/http://www.nseindia.com"+path;
-    const r=await fetch(proxy,{headers:{"User-Agent":HEADERS["User-Agent"],Accept:"application/json,text/plain,*/*"},cache:"no-store"});
+    const r=await fetchWithTimeout(proxy,{headers:{"User-Agent":HEADERS["User-Agent"],Accept:"application/json,text/plain,*/*"},cache:"no-store"});
     if(!r.ok) throw new Error("NSE proxy HTTP "+r.status);
     return parseProxyJson(await r.text());
   }
@@ -70,13 +157,7 @@ function parseInfo(rows:unknown[]){
   return out;
 }
 function rowsFromCategory(raw:unknown):any[]{
-  if(Array.isArray(raw)) return raw;
-  const x=raw as any;
-  if(x&&Array.isArray(x.dataList)) return x.dataList;
-  if(x&&Array.isArray(x.data)) return x.data;
-  if(x&&Array.isArray(x.records)) return x.records;
-  if(x&&x.data&&Array.isArray(x.data.data)) return x.data.data;
-  return [];
+  return deepFindScoredRecordArray(raw,["category","noOfTime","noOfTimes","subscription","noOfsharesBid","noOfSharesBid"]);
 }
 
 function issueSizeCr(v:string|null|undefined){
@@ -118,7 +199,7 @@ function numberList(s:string,patterns:RegExp[],limit=3){for(const p of patterns)
 async function researchSearch(query:string):Promise<string[]>{
   try{
     const u="https://r.jina.ai/http://www.google.com/search?q="+encodeURIComponent(query);
-    const r=await fetch(u,{headers:{Accept:"text/plain"},cache:"no-store"});
+    const r=await fetchWithTimeout(u,{headers:{Accept:"text/plain"},cache:"no-store"});
     if(!r.ok)return [];
     const t=await r.text();const urls:string[]=[];
     const add=(value:string)=>{
@@ -133,18 +214,23 @@ async function researchSearch(query:string):Promise<string[]>{
 }
 async function readResearchUrl(url:string):Promise<string>{
   try{
-    const r=await fetch("https://r.jina.ai/"+url,{headers:{Accept:"text/plain"},cache:"no-store"});
+    const r=await fetchWithTimeout("https://r.jina.ai/"+url,{headers:{Accept:"text/plain"},cache:"no-store"});
     if(!r.ok)return "";
     return (await r.text()).slice(0,45000);
   }catch{return "";}
 }
 function parseGmpValue(text:string){
-  const s=clean(text);
-  const patterns=[
-    /(?:grey market premium|gmp)[^₹0-9]{0,80}(?:₹|rs\.?\s*)?([\d,]+(?:\.\d+)?)/i,
-    /(?:gmp)[^₹0-9]{0,30}(?:₹|rs\.?\s*)?([\d,]+(?:\.\d+)?)\s*(?:per share)?/i
-  ];
-  for(const p of patterns){const m=s.match(p);const value=n(m?.[1]);if(value!=null)return value;}
+  const blocks=clean(text).split(/(?:\\n|\\r|[.!?])+/).filter(Boolean);
+  const strict=/\\b(gmp|grey\\s*market|kotak\\s*gmp|ipo\\s*premium|expected\\s*premium)\\b/i;
+  const value=/([+-]?\\s*₹?\\s*[\\d,]+(?:\\.\\d+)?)/;
+  for(const block of blocks){
+    if(!strict.test(block))continue;
+    const m=block.match(value);
+    if(m){
+      const parsed=n(m[1].replace(/[₹\\s]/g,""));
+      if(parsed!=null)return parsed;
+    }
+  }
   return null;
 }
 async function enrichGmp(ipo:Ipo){
@@ -260,7 +346,7 @@ function applyResearchText(ipo:Ipo,hits:ResearchHit[]){
 }
 function isCompanyOfficialUrl(url:string,name:string){const d=domainOf(url);if(!d||/sebi\.gov\.in|nseindia\.com|bseindia\.com|chittorgarh\.com|moneycontrol\.com|economictimes\.indiatimes\.com|livemint\.com|groww\.in|zerodha\.com|angelone\.in|upstox\.com|investorgain\.com|ipowatch\.in|ipocentral\.in|niftytrader\.in|ipogram\.in|ipoji\.com/.test(d))return false;const tokens=name.toLowerCase().replace(/\b(limited|ltd|private|pvt|ipo)\b/g," ").split(/[^a-z0-9]+/).filter(x=>x.length>=3);return tokens.some(t=>d.includes(t));}
 function prospectusTypeFromUrl(url:string,text:string){const s=(url+" "+text).toLowerCase();if(/\bdrhp\b|draft red herring/.test(s))return "DRHP" as const;if(/\brhp\b|red herring prospectus/.test(s))return "RHP" as const;if(/abridged prospectus/.test(s))return "Abridged Prospectus" as const;if(/prospectus/.test(s))return "Prospectus" as const;return null;}
-function extractOfficialAndProspectus(ipo:Ipo,hits:ResearchHit[]){const official=hits.find(h=>isCompanyOfficialUrl(h.url,ipo.name));const docs=hits.filter(h=>/sebi\.gov\.in|nseindia\.com|bseindia\.com/.test(h.domain)||/prospectus|rhp|drhp/i.test(h.url+" "+h.text));const doc=docs.sort((a,b)=>{const rank=(h:ResearchHit)=>{const t=(h.url+" "+h.text).toLowerCase();return /\bprospectus\b/.test(t)&&!/drhp|rhp/.test(t)?4:/\brhp\b|red herring/.test(t)?3:/\bdrhp\b|draft red herring/.test(t)?2:/abridged prospectus/.test(t)?1:0};return rank(b)-rank(a)||b.priority-a.priority;})[0];if(official)ipo.officialWebsite=official.url.split("/").slice(0,3).join("/");if(doc){ipo.prospectusUrl=doc.url;ipo.prospectusType=prospectusTypeFromUrl(doc.url,doc.text);}}
+function extractOfficialAndProspectus(ipo:Ipo,hits:ResearchHit[]){const official=hits.find(h=>isCompanyOfficialUrl(h.url,ipo.name));const docs=hits.filter(h=>/sebi\.gov\.in|nseindia\.com|bseindia\.com/.test(h.domain)||/prospectus|rhp|drhp/i.test(h.url+" "+h.text));const doc=docs.sort((a,b)=>{const rank=(h:ResearchHit)=>{const t=(h.url+" "+h.text).toLowerCase();return /\bprospectus\b/.test(t)&&!/drhp|rhp/.test(t)?4:/\brhp\b|red herring/.test(t)?3:/\bdrhp\b|draft red herring/.test(t)?2:/abridged prospectus/.test(t)?1:0};return rank(b)-rank(a)||b.priority-a.priority;})[0];if(official)ipo.officialWebsite=official.url.split("/").slice(0,3).join("/");if(doc){ipo.prospectusUrl=doc.url;ipo.prospectusType=prospectusTypeFromUrl(doc.url,doc.text);if(ipo.prospectusType==="RHP")ipo.rhpStatus="DISCOVERED_UNPARSED";}}
 async function universalResearch(ipo:Ipo){const hits=await researchHits(ipo);if(hits.length){applyResearchText(ipo,hits);extractOfficialAndProspectus(ipo,hits);ipo.verifiedSources=[...new Set(hits.map(h=>sourceName(h.url)))];ipo.sourceUrls=[...new Set(hits.map(h=>h.url))];ipo.detailSource=hits.find(h=>h.priority>=96)?.url??hits[0].url;}await enrichGmp(ipo);ipo.verifiedAt=new Date().toISOString();return ipo;}
 
 function baseNse(r:any):Ipo{
@@ -274,7 +360,7 @@ function baseNse(r:any):Ipo{
   const subscriptionAmount=bid!=null&&bid>0&&upperPrice!=null?Number((bid*upperPrice/10000000).toFixed(2)):null;
   return {
     officialWebsite:null,prospectusUrl:null,prospectusType:null,
-    symbol:r.symbol??undefined,exchange:r.isBse==="1"?"BSE India":"NSE India",id:slugId(r.companyName||r.symbol||"ipo"),
+    symbol:r.symbol??undefined,nseSymbol:r.isBse==="1"?undefined:(r.symbol??undefined),bseScripCode:r.scripCode??r.scripcode??undefined,bseSymbol:r.isBse==="1"?(r.symbol??undefined):undefined,exchange:r.isBse==="1"?"BSE India":"NSE India",exchanges:[r.isBse==="1"?"BSE India":"NSE India"],id:slugId(r.companyName||r.symbol||"ipo"),
     name:clean(r.companyName||r.symbol||"IPO"),
     type:r.series==="SME"?"SME":"Mainboard",
     openDate:date(r.issueStartDate),closeDate:date(r.issueEndDate),listingDate:null,
@@ -398,18 +484,35 @@ async function loadNse(){
   }
   const today=new Date().toISOString().slice(0,10);
   const map=new Map<string,Ipo>();
+  const canonicalRecords:Ipo[]=[];
   for(const r of [...rowsFromNse(current),...rowsFromNse(upcoming)]){
     if(!r?.companyName && !r?.symbol && !r?.company)continue;
     if(!r.companyName && r.company) r.companyName=r.company;
     const ipo=baseNse(r);
-    // Preserve any direct minimum-application value exposed by NSE when available.
     ipo.minSubscription=n(
       r.minSubscription??r.minimumApplication??r.minimumInvestment??r.minInvestment??
       r.minBidValue??r.minimumBidValue
     )??ipo.minSubscription;
     if(ipo.closeDate&&ipo.closeDate<today)continue;
-    const previous=map.get(ipo.id);
-    if(!previous||r.status==="Active")map.set(ipo.id,ipo);
+
+    const key=buildCanonicalKey(ipo);
+    const exact=map.get(key);
+    if(exact){
+      map.set(key,mergeIpoRecords(exact,ipo));
+      continue;
+    }
+    // Secondary reconciliation is deliberately strict: company identity AND issue date
+    // must agree. This prevents unrelated IPOs from being silently merged.
+    const related=canonicalRecords.find(existing=>sameCompanyIssue(existing,ipo));
+    if(related){
+      const merged=mergeIpoRecords(related,ipo);
+      const relatedKey=buildCanonicalKey(related);
+      map.set(relatedKey,merged);
+      canonicalRecords[canonicalRecords.indexOf(related)]=merged;
+    }else{
+      map.set(key,ipo);
+      canonicalRecords.push(ipo);
+    }
   }
   const base=[...map.values()].filter(x=>!!x.name&&!!x.closeDate&&x.closeDate>=today);
 
