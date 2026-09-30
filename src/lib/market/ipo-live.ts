@@ -484,6 +484,17 @@ function applyResearchText(ipo:Ipo,hits:ResearchHit[]){
     /(?:about [^\n]{0,100}|products and services|business model|what the company does)[:\s]+([^\n]{40,900})/i
   ]);
   if(business)ipo.business=business;
+  const domesticPct=firstNumber(all,[/(?:domestic sales|domestic revenue|revenue from domestic|domestic)[:\s-]*([0-9]+(?:\.[0-9]+)?)\s*%/i]);
+  const exportPct=firstNumber(all,[/(?:export sales|export revenue|revenue from exports?|exports?)[:\s-]*([0-9]+(?:\.[0-9]+)?)\s*%/i]);
+  if(domesticPct!=null&&domesticPct<=100)ipo.domesticRevenuePercent=domesticPct;
+  if(exportPct!=null&&exportPct<=100)ipo.exportRevenuePercent=exportPct;
+  const segmentPattern=/(?:revenue|sales)[^\n]{0,80}?([A-Za-z][A-Za-z &/-]{2,70})\s*[:\-]\s*(?:₹|Rs\.?\s*)?([0-9][0-9,]*(?:\.\d+)?)\s*(?:crore|cr|%)/gi;
+  const segmentRows:Array<{segment:string;amount:number|null;percentage:number|null}>=[];
+  for(const m of all.matchAll(segmentPattern)){
+    const segment=clean(m[1]); const raw=Number(String(m[2]).replace(/,/g,""));
+    if(segment&&segment.length<80&&Number.isFinite(raw))segmentRows.push({segment,amount:/crore|cr/i.test(m[0])?raw*10000000:null,percentage:/%/.test(m[0])?raw:null});
+  }
+  if(segmentRows.length)ipo.revenueSources=[...new Map(segmentRows.map(x=>[x.segment.toLowerCase(),x])).values()].slice(0,15);
   const office=firstText(officialText||all,[/(?:registered and corporate office|registered office|corporate office)[:\s]+([^\n]{20,220})/i]);
   const registeredOffice=firstText(officialText||all,[/(?:registered office)[:\s]+([^\n]{20,220})/i]);
   const corporateOffice=firstText(officialText||all,[/(?:corporate office)[:\s]+([^\n]{20,220})/i]);
