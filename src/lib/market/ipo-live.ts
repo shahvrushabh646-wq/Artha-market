@@ -619,11 +619,11 @@ function baseNse(r:any):Ipo{
     openDate:date(r.issueStartDate),closeDate:date(r.issueEndDate),listingDate:null,
     issueSize:null,minSubscription:fallbackMinimum,verifiedMinApplication:rawMinimum,subscription,subscriptionAmount,subscriptionSource:r.isBse==="1"?"BSE India":"NSE India",
     subscriptionCategories:[],gmpPct:null,gmpRs:null,gmpSources:[],gmpVerifiedSources:[],
-    city:null,state:null,business:null,promoters:[],segments:[],competitors:[],leadManagers:[],documents:[],countries:[],countryCount:null,revenues:[],profits:[],eps:[],
+    city:null,state:null,business:null,businessModel:null,sector:null,products:[],services:[],registeredOffice:null,corporateOffice:null,promoters:[],segments:[],competitors:[],customerType:null,customerConcentration:null,industriesServed:[],geographicPresence:[],domesticMarket:null,exportMarket:null,b2b:null,b2c:null,leadManagers:[],documents:[],countries:[],countryCount:null,revenues:[],profits:[],eps:[],
     priceBand:band(r.issuePrice),lotSize:rawLot,faceValue:null,
     sharesOffered:n(r.noOfSharesOffered),offeredToPublic:null,retailShares:null,qibShares:null,niiShares:null,
     freshIssue:null,offerForSale:null,issueType:null,objects:[],risks:[],
-    promoterHolding:null,postIssuePromoterHolding:null,moneycontrolUrl:null,
+    promoterHolding:null,postIssuePromoterHolding:null,registrar:null,registrarAddress:null,registrarEmail:null,registrarPhone:null,registrarWebsite:null,allotmentCheckUrl:null,leadManagers:[],sponsorBank:null,marketMaker:null,scsbListUrl:null,moneycontrolUrl:null,
     detailSource:null,verifiedSources:[],sourceUrls:[],
     verifiedAt:new Date().toISOString()
   };
