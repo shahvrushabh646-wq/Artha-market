@@ -623,7 +623,7 @@ function baseNse(r:any):Ipo{
     priceBand:band(r.issuePrice),lotSize:rawLot,faceValue:null,
     sharesOffered:n(r.noOfSharesOffered),offeredToPublic:null,retailShares:null,qibShares:null,niiShares:null,
     freshIssue:null,offerForSale:null,issueType:null,objects:[],risks:[],
-    promoterHolding:null,postIssuePromoterHolding:null,registrar:null,registrarAddress:null,registrarEmail:null,registrarPhone:null,registrarWebsite:null,allotmentCheckUrl:null,leadManagers:[],sponsorBank:null,marketMaker:null,scsbListUrl:null,moneycontrolUrl:null,
+    promoterHolding:null,postIssuePromoterHolding:null,registrar:null,registrarAddress:null,registrarEmail:null,registrarPhone:null,registrarWebsite:null,allotmentCheckUrl:null,sponsorBank:null,marketMaker:null,scsbListUrl:null,moneycontrolUrl:null,
     detailSource:null,verifiedSources:[],sourceUrls:[],
     verifiedAt:new Date().toISOString()
   };
