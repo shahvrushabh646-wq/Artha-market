@@ -1,7 +1,8 @@
 import { IPO } from "@/types/ipo";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Calendar, IndianRupee } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { TrendingUp, IndianRupee, Calendar, Users } from "lucide-react";
 
 interface IPOListProps {
   ipos: IPO[];
