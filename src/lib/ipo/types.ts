@@ -1,3 +1,5 @@
+export type { IPOStatus, DocumentLink, Subscription, GMPData, IPO } from "./zip-ipo-contract";
+
 export type IpoStatus="OPEN"|"UPCOMING"|"CLOSED";
 export type IpoBoard="Mainboard"|"SME";
 export type FieldConfidence="official"|"secondary"|"unofficial"|"derived"|"unavailable";
