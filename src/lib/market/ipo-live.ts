@@ -6,6 +6,7 @@ const NSE_PAGE = "https://www.nseindia.com/market-data/all-upcoming-issues-ipo";
 const cache=new Map<string,{expires:number;value:Ipo[]}>();
 const CACHE_MS=30000;
 function clean(v:unknown){return String(v??"").replace(/<[^>]*>/g," ").replace(/\s+/g," ").trim();}
+function firstNumber(text:string,patterns:RegExp[]){for(const pattern of patterns){const m=text.match(pattern);if(m){const v=n(m[1]);if(v!=null)return v;}}return null;}
 function n(v:unknown){if(v==null||v==="")return null;const x=Number(String(v).replace(/,/g,"").replace(/%/g,"").trim());return Number.isFinite(x)?x:null;}
 function date(v:unknown){
   const s=clean(v);
