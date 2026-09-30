@@ -438,10 +438,10 @@ function applyQuestionResearch(ipo:Ipo,key:ResearchQuestionKey,hits:ResearchHit[
       ipo.city=draft.city; ipo.state=draft.state; ipo.promoters=draft.promoters;
       break;
     case "Q2":
-      ipo.city=draft.city; ipo.state=draft.state; ipo.segments=draft.segments;
+      ipo.city=draft.city; ipo.state=draft.state; ipo.business=draft.business; ipo.businessModel=draft.businessModel; ipo.sector=draft.sector; ipo.products=draft.products; ipo.services=draft.services; ipo.registeredOffice=draft.registeredOffice; ipo.corporateOffice=draft.corporateOffice; ipo.segments=draft.segments; ipo.promoters=draft.promoters;
       break;
     case "Q3":
-      ipo.business=draft.business; ipo.promoters=draft.promoters; ipo.competitors=draft.competitors;
+      ipo.business=draft.business; ipo.customerType=draft.customerType; ipo.customerConcentration=draft.customerConcentration; ipo.industriesServed=draft.industriesServed; ipo.geographicPresence=draft.geographicPresence; ipo.domesticMarket=draft.domesticMarket; ipo.exportMarket=draft.exportMarket; ipo.b2b=draft.b2b; ipo.b2c=draft.b2c; ipo.promoters=draft.promoters; ipo.competitors=draft.competitors; ipo.countries=draft.countries; ipo.countryCount=draft.countryCount;
       break;
     case "Q4":
       ipo.countryCount=draft.countryCount; ipo.countries=draft.countries;
@@ -462,7 +462,7 @@ function applyQuestionResearch(ipo:Ipo,key:ResearchQuestionKey,hits:ResearchHit[
     case "Q9":
       ipo.leadManagers=draft.leadManagers;
       ipo.registrar=draft.registrar; ipo.registrarEmail=draft.registrarEmail;
-      ipo.registrarPhone=draft.registrarPhone; ipo.sponsorBank=draft.sponsorBank;
+      ipo.registrarPhone=draft.registrarPhone; ipo.sponsorBank=draft.sponsorBank; ipo.marketMaker=draft.marketMaker;
       break;
   }
 }
@@ -559,7 +559,7 @@ function applyResearchText(ipo:Ipo,hits:ResearchHit[]){
   const registrar=firstText(all,[/(?:registrar to the issue|registrar)[^\n:]*[:\\-]\s*([^\n]{5,180})/i]);
   const sponsorBank=firstText(all,[/(?:sponsor bank|sponsor banks?)[^\n:]*[:\\-]\s*([^\n]{5,180})/i]);
   if(managers.length)ipo.leadManagers=[...new Set(managers)];
-  if(registrar)(ipo as any).registrar=registrar;
+  if(registrar)ipo.registrar=registrar;
   if(sponsorBank)ipo.sponsorBank=sponsorBank;
   if(marketMaker)ipo.marketMaker=marketMaker;
   const promoterPct=firstText(all,[/(?:promoter(?:s)?(?:'s)?|promoter group)[^\\d%]{0,100}(\\d+(?:\\.\\d+)?)\\s*%/i]);
