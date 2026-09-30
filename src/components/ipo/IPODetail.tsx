@@ -542,29 +542,37 @@ export function IPODetail({ ipo }: IPODetailProps) {
         </CardHeader>
         <CardContent>
           <div className="space-y-2">
-            <div className="text-sm text-slate-600">ચકાસાયેલ સ્રોતો:</div>
-            <div className="flex flex-wrap gap-2">
-              {ipo.verifiedSources.map((source) => (
-                <Badge key={source} variant="secondary">{source}</Badge>
-              ))}
-            </div>
-            <div className="text-sm text-slate-600 mt-4">સ્રોત URLs:</div>
-            <div className="space-y-1">
-              {ipo.sourceUrls.map((url) => (
-                <a
-                  key={url}
-                  href={url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800"
-                >
-                  <ExternalLink className="h-3 w-3" />
-                  {url}
-                </a>
-              ))}
-            </div>
+            <div className="text-sm text-slate-600">સ્રોતો:</div>
+            {ipo.documents && ipo.documents.length > 0 ? (
+              <>
+                <div className="flex flex-wrap gap-2">
+                  {ipo.documents.map((doc) => (
+                    <Badge key={doc.type} variant="secondary">
+                      {doc.source}
+                    </Badge>
+                  ))}
+                </div>
+                <div className="text-sm text-slate-600 mt-4">સ્રોત URLs:</div>
+                <div className="space-y-1">
+                  {ipo.documents.map((doc) => (
+                    <a
+                      key={doc.type}
+                      href={doc.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800"
+                    >
+                      <ExternalLink className="h-3 w-3" />
+                      {doc.label}
+                    </a>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <InfoUnavailable />
+            )}
             <div className="text-xs text-slate-500 mt-4">
-              ચકાસણી: {formatDate(ipo.verifiedAt)} • સ્રોત: {ipo.verifiedSources.join(", ")}
+              IPO documents and source links are shown above where available.
             </div>
           </div>
         </CardContent>
