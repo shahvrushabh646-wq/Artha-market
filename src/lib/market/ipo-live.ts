@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { loadIpoEnriched, loadIpoFast, loadIpoUniverse } from "@/lib/ipo/engine";
-type Ipo={nseSymbol?:string|null;bseScripCode?:string|null;bseSymbol?:string|null;normalizedName:string;issueDateKey:string|null;rhpStatus:"NOT_FOUND"|"DISCOVERED_UNPARSED"|"PARSED"|"PARSE_FAILED";officialWebsite?:string|null;prospectusUrl?:string|null;rhpUrl?:string|null;drhpUrl?:string|null;prospectusType?:"DRHP"|"RHP"|"Prospectus"|"Abridged Prospectus"|null;symbol?:string;exchange?:"NSE India"|"BSE India"|"BOTH"|"UNKNOWN";exchanges:string[];id:string;name:string;type:"Mainboard"|"SME";openDate:string|null;closeDate:string|null;listingDate:string|null;issueSize:number|null;minSubscription:number|null;verifiedMinApplication:number|null;subscription:number|null;subscriptionAmount:number|null;subscriptionSource:string|null;subscriptionCategories:{category:string;value:number|null}[];gmpPct:number|null;gmpRs:number|null;gmpSources:{source:string;url:string|null;pct:number|null;rs:number|null;asOf:string|null}[];gmpVerifiedSources:string[];city:string|null;state:string|null;business:string|null;businessModel:string|null;revenueSources:Array<{segment:string;amount:number|null;percentage:number|null}>;domesticRevenuePercent:number|null;exportRevenuePercent:number|null;sector:string|null;products:string[];services:string[];businessLocations:string[];registeredOffice:string|null;corporateOffice:string|null;promoters:string[];segments:string[];competitors:string[];customerType:string|null;customerConcentration:string|null;customerCategories:string[];industriesServed:string[];geographicPresence:string[];domesticMarket:boolean|null;exportMarket:boolean|null;b2b:boolean|null;b2c:boolean|null;leadManagers:string[];registrar?:string|null;registrarAddress?:string|null;registrarEmail?:string|null;registrarPhone?:string|null;sponsorBank?:string|null;marketMaker?:string|null;registrarWebsite?:string|null;allotmentCheckUrl?:string|null;scsbListUrl?:string|null;documents:{label:string;url:string;source:string}[];countryCount?:number|null;countries:{country:string;business:string;salesPct:number|null}[];revenues:{year:string;value:number|null}[];profits:{year:string;value:number|null}[];eps:{year:string;value:number|null}[];priceBand:string|null;lotSize:number|null;faceValue:number|null;sharesOffered:number|null;offeredToPublic:number|null;retailShares:number|null;qibShares:number|null;niiShares:number|null;freshIssue:number|null;freshIssueShares:number|null;offerForSale:number|null;offerForSaleShares:number|null;issueType:string|null;objects:string[];risks:string[];promoterHolding:number|null;postIssuePromoterHolding:number|null;moneycontrolUrl:string|null;detailSource:string|null;verifiedSources:string[];sourceUrls:string[];verifiedAt:string};
+type Ipo={nseSymbol?:string|null;bseScripCode?:string|null;bseSymbol?:string|null;normalizedName:string;issueDateKey:string|null;rhpStatus:"NOT_FOUND"|"DISCOVERED_UNPARSED"|"PARSED"|"PARSE_FAILED";officialWebsite?:string|null;prospectusUrl?:string|null;rhpUrl?:string|null;drhpUrl?:string|null;prospectusType?:"DRHP"|"RHP"|"Prospectus"|"Abridged Prospectus"|null;symbol?:string;exchange?:"NSE India"|"BSE India"|"BOTH"|"UNKNOWN";exchanges:string[];id:string;name:string;type:"Mainboard"|"SME";openDate:string|null;closeDate:string|null;listingDate:string|null;issueSize:number|null;minSubscription:number|null;verifiedMinApplication:number|null;subscription:number|null;subscriptionAmount:number|null;subscriptionSource:string|null;subscriptionCategories:{category:string;value:number|null}[];gmpPct:number|null;gmpRs:number|null;gmpSources:{source:string;url:string|null;pct:number|null;rs:number|null;asOf:string|null}[];gmpVerifiedSources:string[];city:string|null;state:string|null;business:string|null;businessModel:string|null;revenueSources:Array<{segment:string;amount:number|null;percentage:number|null}>;domesticRevenuePercent:number|null;exportRevenuePercent:number|null;sector:string|null;products:string[];services:string[];businessLocations:string[];registeredOffice:string|null;corporateOffice:string|null;promoters:string[];segments:string[];competitors:string[];customerType:string|null;customerConcentration:string|null;customerCategories:string[];industriesServed:string[];geographicPresence:string[];domesticMarket:boolean|null;exportMarket:boolean|null;b2b:boolean|null;b2c:boolean|null;leadManagers:string[];registrar?:string|null;registrarAddress?:string|null;registrarEmail?:string|null;registrarPhone?:string|null;sponsorBank?:string|null;marketMaker?:string|null;registrarWebsite?:string|null;allotmentCheckUrl?:string|null;scsbListUrl?:string|null;documents:{label:string;url:string;source:string}[];countryCount?:number|null;countries:{country:string;business:string;salesPct:number|null}[];revenues:{year:string;value:number|null}[];profits:{year:string;value:number|null}[];eps:{year:string;value:number|null}[];priceBand:string|null;lotSize:number|null;faceValue:number|null;sharesOffered:number|null;offeredToPublic:number|null;retailShares:number|null;qibShares:number|null;niiShares:number|null;freshIssue:number|null;freshIssueShares:number|null;offerForSale:number|null;offerForSaleShares:number|null;issueType:string|null;financials:{year:string;revenue:number|null;ebitda:number|null;pat:number|null;eps:number|null;debt:number|null;netWorth:number|null;assets:number|null;roe:number|null;roce:number|null;source:string|null}[];objects:string[];risks:string[];promoterHolding:number|null;postIssuePromoterHolding:number|null;moneycontrolUrl:string|null;detailSource:string|null;verifiedSources:string[];sourceUrls:string[];verifiedAt:string};
 const NSE = "https://www.nseindia.com";
 const NSE_PAGE = "https://www.nseindia.com/market-data/all-upcoming-issues-ipo";
 const cache=new Map<string,{expires:number;value:Ipo[]}>();
@@ -429,7 +429,7 @@ function applyQuestionResearch(ipo:Ipo,key:ResearchQuestionKey,hits:ResearchHit[
   // Q2 business page from silently overwriting Q5 financials, etc.
   const draft={...ipo,
     promoters:[...ipo.promoters],segments:[...ipo.segments],competitors:[...ipo.competitors],
-    leadManagers:[...ipo.leadManagers],documents:[...ipo.documents],
+    leadManagers:[...ipo.leadManagers],documents:[...ipo.documents],customerCategories:[...ipo.customerCategories],businessLocations:[...ipo.businessLocations],financials:[...ipo.financials],
     countries:[...ipo.countries],revenues:[...ipo.revenues],profits:[...ipo.profits],eps:[...ipo.eps],
     objects:[...ipo.objects],risks:[...ipo.risks]
   };
@@ -439,20 +439,20 @@ function applyQuestionResearch(ipo:Ipo,key:ResearchQuestionKey,hits:ResearchHit[
       ipo.city=draft.city; ipo.state=draft.state; ipo.promoters=draft.promoters;
       break;
     case "Q2":
-      ipo.city=draft.city; ipo.state=draft.state; ipo.business=draft.business; ipo.businessModel=draft.businessModel; ipo.sector=draft.sector; ipo.products=draft.products; ipo.services=draft.services; ipo.registeredOffice=draft.registeredOffice; ipo.corporateOffice=draft.corporateOffice; ipo.segments=draft.segments; ipo.promoters=draft.promoters;
+      ipo.city=draft.city; ipo.state=draft.state; ipo.business=draft.business; ipo.businessModel=draft.businessModel; ipo.sector=draft.sector; ipo.products=draft.products; ipo.services=draft.services; ipo.businessLocations=draft.businessLocations; ipo.registeredOffice=draft.registeredOffice; ipo.corporateOffice=draft.corporateOffice; ipo.segments=draft.segments; ipo.promoters=draft.promoters;
       break;
     case "Q3":
-      ipo.business=draft.business; ipo.customerType=draft.customerType; ipo.customerConcentration=draft.customerConcentration; ipo.industriesServed=draft.industriesServed; ipo.geographicPresence=draft.geographicPresence; ipo.domesticMarket=draft.domesticMarket; ipo.exportMarket=draft.exportMarket; ipo.b2b=draft.b2b; ipo.b2c=draft.b2c; ipo.promoters=draft.promoters; ipo.competitors=draft.competitors; ipo.countries=draft.countries; ipo.countryCount=draft.countryCount;
+      ipo.business=draft.business; ipo.customerType=draft.customerType; ipo.customerConcentration=draft.customerConcentration; ipo.customerCategories=draft.customerCategories; ipo.industriesServed=draft.industriesServed; ipo.geographicPresence=draft.geographicPresence; ipo.domesticMarket=draft.domesticMarket; ipo.exportMarket=draft.exportMarket; ipo.b2b=draft.b2b; ipo.b2c=draft.b2c; ipo.promoters=draft.promoters; ipo.competitors=draft.competitors; ipo.countries=draft.countries; ipo.countryCount=draft.countryCount;
       break;
     case "Q4":
-      ipo.countryCount=draft.countryCount; ipo.countries=draft.countries;
+      ipo.countryCount=draft.countryCount; ipo.countries=draft.countries; ipo.revenueSources=draft.revenueSources; ipo.domesticRevenuePercent=draft.domesticRevenuePercent; ipo.exportRevenuePercent=draft.exportRevenuePercent;
       ipo.revenues=draft.revenues;
       break;
     case "Q5":
-      ipo.revenues=draft.revenues; ipo.profits=draft.profits; ipo.eps=draft.eps;
+      ipo.revenues=draft.revenues; ipo.profits=draft.profits; ipo.eps=draft.eps; ipo.financials=draft.financials;
       break;
     case "Q6":
-      ipo.promoterHolding=draft.promoterHolding;
+      ipo.promoterHolding=draft.promoterHolding; ipo.postIssuePromoterHolding=draft.postIssuePromoterHolding; ipo.sharesOffered=draft.sharesOffered; ipo.freshIssue=draft.freshIssue; ipo.freshIssueShares=draft.freshIssueShares; ipo.offerForSale=draft.offerForSale; ipo.offerForSaleShares=draft.offerForSaleShares;
       break;
     case "Q7":
       ipo.objects=draft.objects; ipo.risks=draft.risks;
@@ -518,7 +518,23 @@ function applyResearchText(ipo:Ipo,hits:ResearchHit[]){
     ipo.products=[...new Set([...ipo.products,...productText.split(/,|;|\|/).map(clean).filter(x=>x.length>2)])].slice(0,15);
     ipo.segments=[...new Set([...ipo.segments,productText])];
   }
-  const rev=numberList(all,[/(?:revenue from operations|revenue|turnover)[^\d]{0,80}([\d,]+(?:\.\d+)?)\s*(?:crore|cr)/gi]);
+  const rev=numberList(all,[/(?:revenue from operations|revenue|turnover)[^\d]{0,80}([\d,]+(?:\.\d+)?)\s*(?:crore|cr)/gi]);  const ebitda=numberList(all,[/(?:EBITDA|EBITDA margin)[^\d]{0,80}([\d,]+(?:\.\d+)?)\s*(?:crore|cr|%)/gi]);
+  const roe=numberList(all,[/(?:ROE|return on equity)[^\d]{0,80}([\d,]+(?:\.\d+)?)\s*%/gi]);
+  const roce=numberList(all,[/(?:ROCE|return on capital employed)[^\d]{0,80}([\d,]+(?:\.\d+)?)\s*%/gi]);
+  const debt=numberList(all,[/(?:total debt|net debt|borrowings|debt)[^\d]{0,80}([\d,]+(?:\.\d+)?)\s*(?:crore|cr)/gi]);
+  const netWorth=numberList(all,[/(?:net worth|networth)[^\d]{0,80}([\d,]+(?:\.\d+)?)\s*(?:crore|cr)/gi]);
+  const assets=numberList(all,[/(?:total assets|assets)[^\d]{0,80}([\d,]+(?:\.\d+)?)\s*(?:crore|cr)/gi]);
+  const finYears=years.length?years:["FY1","FY2","FY3"];
+  ipo.financials=finYears.map((year,i)=>({year,revenue:rev[i]??null,ebitda:ebitda[i]??null,pat:prof[i]??null,eps:eps[i]??null,debt:debt[i]??null,netWorth:netWorth[i]??null,assets:assets[i]??null,roe:roe[i]??null,roce:roce[i]??null,source:sourceName(hits[0]?.url??"")})).filter(x=>x.revenue!=null||x.pat!=null||x.eps!=null||x.ebitda!=null||x.debt!=null||x.netWorth!=null||x.assets!=null||x.roe!=null||x.roce!=null);
+  const freshAmount=firstNumber(all,[/(?:fresh issue|fresh equity issue)[^₹\d]{0,80}(?:₹|Rs\.?\s*)?([\d,]+(?:\.\d+)?)\s*(?:crore|cr)/i]);
+  const freshShares=firstNumber(all,[/(?:fresh issue|fresh equity issue)[^\d]{0,120}([\d,]+(?:\.\d+)?)\s*(?:equity )?shares?/i]);
+  const ofsAmount=firstNumber(all,[/(?:offer for sale|OFS)[^₹\d]{0,80}(?:₹|Rs\.?\s*)?([\d,]+(?:\.\d+)?)\s*(?:crore|cr)/i]);
+  const ofsShares=firstNumber(all,[/(?:offer for sale|OFS)[^\d]{0,120}([\d,]+(?:\.\d+)?)\s*(?:equity )?shares?/i]);
+  if(freshAmount!=null)ipo.freshIssue=freshAmount;
+  if(freshShares!=null)ipo.freshIssueShares=freshShares;
+  if(ofsAmount!=null)ipo.offerForSale=ofsAmount;
+  if(ofsShares!=null)ipo.offerForSaleShares=ofsShares;
+
   const prof=numberList(all,[/(?:profit after tax|profit for the year|net profit|PAT)[^\d]{0,80}([\d,]+(?:\.\d+)?)\s*(?:crore|cr)/gi]);
   const eps=numberList(all,[/(?:basic EPS|diluted EPS|earnings per share|EPS)[^\d]{0,60}([\d,]+(?:\.\d+)?)/gi]);
   const years=[...new Set([...all.matchAll(/\b20(?:2[2-9]|3[0-9])\b/g)].map(m=>m[0]))].slice(-3);
@@ -539,6 +555,11 @@ function applyResearchText(ipo:Ipo,hits:ResearchHit[]){
     ...[...all.matchAll(/(?:business segments?|segments?)[^\n:]*[:\-]\s*([^\n]{20,500})/gi)].slice(0,3).map(m=>clean(m[1]))
   ];
   const customerConcentration=firstText(all,[/(?:customer concentration|concentration of customers|top \d+ customers)[^:\n]*[:\-]\s*([^\n]{15,300})/i]);
+  const customerCategoriesText=firstText(all,[/(?:customer categories|customer segments|types of customers|customer base)[^:\n]*[:\-]\s*([^\n]{15,500})/i]);
+  const locationsText=firstText(all,[/(?:manufacturing locations?|operating locations?|business locations?|facilities|plants)[^:\n]*[:\-]\s*([^\n]{15,500})/i]);
+  if(customerCategoriesText)ipo.customerCategories=[...new Set(customerCategoriesText.split(/,|;|\|/).map(clean).filter(x=>x.length>2))].slice(0,15);
+  if(locationsText)ipo.businessLocations=[...new Set(locationsText.split(/,|;|\|/).map(clean).filter(x=>x.length>2))].slice(0,20);
+
   const industriesText=firstText(all,[/(?:industries served|industries we serve|end-user industries)[^:\n]*[:\-]\s*([^\n]{15,400})/i]);
   const geographyText=firstText(all,[/(?:geographic presence|geographical presence|states served|markets served)[^:\n]*[:\-]\s*([^\n]{15,500})/i]);
   if(customerConcentration)ipo.customerConcentration=customerConcentration;
@@ -641,7 +662,7 @@ function baseNse(r:any):Ipo{
     city:null,state:null,business:null,businessModel:null,revenueSources:[],domesticRevenuePercent:null,exportRevenuePercent:null,sector:null,products:[],services:[],businessLocations:[],registeredOffice:null,corporateOffice:null,promoters:[],segments:[],competitors:[],customerType:null,customerConcentration:null,customerCategories:[],industriesServed:[],geographicPresence:[],domesticMarket:null,exportMarket:null,b2b:null,b2c:null,leadManagers:[],documents:[],countries:[],countryCount:null,revenues:[],profits:[],eps:[],
     priceBand:band(r.issuePrice),lotSize:rawLot,faceValue:null,
     sharesOffered:n(r.noOfSharesOffered),offeredToPublic:null,retailShares:null,qibShares:null,niiShares:null,
-    freshIssue:null,freshIssueShares:null,offerForSale:null,offerForSaleShares:null,issueType:null,objects:[],risks:[],
+    freshIssue:null,freshIssueShares:null,offerForSale:null,offerForSaleShares:null,issueType:null,financials:[],objects:[],risks:[],
     promoterHolding:null,postIssuePromoterHolding:null,registrar:null,registrarAddress:null,registrarEmail:null,registrarPhone:null,registrarWebsite:null,allotmentCheckUrl:null,sponsorBank:null,marketMaker:null,scsbListUrl:null,moneycontrolUrl:null,
     detailSource:null,verifiedSources:[],sourceUrls:[],
     verifiedAt:new Date().toISOString()
