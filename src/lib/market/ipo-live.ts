@@ -484,7 +484,11 @@ function applyResearchText(ipo:Ipo,hits:ResearchHit[]){
     /(?:about [^\n]{0,100}|products and services|business model|what the company does)[:\s]+([^\n]{40,900})/i
   ]);
   if(business)ipo.business=business;
-  const office=firstText(officialText||all,[/(?:registered office|corporate office|registered and corporate office)[:\s]+([^\n]{20,220})/i]);
+  const office=firstText(officialText||all,[/(?:registered and corporate office|registered office|corporate office)[:\s]+([^\n]{20,220})/i]);
+  const registeredOffice=firstText(officialText||all,[/(?:registered office)[:\s]+([^\n]{20,220})/i]);
+  const corporateOffice=firstText(officialText||all,[/(?:corporate office)[:\s]+([^\n]{20,220})/i]);
+  const businessModel=firstText(all,[/(?:business model|business model of the company)[:\s]+([^\n]{30,700})/i]);
+  const servicesText=firstText(all,[/(?:services?|service portfolio|key services?)[:\s]+([^\n]{20,500})/i]);
   if(office){
     const parts=office.split(",").map(x=>x.trim()).filter(Boolean);
     if(parts.length>1)ipo.city=parts[parts.length-2]||ipo.city;
@@ -493,7 +497,10 @@ function applyResearchText(ipo:Ipo,hits:ResearchHit[]){
   const sector=firstText(all,[/(?:industry|sector|industry classification)[:\s]+([^\n]{10,160})/i]);
   if(sector && !ipo.segments.length)ipo.segments=[sector];
   const productText=firstText(all,[/(?:products?|product portfolio|product range|key products?)[:\s]+([^\n]{20,500})/i]);
-  if(productText)ipo.segments=[...new Set([...ipo.segments,productText])];
+  if(productText){
+    ipo.products=[...new Set([...ipo.products,...productText.split(/,|;|\|/).map(clean).filter(x=>x.length>2)])].slice(0,15);
+    ipo.segments=[...new Set([...ipo.segments,productText])];
+  }
   const rev=numberList(all,[/(?:revenue from operations|revenue|turnover)[^\d]{0,80}([\d,]+(?:\.\d+)?)\s*(?:crore|cr)/gi]);
   const prof=numberList(all,[/(?:profit after tax|profit for the year|net profit|PAT)[^\d]{0,80}([\d,]+(?:\.\d+)?)\s*(?:crore|cr)/gi]);
   const eps=numberList(all,[/(?:basic EPS|diluted EPS|earnings per share|EPS)[^\d]{0,60}([\d,]+(?:\.\d+)?)/gi]);
@@ -514,10 +521,22 @@ function applyResearchText(ipo:Ipo,hits:ResearchHit[]){
   const segments = [
     ...[...all.matchAll(/(?:business segments?|segments?)[^\n:]*[:\-]\s*([^\n]{20,500})/gi)].slice(0,3).map(m=>clean(m[1]))
   ];
+  const customerConcentration=firstText(all,[/(?:customer concentration|concentration of customers|top \d+ customers)[^:\n]*[:\-]\s*([^\n]{15,300})/i]);
+  const industriesText=firstText(all,[/(?:industries served|industries we serve|end-user industries)[^:\n]*[:\-]\s*([^\n]{15,400})/i]);
+  const geographyText=firstText(all,[/(?:geographic presence|geographical presence|states served|markets served)[^:\n]*[:\-]\s*([^\n]{15,500})/i]);
+  if(customerConcentration)ipo.customerConcentration=customerConcentration;
+  if(industriesText)ipo.industriesServed=[...new Set(industriesText.split(/,|;|\|/).map(clean).filter(x=>x.length>2))].slice(0,15);
+  if(geographyText)ipo.geographicPresence=[...new Set(geographyText.split(/,|;|\|/).map(clean).filter(x=>x.length>2))].slice(0,20);
+  const customerFlags=all.toLowerCase();
+  if(/\bb2b\b|business[- ]to[- ]business|institutional customers?/.test(customerFlags))ipo.b2b=true;
+  if(/\bb2c\b|business[- ]to[- ]consumer|retail customers?/.test(customerFlags))ipo.b2c=true;
+  if(/domestic market|domestic sales|within india/.test(customerFlags))ipo.domesticMarket=true;
+  if(/export market|exports?|international market/.test(customerFlags))ipo.exportMarket=true;
   const competitors = [
     ...[...all.matchAll(/(?:competitors?|competitive landscape)[^\n:]*[:\-]\s*([^\n]{20,500})/gi)].slice(0,3).map(m=>clean(m[1]))
   ];
   if(promoters.length)ipo.promoters=[...new Set(promoters)];
+  if(!ipo.products.length&&productText)ipo.products=[productText];
   if(segments.length)ipo.segments=[...new Set(segments)];
   if(competitors.length)ipo.competitors=[...new Set(competitors)];
 
@@ -541,7 +560,8 @@ function applyResearchText(ipo:Ipo,hits:ResearchHit[]){
   const sponsorBank=firstText(all,[/(?:sponsor bank|sponsor banks?)[^\n:]*[:\\-]\s*([^\n]{5,180})/i]);
   if(managers.length)ipo.leadManagers=[...new Set(managers)];
   if(registrar)(ipo as any).registrar=registrar;
-  if(sponsorBank)(ipo as any).sponsorBank=sponsorBank;
+  if(sponsorBank)ipo.sponsorBank=sponsorBank;
+  if(marketMaker)ipo.marketMaker=marketMaker;
   const promoterPct=firstText(all,[/(?:promoter(?:s)?(?:'s)?|promoter group)[^\\d%]{0,100}(\\d+(?:\\.\\d+)?)\\s*%/i]);
   if(promoterPct)(ipo as any).promoterHolding=n(promoterPct);
 
