@@ -489,12 +489,17 @@ function applyResearchText(ipo:Ipo,hits:ResearchHit[]){
   const corporateOffice=firstText(officialText||all,[/(?:corporate office)[:\s]+([^\n]{20,220})/i]);
   const businessModel=firstText(all,[/(?:business model|business model of the company)[:\s]+([^\n]{30,700})/i]);
   const servicesText=firstText(all,[/(?:services?|service portfolio|key services?)[:\s]+([^\n]{20,500})/i]);
+  if(registeredOffice)ipo.registeredOffice=registeredOffice;
+  if(corporateOffice)ipo.corporateOffice=corporateOffice;
+  if(businessModel)ipo.businessModel=businessModel;
+  if(servicesText)ipo.services=[...new Set(servicesText.split(/,|;|\|/).map(clean).filter(x=>x.length>2))].slice(0,12);
   if(office){
     const parts=office.split(",").map(x=>x.trim()).filter(Boolean);
     if(parts.length>1)ipo.city=parts[parts.length-2]||ipo.city;
     ipo.state=parts[parts.length-1]||ipo.state;
   }
   const sector=firstText(all,[/(?:industry|sector|industry classification)[:\s]+([^\n]{10,160})/i]);
+  if(sector)ipo.sector=sector;
   if(sector && !ipo.segments.length)ipo.segments=[sector];
   const productText=firstText(all,[/(?:products?|product portfolio|product range|key products?)[:\s]+([^\n]{20,500})/i]);
   if(productText){
@@ -528,8 +533,8 @@ function applyResearchText(ipo:Ipo,hits:ResearchHit[]){
   if(industriesText)ipo.industriesServed=[...new Set(industriesText.split(/,|;|\|/).map(clean).filter(x=>x.length>2))].slice(0,15);
   if(geographyText)ipo.geographicPresence=[...new Set(geographyText.split(/,|;|\|/).map(clean).filter(x=>x.length>2))].slice(0,20);
   const customerFlags=all.toLowerCase();
-  if(/\bb2b\b|business[- ]to[- ]business|institutional customers?/.test(customerFlags))ipo.b2b=true;
-  if(/\bb2c\b|business[- ]to[- ]consumer|retail customers?/.test(customerFlags))ipo.b2c=true;
+  if(/\bb2b\b|business[- ]to[- ]business|institutional customers?/.test(customerFlags)){ipo.b2b=true;ipo.customerType=ipo.customerType||"B2B";}
+  if(/\bb2c\b|business[- ]to[- ]consumer|retail customers?/.test(customerFlags)){ipo.b2c=true;ipo.customerType=ipo.customerType?ipo.customerType+" / B2C":"B2C";}
   if(/domestic market|domestic sales|within india/.test(customerFlags))ipo.domesticMarket=true;
   if(/export market|exports?|international market/.test(customerFlags))ipo.exportMarket=true;
   const competitors = [
