@@ -714,8 +714,12 @@ async function enrichNse(ipo:Ipo,cookie:string){
         continue;
       }
       const category=label.includes("qualified")||label.includes("qib")?"QIB"
+        :label.includes("employee")?"Employee"
+        :label.includes("bnii")||label.includes("big non institutional")?"bNII"
+        :label.includes("snii")||label.includes("small non institutional")?"sNII"
         :label.includes("non institutional")||label.includes("non-institutional")||label.includes("nii")||label.includes("hni")?"NII"
-        :label.includes("retail")||label.includes("individual")?"Retail":null;
+        :label.includes("retail")||label.includes("individual")?"Retail"
+        :label.includes("other")?"Other":null;
       if(!category)continue;
       const valueRaw=n(row.noOfTotalMeant??row.noOfTime??row.noOfTimes??row.subscription??row.subscriptionRatio??row.subscriptionRate);
       const rows=grouped.get(category)??[];
