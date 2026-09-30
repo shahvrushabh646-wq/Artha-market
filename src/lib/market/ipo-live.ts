@@ -461,7 +461,7 @@ function applyQuestionResearch(ipo:Ipo,key:ResearchQuestionKey,hits:ResearchHit[
       break;
     case "Q9":
       ipo.leadManagers=draft.leadManagers;
-      ipo.registrar=draft.registrar; ipo.registrarEmail=draft.registrarEmail;
+      ipo.registrar=draft.registrar; ipo.registrarAddress=draft.registrarAddress; ipo.registrarEmail=draft.registrarEmail;
       ipo.registrarPhone=draft.registrarPhone; ipo.sponsorBank=draft.sponsorBank; ipo.marketMaker=draft.marketMaker;
       break;
   }
@@ -566,6 +566,7 @@ function applyResearchText(ipo:Ipo,hits:ResearchHit[]){
   const marketMaker=firstText(all,[/(?:market maker|market makers?)[^\n:]*[:\-]\s*([^\n]{5,180})/i]);
   if(managers.length)ipo.leadManagers=[...new Set(managers)];
   if(registrar)ipo.registrar=registrar;
+  if(registrarAddress)ipo.registrarAddress=registrarAddress;
   if(sponsorBank)ipo.sponsorBank=sponsorBank;
   if(marketMaker)ipo.marketMaker=marketMaker;
   const promoterPct=firstText(all,[/(?:promoter(?:s)?(?:'s)?|promoter group)[^\\d%]{0,100}(\\d+(?:\\.\\d+)?)\\s*%/i]);
