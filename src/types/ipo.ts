@@ -128,10 +128,6 @@ export interface Document {
   source: string;
 }
 
-export type IPOStatus = "UPCOMING" | "OPEN" | "CLOSED" | "LISTED" | "upcoming" | "open" | "closed" | "listed";
-export type GMPData = GMP;
-export type DocumentLink = Document;
-
 export interface IPO {
   id: string;
   companyName: string;
@@ -165,10 +161,4 @@ export interface IPO {
   sponsorBank: SponsorBank;
   marketMaker?: MarketMaker;
   documents: Document[];
-  officialWebsite: string;
-  verifiedSources: string[];
-  sourceUrls: string[];
-  verifiedAt: string;
-  drhpUrl?: string;
-  rhpUrl?: string;
 }
