@@ -1,16 +1,16 @@
-export type IPOType = "Mainboard" | "SME";
-export type IPOStatus = "upcoming" | "open" | "closed" | "listed";
+export interface PriceBand {
+  min: number;
+  max: number;
+}
 
-export interface CategorySubscription {
+export interface SubscriptionCategory {
   category: string;
-  times?: number;
-  sharesBid?: number;
-  sharesOffered?: number;
+  times: number;
 }
 
 export interface Subscription {
   overall: number;
-  categories: CategorySubscription[];
+  categories: SubscriptionCategory[];
   source: string;
   updatedAt: string;
 }
@@ -20,17 +20,17 @@ export interface GMPSource {
   gmp: number;
   gmpPercent: number;
   asOf: string;
-  url?: string;
+  url: string;
 }
 
-export interface GMPData {
+export interface GMP {
   median: number;
   medianPercent: number;
   sources: GMPSource[];
   updatedAt: string;
 }
 
-export interface BusinessInfo {
+export interface Business {
   industry: string;
   sector: string;
   businessModel: string;
@@ -42,12 +42,12 @@ export interface BusinessInfo {
   source: string;
 }
 
-export interface CustomerInfo {
+export interface Customers {
   b2b: boolean;
   b2c: boolean;
   domesticMarket: boolean;
   exportMarket: boolean;
-  customerConcentration?: string;
+  customerConcentration: string;
   categories: string[];
   industriesServed: string[];
   geographicPresence: string[];
@@ -55,14 +55,14 @@ export interface CustomerInfo {
   source: string;
 }
 
-export interface RevenueSegment {
+export interface RevenueSource {
   segment: string;
   amount: number;
   percentage: number;
 }
 
 export interface RevenueSources {
-  sources: RevenueSegment[];
+  sources: RevenueSource[];
   domesticPercent: number;
   exportPercent: number;
   source: string;
@@ -87,25 +87,25 @@ export interface IPOObject {
   amount: number;
 }
 
-export interface ObjectsOfIssue {
+export interface Objects {
   objects: IPOObject[];
   source: string;
 }
 
-export interface RiskFactor {
+export interface Risk {
   risk: string;
   category: string;
 }
 
-export interface RiskFactors {
-  risks: RiskFactor[];
+export interface Risks {
+  risks: Risk[];
   source: string;
 }
 
 export interface Registrar {
   name: string;
-  email?: string;
-  phone?: string;
+  email: string;
+  phone: string;
 }
 
 export interface LeadManagers {
@@ -113,69 +113,62 @@ export interface LeadManagers {
   source: string;
 }
 
-export interface DocumentLink {
+export interface SponsorBank {
+  name: string;
+}
+
+export interface MarketMaker {
+  name: string;
+}
+
+export interface Document {
   type: string;
   label: string;
   url: string;
   source: string;
 }
 
+export type IPOStatus = "UPCOMING" | "OPEN" | "CLOSED" | "LISTED" | "upcoming" | "open" | "closed" | "listed";
+export type GMPData = GMP;
+export type DocumentLink = Document;
+
 export interface IPO {
   id: string;
   companyName: string;
   normalizedName: string;
-  ipoType: IPOType;
-  nseSymbol?: string;
-  bseSymbol?: string;
-  bseScripCode?: string;
+  ipoType: "SME" | "Mainboard";
   exchange: string;
-  status: IPOStatus;
+  status: "upcoming" | "open" | "closed" | "listed";
   openDate: string;
   closeDate: string;
-  listingDate?: string;
-  priceBand: {
-    min: number;
-    max: number;
-  };
-  faceValue?: number;
-  lotSize?: number;
-  minimumInvestment?: number;
-  issueSize?: number;
-  issueType?: string;
-  totalSharesOffered?: number;
-  freshIssue?: {
-    amount?: number;
-    shares?: number;
-  };
-  offerForSale?: {
-    amount?: number;
-    shares?: number;
-  };
-  promoterHolding?: {
-    preIssue?: number;
-    postIssue?: number;
-  };
-  subscription?: Subscription;
-  gmp?: GMPData;
-  business?: BusinessInfo;
-  customers?: CustomerInfo;
-  revenueSources?: RevenueSources;
-  financials?: Financials;
-  objects?: ObjectsOfIssue;
-  risks?: RiskFactors;
-  registrar?: Registrar;
-  leadManagers?: LeadManagers;
-  sponsorBank?: {
-    name: string;
-  };
-  marketMaker?: {
-    name: string;
-  };
-  documents?: DocumentLink[];
-  officialWebsite?: string;
-  moneycontrolUrl?: string;
+  listingDate: string;
+  priceBand: PriceBand;
+  faceValue: number;
+  lotSize: number;
+  minimumInvestment: number;
+  issueSize: number;
+  issueType: string;
+  totalSharesOffered: number;
+  freshIssue: { amount: number; shares: number };
+  offerForSale: { amount: number; shares: number };
+  promoterHolding: { preIssue: number; postIssue: number };
+  subscription: Subscription;
+  gmp: GMP;
+  business: Business;
+  customers: Customers;
+  revenueSources: RevenueSources;
+  financials: Financials;
+  objects: Objects;
+  risks: Risks;
+  registrar: Registrar;
+  leadManagers: LeadManagers;
+  sponsorBank: SponsorBank;
+  marketMaker?: MarketMaker;
+  documents: Document[];
+  officialWebsite: string;
   verifiedSources: string[];
   sourceUrls: string[];
   verifiedAt: string;
-  isSampleData?: boolean;
+  drhpUrl?: string;
+  rhpUrl?: string;
 }
