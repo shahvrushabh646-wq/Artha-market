@@ -563,6 +563,7 @@ function applyResearchText(ipo:Ipo,hits:ResearchHit[]){
   const managers=[...all.matchAll(/(?:book running lead managers?|lead managers?|BRLMs?|merchant bankers?)[^\n:\\-]*[:\\-]\s*([^\n]{10,500})/gi)].slice(0,5).map(m=>clean(m[1]));
   const registrar=firstText(all,[/(?:registrar to the issue|registrar)[^\n:]*[:\\-]\s*([^\n]{5,180})/i]);
   const sponsorBank=firstText(all,[/(?:sponsor bank|sponsor banks?)[^\n:]*[:\\-]\s*([^\n]{5,180})/i]);
+  const marketMaker=firstText(all,[/(?:market maker|market makers?)[^\n:]*[:\-]\s*([^\n]{5,180})/i]);
   if(managers.length)ipo.leadManagers=[...new Set(managers)];
   if(registrar)ipo.registrar=registrar;
   if(sponsorBank)ipo.sponsorBank=sponsorBank;
