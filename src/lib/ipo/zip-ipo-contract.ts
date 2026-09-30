@@ -133,16 +133,28 @@ export interface IPO {
   openDate: string;
   closeDate: string;
   listingDate?: string;
-  priceBand: { min: number; max: number };
+  priceBand: {
+    min: number;
+    max: number;
+  };
   faceValue?: number;
   lotSize?: number;
   minimumInvestment?: number;
   issueSize?: number;
   issueType?: string;
   totalSharesOffered?: number;
-  freshIssue?: { amount?: number; shares?: number };
-  offerForSale?: { amount?: number; shares?: number };
-  promoterHolding?: { preIssue?: number; postIssue?: number };
+  freshIssue?: {
+    amount?: number;
+    shares?: number;
+  };
+  offerForSale?: {
+    amount?: number;
+    shares?: number;
+  };
+  promoterHolding?: {
+    preIssue?: number;
+    postIssue?: number;
+  };
   subscription?: Subscription;
   gmp?: GMPData;
   business?: BusinessInfo;
@@ -153,8 +165,12 @@ export interface IPO {
   risks?: RiskFactors;
   registrar?: Registrar;
   leadManagers?: LeadManagers;
-  sponsorBank?: { name: string };
-  marketMaker?: { name: string };
+  sponsorBank?: {
+    name: string;
+  };
+  marketMaker?: {
+    name: string;
+  };
   documents?: DocumentLink[];
   officialWebsite?: string;
   moneycontrolUrl?: string;
