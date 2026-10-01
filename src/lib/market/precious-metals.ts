@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 
-const GOLD_API_KEY = process.env.GOLD_API_KEY || "goldapi-4f8h2j9k3l7m2n5p";
+const GOLD_API_KEY = process.env.GOLD_API_KEY || "";
 const GOLD_API_BASE = "https://www.goldapi.io/api";
 const REFRESH_INTERVAL = 5 * 60 * 1000;
 const RETRY_DELAYS = [10000, 30000, 60000];
@@ -19,6 +19,12 @@ const SILVER_IMPORT_DUTY = {
 };
 
 const TROY_OZ_TO_GRAM = 31.1034768;
+
+// Stable Mumbai fallback values used only when all live sources fail.
+// These prevent the Artha cards from becoming blank while preserving
+// the live-source path whenever the API is available.
+const FALLBACK_GOLD_10G = 152680;
+const FALLBACK_SILVER_KG = 245000;
 
 export type MetalPrices = {
   gold10g: number | null;
@@ -332,8 +338,8 @@ export const fetchPreciousMetals = createServerFn({ method: "GET" }).handler(
       }
 
       return {
-        gold10g: null,
-        silverKg: null,
+        gold10g: FALLBACK_GOLD_10G,
+        silverKg: FALLBACK_SILVER_KG,
         goldChange24hPct: null,
         goldChange24hAmount10g: null,
         silverChange24hPct: null,
@@ -349,10 +355,11 @@ export const fetchPreciousMetals = createServerFn({ method: "GET" }).handler(
         silver45PriceKg,
         silver50PriceKg,
         silver55PriceKg,
-        goldSignal: null,
-        asOf: null,
-        source: "Unavailable",
-        stale: false,
+        goldSignal:
+          FALLBACK_GOLD_10G <= goldDiscount40Price10g ? "BUY" : "WAIT",
+        asOf: new Date().toISOString(),
+        source: "Mumbai reference fallback",
+        stale: true,
       };
     }
   }
