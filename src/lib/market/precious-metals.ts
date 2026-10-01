@@ -1,30 +1,10 @@
 import { createServerFn } from "@tanstack/react-start";
 
-const GOLD_API_KEY = process.env.GOLD_API_KEY || "";
-const GOLD_API_BASE = "https://www.goldapi.io/api";
-const REFRESH_INTERVAL = 5 * 60 * 1000;
-const RETRY_DELAYS = [10000, 30000, 60000];
-const GST_RATE = 0.03;
-
-const GOLD_IMPORT_DUTY = {
-  total: 0.15,
-  bcd: 0.10,
-  aidc: 0.05,
-};
-
-const SILVER_IMPORT_DUTY = {
-  total: 0.16,
-  bcd: 0.10,
-  aidc: 0.06,
-};
+const REFRESH_INTERVAL = 60 * 1000;
+const REQUEST_TIMEOUT_MS = 8000;
+const RETRY_DELAYS = [1500, 4000];
 
 const TROY_OZ_TO_GRAM = 31.1034768;
-
-// Stable Mumbai fallback values used only when all live sources fail.
-// These prevent the Artha cards from becoming blank while preserving
-// the live-source path whenever the API is available.
-const FALLBACK_GOLD_10G = 152680;
-const FALLBACK_SILVER_KG = 245000;
 
 export type MetalPrices = {
   gold10g: number | null;
@@ -50,105 +30,7 @@ export type MetalPrices = {
   stale: boolean;
 };
 
-interface GoldApiResponse {
-  price: number;
-  timestamp: number;
-  metal: string;
-  currency: string;
-  exchange: string;
-  symbol: string;
-  ch: number;
-  chp: number;
-  ask: number;
-  bid: number;
-  open: number;
-  high: number;
-  low: number;
-  previous_close: number;
-}
-
-interface UsdInrResponse {
-  rate: number;
-  timestamp: number;
-}
-
-class PriceFetchError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "PriceFetchError";
-  }
-}
-
-async function fetchGoldApiPrice(metal: string): Promise<GoldApiResponse> {
-  if (!GOLD_API_KEY) {
-    throw new PriceFetchError("Gold API key is not configured");
-  }
-
-  const response = await fetch(`${GOLD_API_BASE}/${metal}/USD`, {
-    headers: {
-      "x-access-token": GOLD_API_KEY,
-      "Content-Type": "application/json",
-    },
-  });
-
-  if (!response.ok) {
-    throw new PriceFetchError(`Gold API request failed: ${response.status}`);
-  }
-
-  return response.json();
-}
-
-async function fetchUsdInrRate(): Promise<UsdInrResponse> {
-  const response = await fetch(
-    "https://api.frankfurter.app/latest?from=USD&to=INR"
-  );
-
-  if (!response.ok) {
-    throw new PriceFetchError(`USD/INR request failed: ${response.status}`);
-  }
-
-  const data = await response.json();
-  const rate = Number(data.rates?.INR);
-
-  if (!Number.isFinite(rate) || rate <= 0) {
-    throw new PriceFetchError("Invalid USD/INR rate");
-  }
-
-  return {
-    rate,
-    timestamp: Date.now(),
-  };
-}
-
-function convertUsdPerOzToInrPerGram(
-  usdPerOz: number,
-  usdInrRate: number
-): number {
-  return (usdPerOz * usdInrRate) / TROY_OZ_TO_GRAM;
-}
-
-function calculate22KFrom24K(price24k: number): number {
-  return (price24k * 22) / 24;
-}
-
-function applyImportDutyAndGST(
-  basePrice: number,
-  importDutyRate: number,
-  gstRate: number
-): { finalPrice: number; importDutyAmount: number; gstAmount: number } {
-  const importDutyAmount = basePrice * importDutyRate;
-  const priceWithDuty = basePrice + importDutyAmount;
-  const gstAmount = priceWithDuty * gstRate;
-  const finalPrice = priceWithDuty + gstAmount;
-
-  return {
-    finalPrice,
-    importDutyAmount,
-    gstAmount,
-  };
-}
-
-let lastGood: {
+type LiveMetalData = {
   gold10g: number;
   silverKg: number;
   goldChange24hPct: number | null;
@@ -157,213 +39,299 @@ let lastGood: {
   silverChange24hAmountKg: number | null;
   asOf: string;
   source: string;
-} | null = null;
+};
 
-async function fetchFromSources() {
-  const now = new Date().toISOString();
+type OroPocketResponse = {
+  statusCode?: number;
+  data?: {
+    gold?: {
+      buy?: number;
+      sell?: number;
+      change24h?: { buy?: number };
+    };
+    silver?: {
+      buy?: number;
+      sell?: number;
+      change24h?: { buy?: number };
+    };
+    timestamp?: string;
+  };
+};
 
-  let goldData: GoldApiResponse;
-  let silverData: GoldApiResponse;
-  let usdInrData: UsdInrResponse;
+type GoldApiResponse = {
+  price?: number;
+  timestamp?: number;
+  chp?: number;
+  ch?: number;
+};
 
-  let lastError: unknown = null;
-  for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt++) {
-    try {
-      [goldData, silverData, usdInrData] = await Promise.all([
-        fetchGoldApiPrice("XAU"),
-        fetchGoldApiPrice("XAG"),
-        fetchUsdInrRate(),
-      ]);
-      lastError = null;
-      break;
-    } catch (error) {
-      lastError = error;
-      if (attempt < RETRY_DELAYS.length) {
-        await new Promise((resolve) => setTimeout(resolve, RETRY_DELAYS[attempt]));
-      }
+class PriceFetchError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PriceFetchError";
+  }
+}
+
+async function fetchJson<T>(url: string): Promise<T> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      throw new PriceFetchError(`Price source returned HTTP ${response.status}`);
     }
+
+    return (await response.json()) as T;
+  } catch (error) {
+    if (error instanceof PriceFetchError) throw error;
+    throw new PriceFetchError(
+      error instanceof Error ? error.message : "Price source request failed"
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/**
+ * Primary source:
+ * Indian INR buy quotes, per gram, no API key.
+ * The endpoint already provides the Indian quote excluding GST,
+ * which matches the existing Artha card label.
+ */
+async function fetchOroPocket(): Promise<LiveMetalData> {
+  const data = await fetchJson<OroPocketResponse>(
+    "https://api.oropocket.com/public/prices"
+  );
+
+  const gold = Number(data.data?.gold?.buy);
+  const silver = Number(data.data?.silver?.buy);
+  const goldChangePct = Number(data.data?.gold?.change24h?.buy);
+  const silverChangePct = Number(data.data?.silver?.change24h?.buy);
+  const timestamp = data.data?.timestamp;
+
+  if (!Number.isFinite(gold) || gold <= 0) {
+    throw new PriceFetchError("Primary source returned an invalid gold price");
   }
 
-  if (lastError || !goldData! || !silverData! || !usdInrData!) {
-    throw lastError instanceof Error ? lastError : new PriceFetchError("All metal price sources failed");
+  if (!Number.isFinite(silver) || silver <= 0) {
+    throw new PriceFetchError("Primary source returned an invalid silver price");
   }
 
-  const goldUsdPerOz = goldData.price;
-  const silverUsdPerOz = silverData.price;
-  const usdInrRate = usdInrData.rate;
+  const asOf = timestamp && !Number.isNaN(Date.parse(timestamp))
+    ? new Date(timestamp).toISOString()
+    : new Date().toISOString();
 
-  const goldInrPerGram = convertUsdPerOzToInrPerGram(
-    goldUsdPerOz,
-    usdInrRate
-  );
-  const silverInrPerGram = convertUsdPerOzToInrPerGram(
-    silverUsdPerOz,
-    usdInrRate
-  );
-  const gold22kInrPerGram = calculate22KFrom24K(goldInrPerGram);
+  return {
+    gold10g: gold * 10,
+    silverKg: silver * 1000,
+    goldChange24hPct: Number.isFinite(goldChangePct) ? goldChangePct : null,
+    goldChange24hAmount10g: Number.isFinite(goldChangePct)
+      ? (gold * 10 * goldChangePct) / 100
+      : null,
+    silverChange24hPct: Number.isFinite(silverChangePct)
+      ? silverChangePct
+      : null,
+    silverChange24hAmountKg: Number.isFinite(silverChangePct)
+      ? (silver * 1000 * silverChangePct) / 100
+      : null,
+    asOf,
+    source: "OroPocket · India buy rate · GST excluded",
+  };
+}
 
-  const gold24kPricing = applyImportDutyAndGST(
-    goldInrPerGram,
-    GOLD_IMPORT_DUTY.total,
-    GST_RATE
-  );
-  const gold22kPricing = applyImportDutyAndGST(
-    gold22kInrPerGram,
-    GOLD_IMPORT_DUTY.total,
-    GST_RATE
-  );
-  const silverPricing = applyImportDutyAndGST(
-    silverInrPerGram,
-    SILVER_IMPORT_DUTY.total,
-    GST_RATE
-  );
+/**
+ * Secondary live source:
+ * Gold API provides real-time XAU/XAG spot prices without an API key.
+ * Frankfurter supplies the latest USD/INR reference rate.
+ * This is still live data; there is deliberately no hardcoded price fallback.
+ */
+async function fetchGoldApi(): Promise<LiveMetalData> {
+  const [gold, silver, fx] = await Promise.all([
+    fetchJson<GoldApiResponse>("https://api.gold-api.com/price/XAU"),
+    fetchJson<GoldApiResponse>("https://api.gold-api.com/price/XAG"),
+    fetchJson<{ rates?: { INR?: number } }>(
+      "https://api.frankfurter.app/latest?from=USD&to=INR"
+    ),
+  ]);
 
-  const gold10g = gold24kPricing.finalPrice * 10;
-  const silverKg = silverPricing.finalPrice * 1000;
+  const goldUsd = Number(gold.price);
+  const silverUsd = Number(silver.price);
+  const usdInr = Number(fx.rates?.INR);
+
+  if (!Number.isFinite(goldUsd) || goldUsd <= 0) {
+    throw new PriceFetchError("Secondary source returned an invalid gold price");
+  }
+
+  if (!Number.isFinite(silverUsd) || silverUsd <= 0) {
+    throw new PriceFetchError("Secondary source returned an invalid silver price");
+  }
+
+  if (!Number.isFinite(usdInr) || usdInr <= 0) {
+    throw new PriceFetchError("Secondary source returned an invalid USD/INR rate");
+  }
+
+  const gold10g = (goldUsd * usdInr / TROY_OZ_TO_GRAM) * 10;
+  const silverKg = (silverUsd * usdInr / TROY_OZ_TO_GRAM) * 1000;
+
+  const goldChangePct = Number(gold.chp);
+  const silverChangePct = Number(silver.chp);
+  const asOfMs = Number(gold.timestamp) * 1000;
+  const asOf =
+    Number.isFinite(asOfMs) && asOfMs > 0
+      ? new Date(asOfMs).toISOString()
+      : new Date().toISOString();
 
   return {
     gold10g,
     silverKg,
-    goldChange24hPct:
-      Number.isFinite(goldData.chp) ? goldData.chp : null,
+    goldChange24hPct: Number.isFinite(goldChangePct) ? goldChangePct : null,
+    goldChange24hAmount10g: Number.isFinite(goldChangePct)
+      ? (gold10g * goldChangePct) / 100
+      : null,
+    silverChange24hPct: Number.isFinite(silverChangePct)
+      ? silverChangePct
+      : null,
+    silverChange24hAmountKg: Number.isFinite(silverChangePct)
+      ? (silverKg * silverChangePct) / 100
+      : null,
+    asOf,
+    source: "Gold API + Frankfurter · live spot converted to INR",
+  };
+}
+
+async function fetchLivePrices(): Promise<LiveMetalData> {
+  let lastError: unknown = null;
+
+  for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt += 1) {
+    try {
+      // Always prefer the India-specific INR quote.
+      return await fetchOroPocket();
+    } catch (error) {
+      lastError = error;
+
+      // Do not wait through long retries if the primary source is unavailable.
+      if (attempt < RETRY_DELAYS.length) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, RETRY_DELAYS[attempt])
+        );
+      }
+    }
+  }
+
+  try {
+    return await fetchGoldApi();
+  } catch (error) {
+    lastError = error;
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new PriceFetchError("All live metal price sources failed");
+}
+
+let lastGood: LiveMetalData | null = null;
+
+function buildPrices(
+  live: LiveMetalData,
+  gold5yHigh10g: number,
+  silver5yHighKg: number
+): MetalPrices {
+  const goldDiscount10Price10g = Math.round(gold5yHigh10g * 0.9);
+  const goldDiscount20Price10g = Math.round(gold5yHigh10g * 0.8);
+  const goldDiscount30Price10g = Math.round(gold5yHigh10g * 0.7);
+  const goldDiscount40Price10g = Math.round(gold5yHigh10g * 0.6);
+
+  const silver25PriceKg = Math.round(silver5yHighKg * 0.75);
+  const silver35PriceKg = Math.round(silver5yHighKg * 0.65);
+  const silver45PriceKg = Math.round(silver5yHighKg * 0.55);
+  const silver50PriceKg = Math.round(silver5yHighKg * 0.5);
+  const silver55PriceKg = Math.round(silver5yHighKg * 0.45);
+
+  return {
+    gold10g: Math.round(live.gold10g),
+    silverKg: Math.round(live.silverKg),
+    goldChange24hPct: live.goldChange24hPct,
     goldChange24hAmount10g:
-      Number.isFinite(goldData.ch)
-        ? goldData.ch * usdInrRate / TROY_OZ_TO_GRAM * 10
+      live.goldChange24hAmount10g != null
+        ? Math.round(live.goldChange24hAmount10g)
         : null,
-    silverChange24hPct:
-      Number.isFinite(silverData.chp) ? silverData.chp : null,
+    silverChange24hPct: live.silverChange24hPct,
     silverChange24hAmountKg:
-      Number.isFinite(silverData.ch)
-        ? silverData.ch * usdInrRate / TROY_OZ_TO_GRAM * 1000
+      live.silverChange24hAmountKg != null
+        ? Math.round(live.silverChange24hAmountKg)
         : null,
-    asOf: new Date(goldData.timestamp || Date.now()).toISOString(),
-    source: "Gold API · Imported Market Price · Duty + GST",
-    originalGoldUsdPerOz: goldUsdPerOz,
-    originalSilverUsdPerOz: silverUsdPerOz,
-    usdInrRate,
-    gold24kBase: goldInrPerGram,
-    gold24kImportDuty: gold24kPricing.importDutyAmount,
-    gold24kGst: gold24kPricing.gstAmount,
-    gold22kBase: gold22kInrPerGram,
-    gold22kImportDuty: gold22kPricing.importDutyAmount,
-    gold22kGst: gold22kPricing.gstAmount,
-    silverBase: silverInrPerGram,
-    silverImportDuty: silverPricing.importDutyAmount,
-    silverGst: silverPricing.gstAmount,
+    gold5yHigh10g,
+    goldDiscount10Price10g,
+    goldDiscount20Price10g,
+    goldDiscount30Price10g,
+    goldDiscount40Price10g,
+    silver5yHighKg,
+    silver25PriceKg,
+    silver35PriceKg,
+    silver45PriceKg,
+    silver50PriceKg,
+    silver55PriceKg,
+    goldSignal:
+      live.gold10g <= goldDiscount40Price10g ? "BUY" : "WAIT",
+    asOf: live.asOf,
+    source: live.source,
+    stale: false,
   };
 }
 
 export const fetchPreciousMetals = createServerFn({ method: "GET" }).handler(
   async (): Promise<MetalPrices> => {
+    // Existing Artha reference levels are preserved.
     const gold5yHigh10g = 170000;
     const silver5yHighKg = 400000;
 
-    const goldDiscount10Price10g = Math.round(gold5yHigh10g * 0.9);
-    const goldDiscount20Price10g = Math.round(gold5yHigh10g * 0.8);
-    const goldDiscount30Price10g = Math.round(gold5yHigh10g * 0.7);
-    const goldDiscount40Price10g = Math.round(gold5yHigh10g * 0.6);
-
-    const silver25PriceKg = Math.round(silver5yHighKg * 0.75);
-    const silver35PriceKg = Math.round(silver5yHighKg * 0.65);
-    const silver45PriceKg = Math.round(silver5yHighKg * 0.55);
-    const silver50PriceKg = Math.round(silver5yHighKg * 0.5);
-    const silver55PriceKg = Math.round(silver5yHighKg * 0.45);
-
     try {
-      const live = await fetchFromSources();
+      const live = await fetchLivePrices();
       lastGood = live;
 
-      const goldSignal =
-        live.gold10g <= goldDiscount40Price10g ? "BUY" : "WAIT";
-
-      return {
-        gold10g: Math.round(live.gold10g),
-        silverKg: Math.round(live.silverKg),
-        goldChange24hPct: live.goldChange24hPct,
-        goldChange24hAmount10g:
-          live.goldChange24hAmount10g != null
-            ? Math.round(live.goldChange24hAmount10g)
-            : null,
-        silverChange24hPct: live.silverChange24hPct,
-        silverChange24hAmountKg:
-          live.silverChange24hAmountKg != null
-            ? Math.round(live.silverChange24hAmountKg)
-            : null,
-        gold5yHigh10g,
-        goldDiscount10Price10g,
-        goldDiscount20Price10g,
-        goldDiscount30Price10g,
-        goldDiscount40Price10g,
-        silver5yHighKg,
-        silver25PriceKg,
-        silver35PriceKg,
-        silver45PriceKg,
-        silver50PriceKg,
-        silver55PriceKg,
-        goldSignal,
-        asOf: live.asOf,
-        source: live.source,
-        stale: false,
-      };
+      return buildPrices(live, gold5yHigh10g, silver5yHighKg);
     } catch (error) {
-      console.error("All metal price sources failed:", error);
+      console.error("Live metal price fetch failed:", error);
 
+      // Never invent a current price. If the server has previously
+      // obtained a real price, return that verified price as stale.
       if (lastGood) {
         return {
-          gold10g: Math.round(lastGood.gold10g),
-          silverKg: Math.round(lastGood.silverKg),
-          goldChange24hPct: lastGood.goldChange24hPct,
-          goldChange24hAmount10g:
-            lastGood.goldChange24hAmount10g != null
-              ? Math.round(lastGood.goldChange24hAmount10g)
-              : null,
-          silverChange24hPct: lastGood.silverChange24hPct,
-          silverChange24hAmountKg:
-            lastGood.silverChange24hAmountKg != null
-              ? Math.round(lastGood.silverChange24hAmountKg)
-              : null,
-          gold5yHigh10g,
-          goldDiscount10Price10g,
-          goldDiscount20Price10g,
-          goldDiscount30Price10g,
-          goldDiscount40Price10g,
-          silver5yHighKg,
-          silver25PriceKg,
-          silver35PriceKg,
-          silver45PriceKg,
-          silver50PriceKg,
-          silver55PriceKg,
-          goldSignal:
-            lastGood.gold10g <= goldDiscount40Price10g ? "BUY" : "WAIT",
-          asOf: lastGood.asOf,
-          source: lastGood.source,
+          ...buildPrices(lastGood, gold5yHigh10g, silver5yHighKg),
           stale: true,
         };
       }
 
-      return {
-        gold10g: FALLBACK_GOLD_10G,
-        silverKg: FALLBACK_SILVER_KG,
-        goldChange24hPct: null,
-        goldChange24hAmount10g: null,
-        silverChange24hPct: null,
-        silverChange24hAmountKg: null,
+      // No fixed fallback price. The UI will show "Price unavailable".
+      const unavailable = buildPrices(
+        {
+          gold10g: Number.NaN,
+          silverKg: Number.NaN,
+          goldChange24hPct: null,
+          goldChange24hAmount10g: null,
+          silverChange24hPct: null,
+          silverChange24hAmountKg: null,
+          asOf: new Date().toISOString(),
+          source: "Live price unavailable",
+        },
         gold5yHigh10g,
-        goldDiscount10Price10g,
-        goldDiscount20Price10g,
-        goldDiscount30Price10g,
-        goldDiscount40Price10g,
-        silver5yHighKg,
-        silver25PriceKg,
-        silver35PriceKg,
-        silver45PriceKg,
-        silver50PriceKg,
-        silver55PriceKg,
-        goldSignal:
-          FALLBACK_GOLD_10G <= goldDiscount40Price10g ? "BUY" : "WAIT",
-        asOf: new Date().toISOString(),
-        source: "Mumbai reference fallback",
+        silver5yHighKg
+      );
+
+      return {
+        ...unavailable,
+        gold10g: null,
+        silverKg: null,
+        goldSignal: null,
         stale: true,
+        source: "Live price unavailable",
+        asOf: null,
       };
     }
   }
