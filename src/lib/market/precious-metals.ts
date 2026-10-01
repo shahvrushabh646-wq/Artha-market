@@ -283,13 +283,113 @@ async function fromMumbaiGoogleSearch(): Promise<MetalQuote | null> {
   }
 }
 
+async function fromAibSilverBenchmark(): Promise<{ silverKg: number; asOf: string } | null> {
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Kolkata",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    }).formatToParts(new Date());
+
+    const year = parts.find((p) => p.type === "year")?.value;
+    const month = parts.find((p) => p.type === "month")?.value;
+    const day = parts.find((p) => p.type === "day")?.value;
+    if (!year || !month || !day) return null;
+
+    const date = `${year}-${month}-${day}`;
+    const res = await fetch(`https://allindiabullion.com/benchmark/${date}`, {
+      headers: {
+        Accept: "text/html,application/xhtml+xml",
+        "User-Agent": UA,
+        "Accept-Language": "en-IN,en;q=0.9"
+      },
+      cache: "no-store",
+      signal: AbortSignal.timeout(8000)
+    });
+
+    if (!res.ok) return null;
+
+    const html = await res.text();
+    const text = html
+      .replace(/<script[\\s\\S]*?<\\/script>/gi, " ")
+      .replace(/<style[\\s\\S]*?<\\/style>/gi, " ")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&nbsp;|&#160;/gi, " ")
+      .replace(/&#8377;|&rupee;/gi, "₹")
+      .replace(/&amp;/gi, "&")
+      .replace(/&#44;/gi, ",")
+      .replace(/\\s+/g, " ")
+      .trim();
+
+    const patterns = [
+      /999 silver(?: was| is)?\\s*₹\\s*([0-9]{1,3}(?:,[0-9]{2,3})+)/i,
+      /999 silver\\s+per kilogram\\s*\\|\\s*₹\\s*([0-9]{1,3}(?:,[0-9]{2,3})+)/i,
+      /Silver 999[^₹]{0,180}₹\\s*([0-9]{1,3}(?:,[0-9]{2,3})+)/i
+    ];
+
+    let silverKg: number | null = null;
+    for (const pattern of patterns) {
+      const match = text.match(pattern);
+      if (match?.[1]) {
+        const value = Number(match[1].replace(/,/g, ""));
+        if (Number.isFinite(value) && value >= 150000 && value <= 600000) {
+          silverKg = Math.round(value);
+          break;
+        }
+      }
+    }
+
+    if (silverKg == null) return null;
+
+    const recorded = text.match(/Recorded[^.]{0,160}(\\d{1,2}:\\d{2})\\s*IST/i)?.[1];
+    const asOf = recorded
+      ? `${date}T${recorded}:00+05:30`
+      : new Date().toISOString();
+
+    return { silverKg, asOf };
+  } catch {
+    return null;
+  }
+}
+
 async function getIndianMetalPrices(): Promise<MetalQuote | null> {
-  return (
-    (await fromGoogleFinanceMumbai()) ??
-    (await fromOroPocket()) ??
-    (await fromIndianSpotFeed()) ??
-    (await fromMumbaiGoogleSearch())
-  );
+  const [google, aibSilver] = await Promise.all([
+    fromGoogleFinanceMumbai(),
+    fromAibSilverBenchmark()
+  ]);
+
+  if (google || aibSilver) {
+    const fallback = google ? null : await fromIndianSpotFeed();
+
+    return {
+      gold10g: google?.gold10g ?? fallback?.gold10g ?? 0,
+      silverKg:
+        aibSilver?.silverKg ??
+        google?.silverKg ??
+        fallback?.silverKg ??
+        0,
+      goldChange24hPct: google?.goldChange24hPct ?? fallback?.goldChange24hPct ?? null,
+      goldChange24hAmount10g:
+        google?.goldChange24hAmount10g ??
+        fallback?.goldChange24hAmount10g ??
+        null,
+      silverChange24hPct:
+        aibSilver ? null : google?.silverChange24hPct ?? fallback?.silverChange24hPct ?? null,
+      silverChange24hAmountKg:
+        aibSilver
+          ? null
+          : google?.silverChange24hAmountKg ??
+            fallback?.silverChange24hAmountKg ??
+            null,
+      asOf: aibSilver?.asOf ?? google?.asOf ?? fallback?.asOf ?? new Date().toISOString(),
+      source: aibSilver
+        ? `Gold: ${google ? "Google Finance/Search" : "India spot fallback"} · Silver: All India Bullion Mumbai benchmark`
+        : google?.source ?? fallback?.source ?? "India spot fallback"
+    };
+  }
+
+  return (await fromIndianSpotFeed()) ?? (await fromMumbaiGoogleSearch());
 }
 
 export const fetchPreciousMetals = createServerFn({ method: "GET" }).handler(
