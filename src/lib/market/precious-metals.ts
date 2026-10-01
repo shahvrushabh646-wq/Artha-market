@@ -80,6 +80,10 @@ class PriceFetchError extends Error {
 }
 
 async function fetchGoldApiPrice(metal: string): Promise<GoldApiResponse> {
+  if (!GOLD_API_KEY) {
+    throw new PriceFetchError("Gold API key is not configured");
+  }
+
   const response = await fetch(`${GOLD_API_BASE}/${metal}/USD`, {
     headers: {
       "x-access-token": GOLD_API_KEY,
