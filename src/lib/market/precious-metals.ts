@@ -152,11 +152,31 @@ let lastGood: {
 async function fetchFromSources() {
   const now = new Date().toISOString();
 
-  const [goldData, silverData, usdInrData] = await Promise.all([
-    fetchGoldApiPrice("XAU"),
-    fetchGoldApiPrice("XAG"),
-    fetchUsdInrRate(),
-  ]);
+  let goldData: GoldApiResponse;
+  let silverData: GoldApiResponse;
+  let usdInrData: UsdInrResponse;
+
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt++) {
+    try {
+      [goldData, silverData, usdInrData] = await Promise.all([
+        fetchGoldApiPrice("XAU"),
+        fetchGoldApiPrice("XAG"),
+        fetchUsdInrRate(),
+      ]);
+      lastError = null;
+      break;
+    } catch (error) {
+      lastError = error;
+      if (attempt < RETRY_DELAYS.length) {
+        await new Promise((resolve) => setTimeout(resolve, RETRY_DELAYS[attempt]));
+      }
+    }
+  }
+
+  if (lastError || !goldData! || !silverData! || !usdInrData!) {
+    throw lastError instanceof Error ? lastError : new PriceFetchError("All metal price sources failed");
+  }
 
   const goldUsdPerOz = goldData.price;
   const silverUsdPerOz = silverData.price;
