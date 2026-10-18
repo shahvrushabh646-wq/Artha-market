@@ -15,6 +15,7 @@ import { Route as PortfolioRouteImport } from './routes/portfolio'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as StockRouteImport } from './routes/stock'
 import { Route as WatchlistRouteImport } from './routes/watchlist'
+import { Route as ShareholdingRouteImport } from './routes/shareholding'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -46,6 +47,11 @@ const WatchlistRoute = WatchlistRouteImport.update({
   path: '/watchlist',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ShareholdingRoute = ShareholdingRouteImport.update({
+  id: '/shareholding',
+  path: '/shareholding',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -54,6 +60,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof SettingsRoute
   '/stock': typeof StockRoute
   '/watchlist': typeof WatchlistRoute
+  '/shareholding': typeof ShareholdingRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -75,7 +82,7 @@ export interface FileRoutesById {
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    '/' | '/alerts' | '/portfolio' | '/settings' | '/stock' | '/watchlist'
+    '/' | '/alerts' | '/portfolio' | '/settings' | '/stock' | '/watchlist' | '/shareholding'
   fileRoutesByTo: FileRoutesByTo
   to: '/' | '/alerts' | '/portfolio' | '/settings' | '/stock' | '/watchlist'
   id:
@@ -86,6 +93,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/stock'
     | '/watchlist'
+    | '/shareholding'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -95,6 +103,7 @@ export interface RootRouteChildren {
   SettingsRoute: typeof SettingsRoute
   StockRoute: typeof StockRoute
   WatchlistRoute: typeof WatchlistRoute
+  ShareholdingRoute: typeof ShareholdingRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -141,6 +150,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WatchlistRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/shareholding': {
+      id: '/shareholding'
+      path: '/shareholding'
+      fullPath: '/shareholding'
+      preLoaderRoute: typeof ShareholdingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -151,6 +167,7 @@ const rootRouteChildren: RootRouteChildren = {
   SettingsRoute: SettingsRoute,
   StockRoute: StockRoute,
   WatchlistRoute: WatchlistRoute,
+  ShareholdingRoute: ShareholdingRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
