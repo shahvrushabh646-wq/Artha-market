@@ -155,3 +155,58 @@ async function loadShareholding(symbolInput: string): Promise<ShareholdingResult
 export const fetchShareholding = createServerFn({ method: "GET" })
   .validator((data: unknown) => z.object({ symbol: z.string().min(1).max(40) }).parse(data))
   .handler(async ({ data }) => loadShareholding(data.symbol));
+
+
+export type SuggestedShareholding = {
+  symbol: string;
+  name: string;
+  fii: number | null;
+  dii: number | null;
+  quarter: string;
+  asOnDate: string;
+  source: string;
+  sourceUrl: string;
+  triggerDate: string | null;
+};
+
+export const fetchSuggestedHoldings = createServerFn({ method: "POST" })
+  .validator((data: unknown) => z.object({
+    stocks: z.array(z.object({
+      symbol: z.string().min(1).max(40),
+      name: z.string().max(200).optional(),
+      triggerDate: z.string().nullable().optional(),
+    })).max(1000),
+  }).parse(data))
+  .handler(async ({ data }): Promise<{ qualified: SuggestedShareholding[]; checkedSymbols: string[] }> => {
+    const qualified: SuggestedShareholding[] = [];
+    const checkedSymbols: string[] = [];
+    let next = 0;
+    const worker = async () => {
+      while (true) {
+        const index = next++;
+        if (index >= data.stocks.length) return;
+        const stock = data.stocks[index];
+        try {
+          const result = await loadShareholding(stock.symbol);
+          const latest = result.quarters[0];
+          checkedSymbols.push(stock.symbol.toUpperCase());
+          if (!latest || !((latest.fii ?? -Infinity) >= 15 || (latest.dii ?? -Infinity) >= 15)) continue;
+          qualified.push({
+            symbol: stock.symbol,
+            name: stock.name || stock.symbol,
+            fii: latest.fii,
+            dii: latest.dii,
+            quarter: latest.quarter,
+            asOnDate: latest.asOnDate,
+            source: result.source,
+            sourceUrl: latest.sourceUrl,
+            triggerDate: stock.triggerDate ?? null,
+          });
+        } catch {
+          // Missing/unavailable disclosures never qualify by default.
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(8, data.stocks.length) }, worker));
+    return { qualified, checkedSymbols };
+  });
