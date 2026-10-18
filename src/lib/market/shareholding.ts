@@ -83,7 +83,14 @@ function parseXbrl(xml: string): Omit<ShareholdingQuarter, "quarter" | "asOnDate
     }
   }
 
-  // Promoter pledge is shown only when the filing exposes both pledged shares and promoter shares.
+  // Prefer the filing’s explicit pledge percentage; otherwise calculate from pledged and promoter share counts.
+  let pledgePctRaw: number | null = null;
+  const pledgePattern = /<(?:[\\w.-]+:)?PledgedOrEncumberedSharesHeldAsPercentageOfTotalNumberOfShares\\b[^>]*\\bcontextRef="([^"]+)"[^>]*>([-\\d.]+)<\\/(?:[\\w.-]+:)?PledgedOrEncumberedSharesHeldAsPercentageOfTotalNumberOfShares>/g;
+  for (const fact of xml.matchAll(pledgePattern)) {
+    const members = contexts.get(fact[1]) ?? [];
+    const value = Number(fact[2]);
+    if (members.length <= 2 && members.includes("ShareholdingOfPromoterAndPromoterGroupMember") && Number.isFinite(value)) { pledgePctRaw = value; break; }
+  }
   const shareCounts: Record<string, number | null> = { promoter: null, pledged: null };
   const countPattern = /<(?:[\w.-]+:)?(NumberOfShares|NumberOfSharesPledgedOrOtherwiseEncumbered)\b[^>]*\bcontextRef="([^"]+)"[^>]*>(\d+)<\/(?:[\w.-]+:)?\1>/g;
   for (const fact of xml.matchAll(countPattern)) {
@@ -96,9 +103,11 @@ function parseXbrl(xml: string): Omit<ShareholdingQuarter, "quarter" | "asOnDate
   const sum = (values.promoter ?? 0) + (values.public ?? 0);
   const scale = sum > 1000 ? 0.01 : sum > 0 && sum < 2 ? 100 : 1;
   for (const key of ["promoter", "public", "fii", "dii"] as const) if (values[key] !== null) values[key] = Math.round((values[key] as number) * scale * 10000) / 10000;
-  const promoterPledge = shareCounts.promoter && shareCounts.pledged !== null
-    ? Math.round((shareCounts.pledged / shareCounts.promoter) * 10000) / 100
-    : null;
+  const promoterPledge = pledgePctRaw !== null
+    ? Math.round(pledgePctRaw * scale * 100) / 100
+    : shareCounts.promoter && shareCounts.pledged !== null
+      ? Math.round((shareCounts.pledged / shareCounts.promoter) * 10000) / 100
+      : null;
   if (Object.values(values).every(v => v === null)) return null;
   return { promoter: values.promoter, fii: values.fii, dii: values.dii, public: values.public, promoterPledge };
 }
