@@ -10,10 +10,12 @@ export type ShareholdingQuarter = {
   public: number | null;
   promoterPledge: number | null;
   sourceUrl: string;
+  sourceName: "NSE" | "Screener.in";
 };
 export type ShareholdingResult = {
   symbol: string;
   source: string;
+  sourceName: "NSE" | "Screener.in";
   quarters: ShareholdingQuarter[];
   note: string | null;
 };
@@ -112,13 +114,82 @@ function parseXbrl(xml: string): Omit<ShareholdingQuarter, "quarter" | "asOnDate
   return { promoter: values.promoter, fii: values.fii, dii: values.dii, public: values.public, promoterPledge };
 }
 
+function htmlText(value: string): string {
+  return value
+    .replace(/<script\b[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style\b[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;|&#160;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+function screenerNumber(value: string): number | null {
+  const text = htmlText(value).replace(/,/g, "").replace(/%/g, "").trim();
+  if (!text || text === "-" || text === "—" || text === "NA" || text === "N/A") return null;
+  const number = Number(text);
+  return Number.isFinite(number) && number >= 0 && number <= 100 ? number : null;
+}
+function parseScreener(html: string, symbol: string, url: string): ShareholdingQuarter[] {
+  // Screener publishes quarterly ownership in a table titled "Shareholding Pattern".
+  const tables = [...html.matchAll(/<table\b[^>]*>[\s\S]*?<\/table>/gi)].map(m => m[0]);
+  const table = tables.find(t => /Shareholding\s*Pattern/i.test(htmlText(t)));
+  if (!table) return [];
+  const rows = [...table.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)].map(m => {
+    const cells = [...m[1].matchAll(/<t[hd]\b[^>]*>([\s\S]*?)<\/t[hd]>/gi)].map(x => htmlText(x[1]));
+    return cells;
+  }).filter(row => row.length > 1);
+  if (rows.length < 2) return [];
+  const header = rows.find(row => row.some(cell => /(?:Mar|Jun|Sep|Dec|Jan|Feb|Apr|May|Jul|Aug|Oct|Nov)\s*['’]?\d{2,4}/i.test(cell)));
+  if (!header) return [];
+  const dates = header.slice(1).map(value => {
+    const cleaned = value.replace(/[’']/g, " ").trim();
+    const date = new Date(cleaned);
+    return Number.isNaN(date.getTime()) ? null : {
+      quarter: date.toLocaleDateString("en-IN", { month: "short", year: "numeric", timeZone: "UTC" }),
+      asOnDate: date.toISOString().slice(0, 10),
+    };
+  });
+  const findRow = (patterns: RegExp[]) => rows.find(row => patterns.some(pattern => pattern.test(row[0] || "")));
+  const promoters = findRow([/^promoters?$/i, /^promoter\s*&\s*promoter group$/i]);
+  const fii = findRow([/^fiis?$/i, /^foreign institutional investors?$/i, /^foreign institutions?$/i]);
+  const dii = findRow([/^diis?$/i, /^domestic institutional investors?$/i, /^domestic institutions?$/i]);
+  const publicRow = findRow([/^public$/i, /^public shareholding$/i]);
+  const quarters: ShareholdingQuarter[] = [];
+  for (let i = 0; i < dates.length && i < 4; i++) {
+    const date = dates[i];
+    if (!date) continue;
+    const get = (row: string[] | undefined) => row ? screenerNumber(row[i + 1] || "") : null;
+    const promoter = get(promoters), fiiValue = get(fii), diiValue = get(dii), publicValue = get(publicRow);
+    if (promoter === null && fiiValue === null && diiValue === null && publicValue === null) continue;
+    quarters.push({
+      ...date, promoter, fii: fiiValue, dii: diiValue, public: publicValue,
+      promoterPledge: null, sourceUrl: url, sourceName: "Screener.in",
+    });
+  }
+  return quarters.sort((a, b) => b.asOnDate.localeCompare(a.asOnDate)).slice(0, 4);
+}
+async function loadScreenerFallback(symbol: string): Promise<{ url: string; quarters: ShareholdingQuarter[] }> {
+  const url = \`https://www.screener.in/company/\${encodeURIComponent(symbol)}/\`;
+  const response = await fetch(url, {
+    headers: { "User-Agent": UA, Accept: "text/html,application/xhtml+xml,*/*", "Accept-Language": "en-US,en;q=0.9" },
+    cache: "no-store",
+  });
+  if (!response.ok) throw new Error(\`Screener.in returned HTTP \${response.status}\`);
+  return { url, quarters: parseScreener(await response.text(), symbol, url) };
+}
+
 async function loadShareholding(symbolInput: string): Promise<ShareholdingResult> {
   const symbol = normalizeSymbol(symbolInput);
   if (!symbol) throw new Error("A valid NSE symbol is required.");
   const cached = cache.get(symbol);
   if (cached && cached.expires > Date.now()) return cached.data;
   const page = `https://www.nseindia.com/companies-listing/corporate-filings-shareholding-pattern?symbol=${encodeURIComponent(symbol)}&tabIndex=equity`;
-  const base: ShareholdingResult = { symbol, source: page, quarters: [], note: null };
+  const base: ShareholdingResult = { symbol, source: page, sourceName: "NSE", quarters: [], note: null };
   try {
     const raw = await nseJson(`https://www.nseindia.com/api/corporate-share-holdings-master?index=equities&symbol=${encodeURIComponent(symbol)}`, page);
     if (!Array.isArray(raw)) throw new Error("Unexpected response from NSE.");
@@ -138,6 +209,7 @@ async function loadShareholding(symbolInput: string): Promise<ShareholdingResult
           quarter: parseDate(date || rawDate),
           asOnDate: date || rawDate,
           sourceUrl: url,
+          sourceName: "NSE",
         });
       } catch { /* one unavailable filing should not hide the other quarters */ }
     }
@@ -146,7 +218,27 @@ async function loadShareholding(symbolInput: string): Promise<ShareholdingResult
     if (!base.quarters.length) base.note = "NSE filings were reachable, but no supported shareholding values could be parsed. Figures are not estimated.";
     else if (base.quarters.some(q => q.fii === null || q.dii === null)) base.note = "Some filings do not expose separate FII/DII values in a format this screen can verify. Missing figures remain unavailable.";
   } catch {
-    base.note = "NSE shareholding data could not be retrieved right now. Try again later; no sample figures are shown.";
+    base.note = "NSE shareholding data could not be retrieved right now.";
+  }
+
+  // Use Screener when NSE is blocked, returns no usable quarters, or lacks FII/DII figures.
+  const latestNse = base.quarters[0];
+  const needsFallback = !latestNse || latestNse.fii === null || latestNse.dii === null;
+  if (needsFallback) {
+    try {
+      const fallback = await loadScreenerFallback(symbol);
+      const usable = fallback.quarters.some(q => q.fii !== null || q.dii !== null);
+      if (usable) {
+        base.source = fallback.url;
+        base.sourceName = "Screener.in";
+        base.quarters = fallback.quarters;
+        base.note = "Using Screener.in as a fallback because NSE data was blocked, empty, or missing separate FII/DII values. Verify figures at the linked source. Promoter pledge is not supplied by this fallback.";
+      } else if (!base.quarters.length) {
+        base.note = "NSE and Screener.in did not return verifiable FII/DII figures. No sample values are shown.";
+      }
+    } catch {
+      if (!base.quarters.length) base.note = "NSE and Screener.in shareholding data could not be retrieved. Try again later; no sample figures are shown.";
+    }
   }
   cache.set(symbol, { expires: Date.now() + 30 * 60_000, data: base });
   return base;
