@@ -64,6 +64,7 @@ function ShareholdingPage() {
     };
   }, [latest]);
   const barData = quarters.map(q => ({ quarter: quarterLabel(q), promoter: q.promoter, pledge: q.promoterPledge }));
+  type ShareholdingKey = "fii" | "dii" | "promoter" | "public" | "promoterPledge";
   const tableRows = [
     { label: "FII", key: "fii" as const },
     { label: "DII", key: "dii" as const },
@@ -72,7 +73,7 @@ function ShareholdingPage() {
     { label: "Promoter pledge (% of promoter holding)", key: "promoterPledge" as const },
   ];
   const first = quarters[0], last = quarters.at(-1);
-  const delta = (key: typeof tableRows[number]["key"]) => {
+  const delta = (key: ShareholdingKey) => {
     const a = first?.[key] ?? null, b = last?.[key] ?? null;
     return a == null || b == null ? "—" : `${b - a > 0 ? "+" : ""}${(b - a).toFixed(2)} pp`;
   };
