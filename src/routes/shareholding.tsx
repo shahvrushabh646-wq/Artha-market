@@ -56,11 +56,10 @@ function ShareholdingPage() {
   }, [latest]);
   const screening = useMemo(() => {
     if (!latest || latest.fii == null || latest.dii == null) return { label: "Insufficient Data", detail: "Latest-quarter FII and/or DII figures could not be verified." };
-    const combined = latest.fii + latest.dii;
-    const passes = latest.fii > 15 || latest.dii > 15 || combined > 15;
+    const passes = latest.fii >= 15 || latest.dii >= 15;
     return {
       label: passes ? "Meets 15% Rule" : "Does Not Meet 15% Rule",
-      detail: `FII ${moneyPercent(latest.fii)} · DII ${moneyPercent(latest.dii)} · Combined ${moneyPercent(combined)}. A stock qualifies when FII > 15%, DII > 15%, or FII + DII > 15%.`,
+      detail: `FII ${moneyPercent(latest.fii)} · DII ${moneyPercent(latest.dii)}. A stock qualifies when FII ≥ 15% or DII ≥ 15%; combined FII + DII is not used.`,
     };
   }, [latest]);
   const barData = quarters.map(q => ({ quarter: quarterLabel(q), promoter: q.promoter, pledge: q.promoterPledge }));
