@@ -66,7 +66,7 @@ function ShareholdingPage() {
       detail: `FII ${moneyPercent(latest.fii)} · DII ${moneyPercent(latest.dii)} · Combined ${moneyPercent(combined)}. A stock qualifies when FII > 15%, DII > 15%, or FII + DII > 15%.`,
     };
   }, [latest]);
-  const barData = quarters.map(q => ({ quarter: quarterLabel(q), promoter: q.promoter, pledge: q.promoterPledge }));
+  const barData = quarters.slice(-4).map(q => ({ quarter: quarterLabel(q), promoter: q.promoter, pledge: q.promoterPledge }));
   type ShareholdingKey = "fii" | "dii" | "promoter" | "public" | "promoterPledge";
   const tableRows = [
     { label: "FII", key: "fii" as const },
@@ -120,16 +120,16 @@ function ShareholdingPage() {
               <XAxis dataKey="quarter" tick={{ fill: "var(--muted)", fontSize: 10 }} />
               <YAxis tick={{ fill: "var(--muted)", fontSize: 10 }} unit="%" />
               <Tooltip formatter={(value) => moneyPercent(typeof value === "number" ? value : null)}/>
-              <Bar dataKey="promoter" name="Promoter holding" fill={COLORS.Promoter} radius={[4,4,0,0]} maxBarSize={28}>
+              <Bar dataKey="promoter" name="Promoter holding" fill="#ef4444" radius={[4,4,0,0]} maxBarSize={28}>
                 <LabelList dataKey="promoter" position="insideTop" fill="#fff" fontSize={10} formatter={(value) => typeof value === "number" ? `${value.toFixed(1)}%` : "—"}/>
               </Bar>
-              <Bar dataKey="pledge" name="Promoter pledge (% of promoter holding)" fill={COLORS.FII} radius={[4,4,0,0]} maxBarSize={28}>
+              <Bar dataKey="pledge" name="Promoter pledge (% of promoter holding)" fill="#f97316" radius={[4,4,0,0]} maxBarSize={28}>
                 <LabelList dataKey="pledge" position="insideTop" fill="#fff" fontSize={10} formatter={(value) => typeof value === "number" ? `${value.toFixed(1)}%` : ""}/>
               </Bar>
             </BarChart>
           </ResponsiveContainer>
         </div> : <Panel><p className="text-sm text-muted">Insufficient Data: no quarterly promoter figures were verified.</p></Panel>}
-        <p className="mt-2 text-xs text-subtle">Pledge is expressed as pledged shares divided by promoter-group shares. If the filing does not provide enough information to calculate it, the value is left blank.</p>
+        <div className="mt-3 flex flex-wrap justify-center gap-x-5 gap-y-2 text-xs text-muted"><span className="inline-flex items-center gap-2"><span className="size-2.5 rounded-sm" style={{ backgroundColor: "#ef4444" }}/>Promoter holding %</span><span className="inline-flex items-center gap-2"><span className="size-2.5 rounded-sm" style={{ backgroundColor: "#f97316" }}/>Promoter pledge %</span></div>\n        <p className="mt-2 text-xs text-subtle">Pledge is expressed as pledged shares divided by promoter-group shares. If the filing does not provide enough information to calculate it, the value is left blank.</p>
       </Section>
 
       <Section title="Four-quarter comparison" hint="Change is latest minus oldest, in percentage points (pp)">
