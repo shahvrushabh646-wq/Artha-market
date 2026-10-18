@@ -136,8 +136,12 @@ function screenerNumber(value: string): number | null {
 }
 function parseScreener(html: string, symbol: string, url: string): ShareholdingQuarter[] {
   // Screener publishes quarterly ownership in a table titled "Shareholding Pattern".
-  const tables = [...html.matchAll(/<table\b[^>]*>[\s\S]*?<\/table>/gi)].map(m => m[0]);
-  const table = tables.find(t => /Shareholding\s*Pattern/i.test(htmlText(t)));
+  const tables = [...html.matchAll(/<table\b[^>]*>[\s\S]*?<\/table>/gi)];
+  const tableMatch = tables.find(match => {
+    const before = html.slice(Math.max(0, (match.index ?? 0) - 1800), match.index ?? 0);
+    return /Shareholding\s*Pattern/i.test(htmlText(match[0])) || /Shareholding\s*Pattern/i.test(htmlText(before));
+  });
+  const table = tableMatch?.[0];
   if (!table) return [];
   const rows = [...table.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)].map(m => {
     const cells = [...m[1].matchAll(/<t[hd]\b[^>]*>([\s\S]*?)<\/t[hd]>/gi)].map(x => htmlText(x[1]));
