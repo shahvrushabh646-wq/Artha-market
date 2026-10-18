@@ -1,5 +1,5 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { Bell, BriefcaseBusiness, CandlestickChart, Eye, LayoutGrid, Settings, Ticket } from "lucide-react";
+import { Bell, Bookmark, CandlestickChart, Eye, LayoutGrid, Settings, Ticket } from "lucide-react";
 import type { ReactNode } from "react";
 import { APP_NAME } from "@/lib/market/config";
 import { getMarketClock } from "@/lib/market/math";
@@ -10,7 +10,7 @@ import { OneSignalPush } from "@/components/onesignal-push";
 const NAV = [
   { to: "/", label: "Home", icon: LayoutGrid },
   { to: "/stock", label: "Analyze", icon: CandlestickChart },
-  { to: "/portfolio", label: "Holdings", icon: BriefcaseBusiness },
+  { to: "/portfolio", label: "Book", icon: Bookmark },
   { to: "/watchlist", label: "Watch", icon: Eye },
   { to: "/ipo", label: "IPO", icon: Ticket },
   { to: "/alerts", label: "Alerts", icon: Bell },
