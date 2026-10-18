@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { BriefcaseBusiness, ExternalLink, RefreshCw } from "lucide-react";
 import { fetchSuggestedHoldings } from "@/lib/market/suggested-holdings";
@@ -7,12 +7,21 @@ import { Panel } from "@/components/widgets";
 export const Route = createFileRoute("/portfolio")({ component: HoldingsPage });
 
 function HoldingsPage() {
+  const queryClient = useQueryClient();
+  const today = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+  const queryKey = ["suggested-holdings-fii-dii-15", today];
   const query = useQuery({
-    queryKey: ["suggested-holdings-fii-dii-15"],
+    queryKey,
     queryFn: () => fetchSuggestedHoldings({ data: {} }),
     staleTime: 5 * 60_000,
     gcTime: 30 * 60_000,
     refetchOnWindowFocus: true,
+    refetchInterval: 5 * 60_000,
     retry: 1,
   });
   const data = query.data;
@@ -25,7 +34,11 @@ function HoldingsPage() {
           <h1 className="mt-1 font-display text-3xl tracking-tight text-fg">Holdings</h1>
           <p className="mt-2 text-sm text-muted">Suggested shares where FII or DII ownership is at least 15%.</p>
         </div>
-        <button type="button" onClick={() => void query.refetch()} disabled={query.isFetching}
+        <button type="button" onClick={() => void queryClient.fetchQuery({
+          queryKey,
+          queryFn: () => fetchSuggestedHoldings({ data: { refresh: true } }),
+          staleTime: 0,
+        })} disabled={query.isFetching}
           className="flex h-10 shrink-0 items-center gap-2 rounded-lg bg-surface-2 px-3 text-xs text-muted shadow-[var(--shadow-border)] disabled:opacity-60"
           aria-label="Refresh holdings">
           <RefreshCw className={`size-4 ${query.isFetching ? "animate-spin" : ""}`} /> Refresh
