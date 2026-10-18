@@ -1,75 +1,15 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { BriefcaseBusiness, ExternalLink, RefreshCw } from "lucide-react";
-import { fetchShareholding, type ShareholdingQuarter } from "@/lib/market/shareholding";
-import { fetchSuggestions } from "@/lib/market/suggestions";
+import { fetchSuggestedHoldings } from "@/lib/market/suggested-holdings";
 import { Panel } from "@/components/widgets";
 
 export const Route = createFileRoute("/portfolio")({ component: HoldingsPage });
 
-type QualifyingShare = {
-  symbol: string;
-  name: string;
-  fii: number;
-  dii: number;
-  quarter: ShareholdingQuarter;
-  reason: "FII ≥ 15%" | "DII ≥ 15%" | "FII and DII ≥ 15%";
-};
-
-async function screenSuggestedShares(): Promise<{ qualifying: QualifyingShare[]; checked: number; unavailable: number }> {
-  // Use the same live/current Suggestions source as the Suggestions page, not a separate stock universe.
-  const suggestions = await fetchSuggestions({ data: { period: "current", sector: "All" } });
-  const unique = new Map<string, (typeof suggestions)[number]>();
-  for (const share of suggestions) {
-    const symbol = String(share.symbol || "").trim().toUpperCase();
-    if (symbol && !unique.has(symbol)) unique.set(symbol, share);
-  }
-  const shares = [...unique.values()];
-  const qualifying: QualifyingShare[] = [];
-  let unavailable = 0;
-
-  // Small batches avoid overwhelming the official disclosure endpoint.
-  for (let i = 0; i < shares.length; i += 4) {
-    const batch = await Promise.all(shares.slice(i, i + 4).map(async (share) => {
-      try {
-        const result = await fetchShareholding({ data: { symbol: share.symbol } });
-        const latest = result.quarters[0];
-        if (!latest || latest.fii === null || latest.dii === null ||
-            !Number.isFinite(latest.fii) || !Number.isFinite(latest.dii)) {
-          return { status: "unavailable" as const };
-        }
-        const fiiPass = latest.fii >= 15;
-        const diiPass = latest.dii >= 15;
-        if (!fiiPass && !diiPass) return { status: "checked" as const };
-        const reason = fiiPass && diiPass ? "FII and DII ≥ 15%" : fiiPass ? "FII ≥ 15%" : "DII ≥ 15%";
-        return {
-          status: "qualifies" as const,
-          share: {
-            symbol: share.symbol,
-            name: share.name || share.symbol,
-            fii: latest.fii,
-            dii: latest.dii,
-            quarter: latest,
-            reason,
-          } satisfies QualifyingShare,
-        };
-      } catch {
-        return { status: "unavailable" as const };
-      }
-    }));
-    for (const item of batch) {
-      if (item.status === "unavailable") unavailable++;
-      else if (item.status === "qualifies") qualifying.push(item.share);
-    }
-  }
-  qualifying.sort((a, b) => a.name.localeCompare(b.name));
-  return { qualifying, checked: shares.length, unavailable };
-}
-
 function HoldingsPage() {
   const query = useQuery({
     queryKey: ["suggested-holdings-fii-dii-15"],
-    queryFn: screenSuggestedShares,
+    queryFn: () => fetchSuggestedHoldings({ data: {} }),
     staleTime: 5 * 60_000,
     gcTime: 30 * 60_000,
     refetchOnWindowFocus: true,
@@ -100,13 +40,13 @@ function HoldingsPage() {
         <Panel className="mt-5 p-8 text-center">
           <BriefcaseBusiness className="mx-auto size-8 text-muted" />
           <h2 className="mt-3 text-base font-semibold text-fg">No qualifying suggested shares</h2>
-          <p className="mt-2 text-sm text-muted">No suggested shares currently meet the FII/DII 15% holding criteria.</p>
+          <p className="mt-2 text-sm text-muted">Screened {data.checked} of {data.totalSuggested} suggested shares. {data.unavailable} had unavailable or unverified ownership data.</p>
         </Panel>
       ) : (
         <>
           <div className="mt-4 flex items-center justify-between gap-3 text-xs text-muted">
             <span>{data?.qualifying.length ?? 0} qualifying shares</span>
-            <span>{data?.checked ?? 0} suggested shares screened</span>
+            <span>{data?.checked ?? 0} of {data?.totalSuggested ?? 0} suggested shares screened</span>
           </div>
           <div className="mt-3 space-y-3">
             {data?.qualifying.map((share) => (
@@ -124,11 +64,11 @@ function HoldingsPage() {
                 <div className="mt-4 grid grid-cols-2 gap-3">
                   <div className="rounded-lg bg-surface-2 p-3">
                     <div className="text-xs text-muted">FII holding</div>
-                    <div className="mt-1 text-lg font-semibold tabular text-fg">{share.fii.toFixed(2)}%</div>
+                    <div className="mt-1 text-lg font-semibold tabular text-fg">{share.fii === null ? "Unavailable" : `${share.fii.toFixed(2)}%`}</div>
                   </div>
                   <div className="rounded-lg bg-surface-2 p-3">
                     <div className="text-xs text-muted">DII holding</div>
-                    <div className="mt-1 text-lg font-semibold tabular text-fg">{share.dii.toFixed(2)}%</div>
+                    <div className="mt-1 text-lg font-semibold tabular text-fg">{share.dii === null ? "Unavailable" : `${share.dii.toFixed(2)}%`}</div>
                   </div>
                 </div>
                 <div className="mt-3 inline-flex rounded-full bg-up/10 px-3 py-1.5 text-xs font-semibold text-up">{share.reason}</div>
