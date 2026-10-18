@@ -4,23 +4,38 @@ on:
   push:
     branches:
       - fix/shareholding-analysis-build
+    paths-ignore:
+      - package-lock.json
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Checkout branch
         uses: actions/checkout@v4
+        with:
+          persist-credentials: true
       - name: Set up supported Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22.12.0
+          node-version: 22.13.0
           cache: npm
+      - name: Regenerate the npm lockfile from package.json
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - name: Commit corrected lockfile on this branch
+        run: |
+          if ! git diff --quiet -- package-lock.json; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add package-lock.json
+            git commit -m "Regenerate npm lockfile for clean installs"
+            git push origin HEAD:fix/shareholding-analysis-build
+          fi
       - name: Install locked dependencies
         run: npm ci
       - name: TypeScript check
