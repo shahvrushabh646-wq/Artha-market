@@ -85,7 +85,7 @@ function HoldingsPage() {
                   </div>
                 </div>
                 <div className="mt-3 inline-flex rounded-full bg-up/10 px-3 py-1.5 text-xs font-semibold text-up">{share.reason}</div>
-                <div className="mt-3 text-[11px] text-muted">Source: NSE shareholding disclosure · <a href={share.quarter.sourceUrl} target="_blank" rel="noreferrer" className="underline underline-offset-2">Verify filing</a></div>
+                <div className="mt-3 text-[11px] text-muted">Source: {share.quarter.sourceName} shareholding disclosure · <a href={share.quarter.sourceUrl} target="_blank" rel="noreferrer" className="underline underline-offset-2">Verify filing</a></div>
               </Panel>
             ))}
           </div>
