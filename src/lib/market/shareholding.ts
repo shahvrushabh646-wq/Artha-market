@@ -85,7 +85,7 @@ function parseXbrl(xml: string): Omit<ShareholdingQuarter, "quarter" | "asOnDate
 
   // Prefer the filing’s explicit pledge percentage; otherwise calculate from pledged and promoter share counts.
   let pledgePctRaw: number | null = null;
-  const pledgePattern = /<(?:[\\w.-]+:)?PledgedOrEncumberedSharesHeldAsPercentageOfTotalNumberOfShares\\b[^>]*\\bcontextRef="([^"]+)"[^>]*>([-\\d.]+)<\\/(?:[\\w.-]+:)?PledgedOrEncumberedSharesHeldAsPercentageOfTotalNumberOfShares>/g;
+  const pledgePattern = /<(?:[\w.-]+:)?PledgedOrEncumberedSharesHeldAsPercentageOfTotalNumberOfShares\b[^>]*\bcontextRef="([^"]+)"[^>]*>([-\d.]+)<\/(?:[\w.-]+:)?PledgedOrEncumberedSharesHeldAsPercentageOfTotalNumberOfShares>/g;
   for (const fact of xml.matchAll(pledgePattern)) {
     const members = contexts.get(fact[1]) ?? [];
     const value = Number(fact[2]);
