@@ -144,5 +144,5 @@ async function loadShareholding(symbolInput: string): Promise<ShareholdingResult
 }
 
 export const fetchShareholding = createServerFn({ method: "GET" })
-  .inputValidator(z.object({ symbol: z.string().min(1).max(40) }))
+  .validator((data: unknown) => z.object({ symbol: z.string().min(1).max(40) }).parse(data))
   .handler(async ({ data }) => loadShareholding(data.symbol));
