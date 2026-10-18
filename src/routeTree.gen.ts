@@ -86,7 +86,7 @@ export interface FileRouteTypes {
   fullPaths:
     '/' | '/alerts' | '/portfolio' | '/settings' | '/stock' | '/watchlist' | '/shareholding'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/alerts' | '/portfolio' | '/settings' | '/stock' | '/watchlist'
+  to: '/' | '/alerts' | '/portfolio' | '/settings' | '/stock' | '/watchlist' | '/shareholding'
   id:
     | '__root__'
     | '/'
