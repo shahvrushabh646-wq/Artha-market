@@ -897,7 +897,7 @@ export const fetchOpenIposLive=createServerFn({method:"GET"}).handler(async()=>{
   }
 });
 
-export const fetchIpoDetailFast=createServerFn({method:"GET"}).inputValidator((data:{id:string})=>data).handler(async({data}:{data:{id:string}})=>{
+export const fetchIpoDetailFast=createServerFn({method:"GET"}).validator((data:{id:string})=>data).handler(async({data}:{data:{id:string}})=>{
   try{
     const ipo=await loadIpoFast(data.id);
     if(ipo)return ipo;
@@ -908,7 +908,7 @@ export const fetchIpoDetailFast=createServerFn({method:"GET"}).inputValidator((d
   return {...ipo,rhpStatus:ipo.rhpStatus??"NOT_FOUND"};
 });
 
-export const fetchIpoDetailLive=createServerFn({method:"GET"}).inputValidator((data:{id:string})=>data).handler(async({data}:{data:{id:string}})=>{
+export const fetchIpoDetailLive=createServerFn({method:"GET"}).validator((data:{id:string})=>data).handler(async({data}:{data:{id:string}})=>{
   let enriched:Ipo|null=null;
   try{enriched=await loadIpoEnriched(data.id);}catch{}
   const list=await loadNse();

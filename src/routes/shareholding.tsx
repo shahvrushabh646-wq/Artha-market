@@ -55,12 +55,12 @@ function ShareholdingPage() {
     ].filter(item => item.value > 0);
   }, [latest]);
   const screening = useMemo(() => {
-    if (!latest || latest.fii == null || latest.dii == null) return { label: "Insufficient Data", detail: "Latest-quarter FII and/or DII figures could not be verified." };
-    const combined = latest.fii + latest.dii;
-    const passes = latest.fii > 15 || latest.dii > 15 || combined > 15;
+    if (!latest) return { label: "Insufficient Data", detail: "Latest-quarter FII and DII figures could not be verified." };
+    const passes = (latest.fii ?? -Infinity) >= 15 || (latest.dii ?? -Infinity) >= 15;
+    if (!passes && (latest.fii == null || latest.dii == null)) return { label: "Insufficient Data", detail: `FII ${moneyPercent(latest.fii)} · DII ${moneyPercent(latest.dii)}. Missing values are not estimated, so this stock cannot be screened conclusively.` };
     return {
       label: passes ? "Meets 15% Rule" : "Does Not Meet 15% Rule",
-      detail: `FII ${moneyPercent(latest.fii)} · DII ${moneyPercent(latest.dii)} · Combined ${moneyPercent(combined)}. A stock qualifies when FII > 15%, DII > 15%, or FII + DII > 15%.`,
+      detail: `FII ${moneyPercent(latest.fii)} · DII ${moneyPercent(latest.dii)}. A stock qualifies when FII ≥ 15% or DII ≥ 15%; combined FII + DII is not used.`,
     };
   }, [latest]);
   const barData = quarters.map(q => ({ quarter: quarterLabel(q), promoter: q.promoter, pledge: q.promoterPledge }));
