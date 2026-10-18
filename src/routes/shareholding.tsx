@@ -27,14 +27,14 @@ function InsidePieLabel(props: { cx?: number; cy?: number; midAngle?: number; in
   const y = cy + radius * Math.sin(-midAngle * RADIAN);
   const value = payload?.value;
   if (value == null || value < 4) return null;
-  return <text x={x} y={y} fill="#fff" textAnchor="middle" dominantBaseline="central" fontSize={11} fontWeight={700} stroke="rgba(0,0,0,.15)" strokeWidth={0.5} paintOrder="stroke">
+  return <text x={x} y={y} fill={payload?.displayName === "Public*" ? "#111827" : "#fff"} textAnchor="middle" dominantBaseline="central" fontSize={11} fontWeight={700} stroke="rgba(0,0,0,.15)" strokeWidth={0.5} paintOrder="stroke">
     <tspan x={x} dy="-0.35em">{moneyPercent(value)}</tspan>
     <tspan x={x} dy="1.2em" fontSize={9}>{payload?.displayName ?? name}</tspan>
   </text>;
 }
 
 function ShareholdingPage() {
-  const { symbol } = Route.useSearch();
+  const { symbol, from } = Route.useSearch();
   const query = useQuery({
     queryKey: ["shareholding-analysis", symbol],
     queryFn: () => fetchShareholding({ data: { symbol } }),
@@ -83,7 +83,7 @@ function ShareholdingPage() {
 
   return <div className="space-y-5">
     <div className="flex items-start gap-3">
-      <a href={Route.useSearch().from === "holdings" ? "/portfolio" : "/suggestions"} className="mt-1 flex size-9 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-muted" aria-label={Route.useSearch().from === "holdings" ? "Back to holdings" : "Back to suggestions"}><ArrowLeft className="size-4"/></a>
+      <a href={from === "holdings" ? "/portfolio" : "/suggestions"} className="mt-1 flex size-9 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-muted" aria-label={from === "holdings" ? "Back to holdings" : "Back to suggestions"}><ArrowLeft className="size-4"/></a>
       <div className="min-w-0 flex-1"><p className="text-xs uppercase tracking-[0.2em] text-subtle">Artha · Suggestion Box</p><h1 className="mt-1 font-display text-2xl tracking-tight text-fg">Shareholding Analysis</h1><p className="mt-1 text-sm text-muted">{displaySymbol(symbol)} · quarterly exchange disclosures</p></div>
       <UsersRound className="mt-1 size-5 text-muted"/>
     </div>
