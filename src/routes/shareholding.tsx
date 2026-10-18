@@ -129,7 +129,8 @@ function ShareholdingPage() {
             </BarChart>
           </ResponsiveContainer>
         </div> : <Panel><p className="text-sm text-muted">Insufficient Data: no quarterly promoter figures were verified.</p></Panel>}
-        <div className="mt-3 flex flex-wrap justify-center gap-x-5 gap-y-2 text-xs text-muted"><span className="inline-flex items-center gap-2"><span className="size-2.5 rounded-sm" style={{ backgroundColor: "#ef4444" }}/>Promoter holding %</span><span className="inline-flex items-center gap-2"><span className="size-2.5 rounded-sm" style={{ backgroundColor: "#f97316" }}/>Promoter pledge %</span></div>\n        <p className="mt-2 text-xs text-subtle">Pledge is expressed as pledged shares divided by promoter-group shares. If the filing does not provide enough information to calculate it, the value is left blank.</p>
+        <div className="mt-3 flex flex-wrap justify-center gap-x-5 gap-y-2 text-xs text-muted"><span className="inline-flex items-center gap-2"><span className="size-2.5 rounded-sm" style={{ backgroundColor: "#ef4444" }}/>Promoter holding %</span><span className="inline-flex items-center gap-2"><span className="size-2.5 rounded-sm" style={{ backgroundColor: "#f97316" }}/>Promoter pledge %</span></div>
+        <p className="mt-2 text-xs text-subtle">Pledge is expressed as pledged shares divided by promoter-group shares. If the filing does not provide enough information to calculate it, the value is left blank.</p>
       </Section>
 
       <Section title="Four-quarter comparison" hint="Change is latest minus oldest, in percentage points (pp)">
