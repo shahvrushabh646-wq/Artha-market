@@ -7,15 +7,16 @@ import { fetchShareholding, type ShareholdingQuarter } from "@/lib/market/shareh
 import { displaySymbol } from "@/lib/market/config";
 import { Panel, Section, SkeletonBlock } from "@/components/widgets";
 
-type Search = { symbol: string };
+type Search = { symbol: string; from?: "holdings" | "suggestions" };
 export const Route = createFileRoute("/shareholding")({
   validateSearch: (search: Record<string, unknown>): Search => ({
     symbol: typeof search.symbol === "string" && search.symbol ? search.symbol : "RELIANCE.NS",
+    from: search.from === "holdings" ? "holdings" : "suggestions",
   }),
   component: ShareholdingPage,
 });
 
-const COLORS = { FII: "#ef4444", DII: "#eab308", Promoter: "#22c55e", Public: "#a855f7", Additional: "#3b82f6" };
+const COLORS = { FII: "#ef4444", DII: "#eab308", Promoter: "#22c55e", Public: "#ffffff", Others: "#3b82f6" };
 const moneyPercent = (value: number | null | undefined) => value == null || !Number.isFinite(value) ? "—" : `${value.toFixed(2)}%`;
 function quarterLabel(q: ShareholdingQuarter) { return q.quarter || q.asOnDate; }
 function InsidePieLabel(props: { cx?: number; cy?: number; midAngle?: number; innerRadius?: number; outerRadius?: number; percent?: number; name?: string; payload?: { value?: number; displayName?: string } }) {
@@ -45,13 +46,15 @@ function ShareholdingPage() {
   const latest = quarters.at(-1) ?? null;
   const pieData = useMemo(() => {
     if (!latest || latest.promoter == null || latest.fii == null || latest.dii == null || latest.public == null) return [];
-    // FII and DII are subcategories of Public. Use the remaining public float as the fourth, non-overlapping slice.
+    // NSE public shareholding includes FII and DII. Split those out to avoid double-counting.
     const otherPublic = Math.max(0, latest.public - latest.fii - latest.dii);
+    const residual = Math.max(0, 100 - latest.promoter - latest.public);
     return [
       { name: "FII", displayName: "FII", value: latest.fii, color: COLORS.FII },
       { name: "DII", displayName: "DII", value: latest.dii, color: COLORS.DII },
       { name: "Promoter", displayName: "Promoter", value: latest.promoter, color: COLORS.Promoter },
       { name: "Public", displayName: "Public*", value: otherPublic, color: COLORS.Public },
+      { name: "Others", displayName: "Others", value: residual, color: COLORS.Others },
     ].filter(item => item.value > 0);
   }, [latest]);
   const screening = useMemo(() => {
@@ -80,7 +83,7 @@ function ShareholdingPage() {
 
   return <div className="space-y-5">
     <div className="flex items-start gap-3">
-      <a href="/suggestions" className="mt-1 flex size-9 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-muted" aria-label="Back to suggestions"><ArrowLeft className="size-4"/></a>
+      <a href={Route.useSearch().from === "holdings" ? "/portfolio" : "/suggestions"} className="mt-1 flex size-9 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-muted" aria-label={Route.useSearch().from === "holdings" ? "Back to holdings" : "Back to suggestions"}><ArrowLeft className="size-4"/></a>
       <div className="min-w-0 flex-1"><p className="text-xs uppercase tracking-[0.2em] text-subtle">Artha · Suggestion Box</p><h1 className="mt-1 font-display text-2xl tracking-tight text-fg">Shareholding Analysis</h1><p className="mt-1 text-sm text-muted">{displaySymbol(symbol)} · quarterly exchange disclosures</p></div>
       <UsersRound className="mt-1 size-5 text-muted"/>
     </div>
@@ -98,14 +101,14 @@ function ShareholdingPage() {
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={112} labelLine={false} label={InsidePieLabel} isAnimationActive={false}>
-                  {pieData.map(entry => <Cell key={entry.name} fill={entry.color}/>)}
+                  {pieData.map(entry => <Cell key={entry.name} fill={entry.color} stroke={entry.name === "Public" ? "#9ca3af" : "var(--surface)"} strokeWidth={entry.name === "Public" ? 1.5 : 1}/>)}
                 </Pie>
                 <Tooltip formatter={(value) => moneyPercent(Number(value))}/>
               </PieChart>
             </ResponsiveContainer>
           </div>
           <div className="flex flex-wrap justify-center gap-x-4 gap-y-2 text-xs text-muted">{pieData.map(entry => <span key={entry.name} className="inline-flex items-center gap-1.5"><span className="size-2.5 rounded-sm" style={{ backgroundColor: entry.color }}/>{entry.displayName}: {moneyPercent(entry.value)}</span>)}</div>
-          <p className="mt-3 text-xs text-subtle">* Public slice excludes FII and DII so the pie does not double-count them. Public (total) remains available in the comparison table. White labels appear inside segments where there is enough room.</p>
+          <p className="mt-3 text-xs text-subtle">* Public slice excludes FII and DII so the pie does not double-count them. Others is the residual to 100%. Public (total) remains available in the comparison table. White labels appear inside segments where there is enough room.</p>
         </> : <Panel><p className="text-sm text-muted">Insufficient Data: verified latest-quarter FII, DII, promoter and public percentages are not all available.</p></Panel>}
       </Section>
 
