@@ -66,7 +66,7 @@ function HoldingsPage() {
               <Panel key={share.symbol} className="p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <Link to="/stock" search={{ symbol: share.symbol, period: "1Y" }} className="font-semibold text-fg hover:underline">{share.name}</Link>
+                    <Link to="/shareholding" search={{ symbol: share.symbol, from: "holdings" }} className="font-semibold text-fg hover:underline">{share.name}</Link>
                     <div className="mt-1 text-xs text-muted">{share.symbol} · {share.quarter.quarter} · As on {share.quarter.asOnDate}</div>
                   </div>
                   <a href={share.quarter.sourceUrl} target="_blank" rel="noreferrer" aria-label={`Open source filing for ${share.name}`}
