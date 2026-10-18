@@ -1,75 +1,145 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Download, MoreVertical, Plus, Search, SlidersHorizontal, Trash2, X, ChevronDown, ChevronUp } from "lucide-react";
-import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
-import { Empty, Panel } from "@/components/widgets";
-import { Signed } from "@/components/price";
-import { displaySymbol } from "@/lib/market/config";
-import { fmtCurrency } from "@/lib/market/math";
-import { fetchQuotes } from "@/lib/market/server";
-import { addPortfolioAccount, addPortfolioTransaction, deletePortfolioTransaction, getPortfolioAccounts, getPortfolioTransactions, renamePortfolioAccount } from "@/lib/market/angel-portfolio";
-import { useDesk } from "@/lib/store";
+import { BriefcaseBusiness, ExternalLink, RefreshCw } from "lucide-react";
+import { fetchShareholding, type ShareholdingQuarter } from "@/lib/market/shareholding";
+import { fetchSuggestions } from "@/lib/market/suggestions";
+import { Panel } from "@/components/widgets";
 
-export const Route = createFileRoute("/portfolio")({ component: PortfolioPage });
+export const Route = createFileRoute("/portfolio")({ component: HoldingsPage });
 
-type Account={id:string;name:string;sortOrder:number};
-type Tx={id:string;broker:string;brokerTradeId:string|null;symbol:string;exchange:string;company:string;side:"BUY"|"SELL";quantity:number;price:number;tradeDate:string;charges:number;source:string};
-type Holding={symbol:string;exchange:string;qty:number;avg:number;invested:number;realized:number};
-type Quote={symbol:string;price?:number;change?:number;changePercent?:number;previousClose?:number};
-const storageKey=(id:string)=>`artha-portfolio-transactions-${id}`;
-function readLocal(id:string):Tx[]{if(typeof window==="undefined"||!id)return[];try{const v=JSON.parse(localStorage.getItem(storageKey(id))||"[]");return Array.isArray(v)?v:[]}catch{return[]}}
-function writeLocal(id:string,v:Tx[]){try{localStorage.setItem(storageKey(id),JSON.stringify(v))}catch{}}
+type QualifyingShare = {
+  symbol: string;
+  name: string;
+  fii: number;
+  dii: number;
+  quarter: ShareholdingQuarter;
+  reason: "FII ≥ 15%" | "DII ≥ 15%" | "FII and DII ≥ 15%";
+};
 
-function PortfolioPage(){
- const qc=useQueryClient(); const legacyHoldings=useDesk(s=>s.holdings);
- const [accountId,setAccountId]=useState(""); const [tab,setTab]=useState<"equity"|"sold"|"history">("equity");
- const [search,setSearch]=useState(""); const [expanded,setExpanded]=useState<string|null>(null); const [detailed,setDetailed]=useState(false);
- const [editing,setEditing]=useState<string|null>(null); const [editName,setEditName]=useState("");
- const [showAccount,setShowAccount]=useState(false); const [newAccount,setNewAccount]=useState(""); const [showTx,setShowTx]=useState(false);
- const [tx,setTx]=useState({symbol:"",exchange:"NSE",side:"BUY" as "BUY"|"SELL",quantity:"",price:"",tradeDate:new Date().toISOString().slice(0,10),charges:"0"});
- const accountsQuery=useQuery({queryKey:["portfolio-accounts"],queryFn:()=>getPortfolioAccounts(),staleTime:300000});
- const accounts=(accountsQuery.data||[]) as Account[]; useEffect(()=>{if(!accountId&&accounts[0])setAccountId(accounts[0].id)},[accounts,accountId]);
- const active=accounts.find(a=>a.id===accountId); const legacyAccountId=accounts[0]?.id||"";
- const txQuery=useQuery({queryKey:["portfolio-transactions",accountId],enabled:!!accountId,refetchInterval:60000,queryFn:async()=>{const remote=await getPortfolioTransactions({data:{accountId}});const m=new Map<string,Tx>();[...readLocal(accountId),...(remote as Tx[])].forEach(x=>m.set(x.id,x));return[...m.values()].sort((a,b)=>`${b.tradeDate}-${b.id}`.localeCompare(`${a.tradeDate}-${a.id}`))}});
- const stored=(txQuery.data||[]) as Tx[];
- const legacy=useMemo<Tx[]>(()=>!legacyAccountId||accountId!==legacyAccountId?[]:legacyHoldings.map(h=>({id:`legacy-${h.id}`,broker:"manual",brokerTradeId:null,symbol:h.symbol,exchange:"NSE",company:h.company||h.symbol,side:"BUY" as const,quantity:Number(h.quantity),price:Number(h.buyPrice),tradeDate:h.buyDate,charges:0,source:"stock-book"})),[legacyAccountId,accountId,legacyHoldings]);
- const transactions=useMemo(()=>{const m=new Map<string,Tx>();[...stored,...legacy].forEach(x=>m.set(x.id,x));return[...m.values()].sort((a,b)=>`${b.tradeDate}-${b.id}`.localeCompare(`${a.tradeDate}-${a.id}`))},[stored,legacy]);
- const symbols=useMemo(()=>[...new Set(transactions.map(t=>t.symbol))],[transactions]);
- const quotesQuery=useQuery({queryKey:["portfolio-quotes",symbols],enabled:symbols.length>0,refetchInterval:60000,queryFn:()=>fetchQuotes({data:{symbols}})});
- const quotes=new Map<string,Quote>((quotesQuery.data||[]).map(q=>[q.symbol,q as Quote]));
- const allHoldings=useMemo(()=>buildHoldings(transactions),[transactions]); const holdings=allHoldings.filter(h=>h.qty>0.000001); const sold=transactions.filter(t=>t.side==="SELL");
- const invested=holdings.reduce((s,h)=>s+h.invested,0); const current=holdings.reduce((s,h)=>s+h.qty*(quotes.get(h.symbol)?.price??h.avg),0); const unrealised=current-invested; const realised=allHoldings.reduce((s,h)=>s+h.realized,0); const totalPnl=unrealised+realised; const returnPct=invested?totalPnl/invested*100:null;
- const todayPnl=holdings.reduce((s,h)=>{const c=Number(quotes.get(h.symbol)?.change);return s+(Number.isFinite(c)?h.qty*c:0)},0);
- const filtered=holdings.filter(h=>{const t=search.trim().toLowerCase();return!t||displaySymbol(h.symbol).toLowerCase().includes(t)||h.symbol.toLowerCase().includes(t)});
- const openTransaction=(side:"BUY"|"SELL",h?:Holding)=>{const p=h?quotes.get(h.symbol)?.price??h.avg:undefined;setTx({symbol:h?.symbol||"",exchange:h?.exchange||"NSE",side,quantity:"",price:p!==undefined?String(p):"",tradeDate:new Date().toISOString().slice(0,10),charges:"0"});setShowTx(true)};
- async function saveTransaction(){const quantity=Number(tx.quantity),price=Number(tx.price),charges=Number(tx.charges||0),symbol=tx.symbol.trim().toUpperCase();if(!accountId||!symbol||!Number.isFinite(quantity)||quantity<=0||!Number.isFinite(price)||price<0||!Number.isFinite(charges)||charges<0||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(tx.tradeDate)){toast("Enter valid transaction details");return}const h=holdings.find(x=>x.symbol===symbol&&x.exchange===tx.exchange);if(tx.side==="SELL"&&(!h||quantity>h.qty+0.000001)){toast(`Available quantity: ${h?trim(h.qty):"0"}`);return}const hasDbBuy=stored.some(t=>t.side==="BUY"&&t.symbol===symbol&&t.exchange===tx.exchange);try{if(tx.side==="SELL"&&!hasDbBuy&&legacy.some(t=>t.symbol===symbol&&t.exchange===tx.exchange)){const item:Tx={id:`local-${Date.now()}-${Math.random().toString(36).slice(2,8)}`,broker:"manual",brokerTradeId:null,symbol,exchange:tx.exchange,company:symbol,side:"SELL",quantity,price,tradeDate:tx.tradeDate,charges,source:"manual-local"};writeLocal(accountId,[...readLocal(accountId),item]);setShowTx(false);await qc.invalidateQueries({queryKey:["portfolio-transactions",accountId]});toast("SELL transaction added");return}const result=await addPortfolioTransaction({data:{accountId,symbol,exchange:tx.exchange,side:tx.side,quantity,price,tradeDate:tx.tradeDate,charges}});const item:Tx={id:String(result.id),broker:"manual",brokerTradeId:String(result.id),symbol,exchange:tx.exchange,company:symbol,side:tx.side,quantity,price,tradeDate:tx.tradeDate,charges,source:"manual"};writeLocal(accountId,[...readLocal(accountId).filter(x=>x.id!==item.id),item]);setShowTx(false);await qc.invalidateQueries({queryKey:["portfolio-transactions",accountId]});toast(`${item.side} transaction added`)}catch(e){toast(e instanceof Error?e.message:"Could not save transaction")}}
- async function addAccount(){if(!newAccount.trim())return;try{const a=await addPortfolioAccount({data:{name:newAccount.trim()}});setNewAccount("");setShowAccount(false);setAccountId(a.id);await qc.invalidateQueries({queryKey:["portfolio-accounts"]});toast("Portfolio added")}catch(e){toast(e instanceof Error?e.message:"Could not add portfolio")}}
- async function renameAccount(){if(!editing||!editName.trim())return;try{await renamePortfolioAccount({data:{id:editing,name:editName.trim()}});setEditing(null);await qc.invalidateQueries({queryKey:["portfolio-accounts"]});toast("Portfolio renamed")}catch(e){toast(e instanceof Error?e.message:"Could not rename portfolio")}}
- async function removeTransaction(id:string){if(id.startsWith("legacy-")){toast("This holding is linked to your Stock-page Book entry");return}if(!confirm("Delete this transaction?"))return;try{await deletePortfolioTransaction({data:{accountId,id}});writeLocal(accountId,readLocal(accountId).filter(x=>x.id!==id));await qc.invalidateQueries({queryKey:["portfolio-transactions",accountId]});toast("Transaction deleted")}catch(e){toast(e instanceof Error?e.message:"Could not delete transaction")}}
- const download=()=>{const rows=[["Symbol","Exchange","Quantity","Average","Invested","LTP","Current Value","P&L"],...holdings.map(h=>{const l=quotes.get(h.symbol)?.price??h.avg;return[displaySymbol(h.symbol),h.exchange,String(h.qty),String(h.avg),String(h.invested),String(l),String(h.qty*l),String(h.qty*l-h.invested)]})];const csv=rows.map(r=>r.map(x=>`"${x.replaceAll('"','""')}"`).join(",")).join("\n");const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));a.download="artha-portfolio.csv";a.click();URL.revokeObjectURL(a.href)};
- if(accountsQuery.isLoading)return <div className="py-12 text-center text-sm text-muted">Loading portfolio…</div>;
- return <div className="mx-auto max-w-4xl pb-10">
-  <header className="flex items-center justify-between gap-3 px-1 py-3"><div><h1 className="text-[24px] font-semibold tracking-tight">Portfolio</h1>{active&&<button onClick={()=>{setEditing(active.id);setEditName(active.name)}} className="text-xs text-muted hover:text-fg">{active.name}</button>}</div><div className="flex items-center gap-1"><button onClick={()=>openTransaction("BUY")} className="rounded-full p-2.5 hover:bg-surface-2" aria-label="Add transaction"><Plus className="size-5"/></button><button onClick={download} className="rounded-full p-2.5 hover:bg-surface-2" aria-label="Download portfolio"><Download className="size-5"/></button><button onClick={()=>setShowAccount(true)} className="rounded-full p-2.5 hover:bg-surface-2" aria-label="Portfolio options"><MoreVertical className="size-5"/></button></div></header>
-  {accounts.length>1&&<div className="mb-3 flex gap-5 overflow-x-auto border-b border-border">{accounts.map(a=><button key={a.id} onClick={()=>{setAccountId(a.id);setTab("equity")}} className={`whitespace-nowrap border-b-2 px-1 py-2.5 text-sm font-medium ${accountId===a.id?"border-fg text-fg":"border-transparent text-muted"}`}>{a.name}</button>)}</div>}
-  {editing&&<div className="mb-3 flex gap-2 rounded-xl border border-border bg-surface-2 p-3"><input autoFocus value={editName} onChange={e=>setEditName(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")void renameAccount();if(e.key==="Escape")setEditing(null)}} className="min-w-0 flex-1 rounded-lg border bg-bg px-3 py-2 text-sm"/><Button size="sm" onClick={renameAccount}>Save</Button><button onClick={()=>setEditing(null)}><X className="size-4"/></button></div>}
-  {active&&<>
-   <section className="overflow-hidden rounded-[10px] bg-slate-800 text-white shadow-sm"><div className="px-5 py-5 sm:px-7 sm:py-6"><div className="grid grid-cols-2 gap-x-6 gap-y-5 sm:grid-cols-4"><Summary label="Invested Amount" value={fmtCurrency(invested)}/><Summary label="Market Value" value={fmtCurrency(current)}/><Summary label="Overall Gain" value={<><Signed value={totalPnl} as="currency"/> <span className="text-xs">({returnPct===null?"—":`${returnPct>=0?"+":""}${returnPct.toFixed(2)}%`})</span></>}/><Summary label="Today's Gain" value={<Signed value={todayPnl} as="currency"/>}/></div></div></section>
-   <div className="mt-4 flex gap-2"><button onClick={()=>setTab("equity")} className={`px-3 py-2 text-sm font-semibold ${tab==="equity"?"border-b-2 border-fg text-fg":"text-muted"}`}>Equity</button><button onClick={()=>setTab("sold")} className={`px-3 py-2 text-sm font-semibold ${tab==="sold"?"border-b-2 border-fg text-fg":"text-muted"}`}>Sold</button><button onClick={()=>setTab("history")} className={`px-3 py-2 text-sm font-semibold ${tab==="history"?"border-b-2 border-fg text-fg":"text-muted"}`}>History</button></div>
-   {tab==="equity"&&<><div className="mt-2 flex items-center gap-2"><div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-border bg-bg px-3 py-2.5"><Search className="size-[19px] text-muted"/><input value={search} onChange={e=>setSearch(e.target.value)} className="min-w-0 flex-1 bg-transparent text-sm outline-none" placeholder="Search for stock or company"/></div><button onClick={()=>setDetailed(v=>!v)} className={`rounded-lg border p-2.5 ${detailed?"bg-surface-2 text-fg":"text-muted"}`} aria-label="Filter and sort"><SlidersHorizontal className="size-[19px]"/></button></div><div className="mt-3 flex items-center justify-between text-xs text-muted"><span>{filtered.length} Holdings</span><span>{quotesQuery.isFetching?"Updating…":"Live prices"}</span></div><Holdings rows={filtered} quotes={quotes} detailed={detailed} expanded={expanded} setExpanded={setExpanded} onBuy={h=>openTransaction("BUY",h)} onSell={h=>openTransaction("SELL",h)}/><button onClick={()=>setDetailed(true)} className="mt-4 flex w-full items-center justify-center rounded-lg border border-border py-3 text-sm font-semibold hover:bg-surface-2">ANALYSE YOUR PORTFOLIO</button></>}
-   {tab==="sold"&&<Transactions rows={sold} onDelete={removeTransaction} emptyTitle="No sold stocks" emptyBody="Stocks sold from your portfolio will appear here."/>}
-   {tab==="history"&&<Transactions rows={transactions} onDelete={removeTransaction} emptyTitle="No transactions" emptyBody="Your BUY and SELL activity will appear here."/>}
-  </>}
-  {showAccount&&<Modal title="Portfolio" close={()=>setShowAccount(false)}><input autoFocus value={newAccount} onChange={e=>setNewAccount(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")void addAccount()}} className="w-full rounded-lg border bg-bg px-3 py-2.5 text-sm" placeholder="New portfolio name"/><div className="mt-4 flex justify-end gap-2"><Button variant="secondary" onClick={()=>setShowAccount(false)}>Cancel</Button><Button onClick={addAccount}>Add Portfolio</Button></div></Modal>}
-  {showTx&&<Modal title={tx.side==="BUY"?"Buy Stock":"Sell Stock"} close={()=>setShowTx(false)}><div className="space-y-3"><div className="grid grid-cols-2 gap-2"><button onClick={()=>setTx({...tx,side:"BUY"})} className={`rounded-lg border py-2.5 text-sm font-semibold ${tx.side==="BUY"?"border-up bg-up/10 text-up":"border-border text-muted"}`}>BUY</button><button onClick={()=>setTx({...tx,side:"SELL"})} className={`rounded-lg border py-2.5 text-sm font-semibold ${tx.side==="SELL"?"border-down bg-down/10 text-down":"border-border text-muted"}`}>SELL</button></div><input value={tx.symbol} onChange={e=>setTx({...tx,symbol:e.target.value.toUpperCase()})} className="w-full rounded-lg border bg-bg px-3 py-2.5 text-sm" placeholder="Stock symbol e.g. TCS"/><div className="grid grid-cols-2 gap-2"><select value={tx.exchange} onChange={e=>setTx({...tx,exchange:e.target.value})} className="rounded-lg border bg-bg px-3 py-2.5 text-sm"><option>NSE</option><option>BSE</option></select><input type="date" value={tx.tradeDate} onChange={e=>setTx({...tx,tradeDate:e.target.value})} className="rounded-lg border bg-bg px-3 py-2.5 text-sm"/></div>{tx.side==="SELL"&&tx.symbol&&<div className="rounded-lg bg-surface-2 px-3 py-2 text-xs text-muted">Available: {trim(holdings.find(h=>h.symbol===tx.symbol&&h.exchange===tx.exchange)?.qty||0)} shares</div>}<div className="grid grid-cols-2 gap-2"><input type="number" min="0.0001" value={tx.quantity} onChange={e=>setTx({...tx,quantity:e.target.value})} className="rounded-lg border bg-bg px-3 py-2.5 text-sm" placeholder="Quantity"/><input type="number" min="0" step="0.01" value={tx.price} onChange={e=>setTx({...tx,price:e.target.value})} className="rounded-lg border bg-bg px-3 py-2.5 text-sm" placeholder="Price"/></div><input type="number" min="0" step="0.01" value={tx.charges} onChange={e=>setTx({...tx,charges:e.target.value})} className="w-full rounded-lg border bg-bg px-3 py-2.5 text-sm" placeholder="Charges (optional)"/><Button className="w-full" onClick={saveTransaction}>{tx.side==="BUY"?"Add BUY":"Confirm SELL"}</Button></div></Modal>}
- </div>
+async function screenSuggestedShares(): Promise<{ qualifying: QualifyingShare[]; checked: number; unavailable: number }> {
+  // Use the same live/current Suggestions source as the Suggestions page, not a separate stock universe.
+  const suggestions = await fetchSuggestions({ data: { period: "current", sector: "All" } });
+  const unique = new Map<string, (typeof suggestions)[number]>();
+  for (const share of suggestions) {
+    const symbol = String(share.symbol || "").trim().toUpperCase();
+    if (symbol && !unique.has(symbol)) unique.set(symbol, share);
+  }
+  const shares = [...unique.values()];
+  const qualifying: QualifyingShare[] = [];
+  let unavailable = 0;
+
+  // Small batches avoid overwhelming the official disclosure endpoint.
+  for (let i = 0; i < shares.length; i += 4) {
+    const batch = await Promise.all(shares.slice(i, i + 4).map(async (share) => {
+      try {
+        const result = await fetchShareholding({ data: { symbol: share.symbol } });
+        const latest = result.quarters[0];
+        if (!latest || latest.fii === null || latest.dii === null ||
+            !Number.isFinite(latest.fii) || !Number.isFinite(latest.dii)) {
+          return { status: "unavailable" as const };
+        }
+        const fiiPass = latest.fii >= 15;
+        const diiPass = latest.dii >= 15;
+        if (!fiiPass && !diiPass) return { status: "checked" as const };
+        const reason = fiiPass && diiPass ? "FII and DII ≥ 15%" : fiiPass ? "FII ≥ 15%" : "DII ≥ 15%";
+        return {
+          status: "qualifies" as const,
+          share: {
+            symbol: share.symbol,
+            name: share.name || share.symbol,
+            fii: latest.fii,
+            dii: latest.dii,
+            quarter: latest,
+            reason,
+          } satisfies QualifyingShare,
+        };
+      } catch {
+        return { status: "unavailable" as const };
+      }
+    }));
+    for (const item of batch) {
+      if (item.status === "unavailable") unavailable++;
+      else if (item.status === "qualifies") qualifying.push(item.share);
+    }
+  }
+  qualifying.sort((a, b) => a.name.localeCompare(b.name));
+  return { qualifying, checked: shares.length, unavailable };
 }
-function Summary({label,value}:{label:string;value:ReactNode}){return <div><div className="text-[11px] text-slate-300">{label}</div><div className="mt-1 text-[16px] font-semibold tabular text-white">{value}</div></div>}
-function Holdings({rows,quotes,detailed,expanded,setExpanded,onBuy,onSell}:{rows:Holding[];quotes:Map<string,Quote>;detailed:boolean;expanded:string|null;setExpanded:(v:string|null)=>void;onBuy:(h:Holding)=>void;onSell:(h:Holding)=>void}){if(!rows.length)return <div className="mt-4"><Panel className="p-8"><Empty title="No holdings" body="Add a BUY transaction to build your portfolio."/></Panel></div>;return <div className="mt-2 divide-y divide-border overflow-hidden rounded-lg border border-border bg-bg">{rows.map(h=>{const key=`${h.exchange}:${h.symbol}`,ltp=quotes.get(h.symbol)?.price??h.avg,value=h.qty*ltp,pnl=value-h.invested,pct=h.invested?pnl/h.invested*100:null,day=Number(quotes.get(h.symbol)?.change)||0,isOpen=detailed||expanded===key;return <div key={key}><div className="cursor-pointer px-4 py-3.5 hover:bg-surface-2" onClick={()=>setExpanded(expanded===key?null:key)}><div className="flex items-start justify-between gap-4"><div className="min-w-0"><Link to="/stock" search={{symbol:h.symbol,period:"1Y"}} onClick={e=>e.stopPropagation()} className="text-[15px] font-semibold hover:underline">{displaySymbol(h.symbol)}</Link><div className="mt-1 text-xs text-muted">{h.exchange} · {trim(h.qty)} Qty</div></div><div className="text-right"><div className={`text-[14px] font-semibold tabular ${pnl>=0?"text-up":"text-down"}`}>{pnl>=0?"+":"−"}{fmtCurrency(Math.abs(pnl))}</div><div className="mt-0.5 text-xs tabular"><Signed value={pct} as="percent"/></div></div></div><div className="mt-2 flex items-center justify-between gap-3 text-xs"><div className="text-muted">LTP <span className="font-medium text-fg">{fmtCurrency(ltp)}</span></div><div className="tabular"><Signed value={day} as="currency"/> <span className="ml-1"><Signed value={quotes.get(h.symbol)?.changePercent??0} as="percent"/></span></div><div className="text-muted">{isOpen?<ChevronUp className="inline size-4"/>:<ChevronDown className="inline size-4"/>}</div></div></div>{isOpen&&<div className="border-t border-border bg-surface-2 px-4 py-3"><div className="grid grid-cols-2 gap-y-3 sm:grid-cols-4"><Metric label="Invested" value={fmtCurrency(h.invested)}/><Metric label="Quantity" value={trim(h.qty)}/><Metric label="Market Value" value={fmtCurrency(value)}/><Metric label="AVG" value={fmtCurrency(h.avg)}/></div><div className="mt-3 flex items-center justify-between border-t border-border pt-3"><div className="text-xs text-muted">Today's Gain <Signed value={h.qty*day} as="currency"/></div><div className="flex gap-2"><button onClick={()=>onBuy(h)} className="rounded-md border border-up/30 px-4 py-1.5 text-xs font-semibold text-up">BUY</button><button onClick={()=>onSell(h)} className="rounded-md border border-down/30 px-4 py-1.5 text-xs font-semibold text-down">SELL</button></div></div></div>}</div>})}</div>}
-function Transactions({rows,onDelete,emptyTitle,emptyBody}:{rows:Tx[];onDelete:(id:string)=>void;emptyTitle:string;emptyBody:string}){if(!rows.length)return <div className="mt-4"><Panel className="p-8"><Empty title={emptyTitle} body={emptyBody}/></Panel></div>;return <div className="mt-4 space-y-2">{rows.map(t=><Panel key={t.id} className="overflow-hidden rounded-xl"><div className="flex items-start justify-between gap-3 p-4"><div><div className="flex items-center gap-2"><span className={`rounded px-2 py-1 text-[10px] font-bold ${t.side==="BUY"?"bg-up/10 text-up":"bg-down/10 text-down"}`}>{t.side}</span><span className="text-[15px] font-semibold">{displaySymbol(t.symbol)}</span></div><div className="mt-1.5 text-xs text-muted">{t.exchange} · {formatDate(t.tradeDate)}{t.source==="stock-book"?" · Stock page":""}</div></div>{!t.id.startsWith("legacy-")&&<button onClick={()=>onDelete(t.id)} className="rounded p-1.5 text-muted hover:text-down"><Trash2 className="size-4"/></button>}</div><div className="grid grid-cols-3 gap-3 border-t border-border px-4 py-3"><Metric label="Quantity" value={trim(t.quantity)}/><Metric label="Price" value={fmtCurrency(t.price)}/><Metric label="Value" value={fmtCurrency(t.quantity*t.price)}/></div></Panel>)}</div>}
-function Metric({label,value}:{label:string;value:ReactNode}){return <div><div className="text-[11px] text-muted">{label}</div><div className="mt-0.5 text-sm font-semibold tabular">{value}</div></div>}
-function Modal({title,close,children}:{title:string;close:()=>void;children:ReactNode}){return <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center sm:p-4" onMouseDown={e=>{if(e.target===e.currentTarget)close()}}><Panel className="w-full rounded-t-2xl p-5 sm:max-w-md sm:rounded-2xl"><div className="flex items-center justify-between"><h3 className="text-xl font-semibold">{title}</h3><button onClick={close} className="rounded-full p-1.5 text-muted hover:bg-surface-2"><X className="size-5"/></button></div><div className="mt-5">{children}</div></Panel></div>}
-function trim(n:number){return Number.isInteger(n)?String(n):n.toFixed(4).replace(/0+$/g,"").replace(/\.$/,"")}
-function formatDate(s:string){const d=new Date(`${s}T00:00:00`);return Number.isNaN(d.getTime())?s:d.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})}
-function buildHoldings(txs:Tx[]):Holding[]{const map=new Map<string,Holding>();for(const t of [...txs].sort((a,b)=>a.tradeDate.localeCompare(b.tradeDate)||a.id.localeCompare(b.id))){const key=`${t.exchange}:${t.symbol}`,h=map.get(key)||{symbol:t.symbol,exchange:t.exchange,qty:0,avg:0,invested:0,realized:0};if(t.side==="BUY"){const q=h.qty+t.quantity;h.avg=(h.avg*h.qty+t.price*t.quantity)/q;h.qty=q;h.invested=h.avg*h.qty}else{const q=Math.min(h.qty,t.quantity);h.realized+=t.price*q-h.avg*q-t.charges;h.qty=Math.max(0,h.qty-t.quantity);h.invested=h.avg*h.qty}map.set(key,h)}return[...map.values()]}
+
+function HoldingsPage() {
+  const query = useQuery({
+    queryKey: ["suggested-holdings-fii-dii-15"],
+    queryFn: screenSuggestedShares,
+    staleTime: 5 * 60_000,
+    gcTime: 30 * 60_000,
+    refetchOnWindowFocus: true,
+    retry: 1,
+  });
+  const data = query.data;
+
+  return (
+    <div className="mx-auto max-w-4xl pb-10">
+      <header className="flex items-center justify-between gap-3 px-1 py-3">
+        <div>
+          <p className="text-xs uppercase tracking-[0.2em] text-subtle">Artha scanner</p>
+          <h1 className="mt-1 font-display text-3xl tracking-tight text-fg">Holdings</h1>
+          <p className="mt-2 text-sm text-muted">Suggested shares where FII or DII ownership is at least 15%.</p>
+        </div>
+        <button type="button" onClick={() => void query.refetch()} disabled={query.isFetching}
+          className="flex h-10 shrink-0 items-center gap-2 rounded-lg bg-surface-2 px-3 text-xs text-muted shadow-[var(--shadow-border)] disabled:opacity-60"
+          aria-label="Refresh holdings">
+          <RefreshCw className={`size-4 ${query.isFetching ? "animate-spin" : ""}`} /> Refresh
+        </button>
+      </header>
+
+      {query.isLoading ? (
+        <Panel className="mt-5 p-6"><p className="text-sm text-muted">Checking current suggested shares against the latest available shareholding disclosures…</p></Panel>
+      ) : query.isError ? (
+        <Panel className="mt-5 p-6"><p className="text-sm text-muted">Suggested holdings could not be loaded. Refresh to try again. No sample data is shown.</p></Panel>
+      ) : data && data.qualifying.length === 0 ? (
+        <Panel className="mt-5 p-8 text-center">
+          <BriefcaseBusiness className="mx-auto size-8 text-muted" />
+          <h2 className="mt-3 text-base font-semibold text-fg">No qualifying suggested shares</h2>
+          <p className="mt-2 text-sm text-muted">No suggested shares currently meet the FII/DII 15% holding criteria.</p>
+        </Panel>
+      ) : (
+        <>
+          <div className="mt-4 flex items-center justify-between gap-3 text-xs text-muted">
+            <span>{data?.qualifying.length ?? 0} qualifying shares</span>
+            <span>{data?.checked ?? 0} suggested shares screened</span>
+          </div>
+          <div className="mt-3 space-y-3">
+            {data?.qualifying.map((share) => (
+              <Panel key={share.symbol} className="p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <Link to="/stock" search={{ symbol: share.symbol, period: "1Y" }} className="font-semibold text-fg hover:underline">{share.name}</Link>
+                    <div className="mt-1 text-xs text-muted">{share.symbol} · {share.quarter.quarter} · As on {share.quarter.asOnDate}</div>
+                  </div>
+                  <a href={share.quarter.sourceUrl} target="_blank" rel="noreferrer" aria-label={`Open source filing for ${share.name}`}
+                    className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-muted hover:text-fg">
+                    <ExternalLink className="size-4" />
+                  </a>
+                </div>
+                <div className="mt-4 grid grid-cols-2 gap-3">
+                  <div className="rounded-lg bg-surface-2 p-3">
+                    <div className="text-xs text-muted">FII holding</div>
+                    <div className="mt-1 text-lg font-semibold tabular text-fg">{share.fii.toFixed(2)}%</div>
+                  </div>
+                  <div className="rounded-lg bg-surface-2 p-3">
+                    <div className="text-xs text-muted">DII holding</div>
+                    <div className="mt-1 text-lg font-semibold tabular text-fg">{share.dii.toFixed(2)}%</div>
+                  </div>
+                </div>
+                <div className="mt-3 inline-flex rounded-full bg-up/10 px-3 py-1.5 text-xs font-semibold text-up">{share.reason}</div>
+                <div className="mt-3 text-[11px] text-muted">Source: NSE shareholding disclosure · <a href={share.quarter.sourceUrl} target="_blank" rel="noreferrer" className="underline underline-offset-2">Verify filing</a></div>
+              </Panel>
+            ))}
+          </div>
+          {!!data?.unavailable && <p className="mt-4 text-xs text-muted">{data.unavailable} suggested share(s) had unavailable or unverified FII/DII data and were not classified.</p>}
+        </>
+      )}
+      <p className="mt-5 text-xs text-subtle">This screen filters only shares from the current Suggestions source. Ownership data is from the latest published disclosure that the app can verify; it is not a live market quote or a guarantee of performance.</p>
+    </div>
+  );
+}
