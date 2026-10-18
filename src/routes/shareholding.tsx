@@ -143,7 +143,7 @@ function ShareholdingPage() {
       </Section>
 
       {data.note ? <Panel className="flex items-start gap-2 p-3"><AlertTriangle className="mt-0.5 size-4 shrink-0 text-muted"/><p className="text-xs text-muted">{data.note}</p></Panel> : null}
-      <Panel className="p-4"><div className="flex items-center justify-between gap-3"><div><p className="text-xs uppercase tracking-wider text-subtle">Data source</p><p className="mt-1 text-sm text-fg">NSE India · Corporate Filings · Shareholding Pattern</p></div><a href={data.source} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-muted underline">Open source <ExternalLink className="size-3"/></a></div><p className="mt-2 text-xs text-subtle">Only verified values are shown. FII/DII screening uses the same latest reported quarter; exactly 15.00% does not pass the strict above-15% threshold.</p></Panel>
+      <Panel className="p-4"><div className="flex items-center justify-between gap-3"><div><p className="text-xs uppercase tracking-wider text-subtle">Data source</p><p className="mt-1 text-sm text-fg">{data.sourceName === "Screener.in" ? "Screener.in · Shareholding Pattern (fallback)" : "NSE India · Corporate Filings · Shareholding Pattern"}</p></div><a href={data.source} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-muted underline">Open source <ExternalLink className="size-3"/></a></div><p className="mt-2 text-xs text-subtle">Only verified values are shown. Source: {data.sourceName}. FII/DII screening uses the same latest reported quarter; exactly 15.00% does not pass the strict above-15% threshold.</p></Panel>
     </>}
   </div>;
 }
