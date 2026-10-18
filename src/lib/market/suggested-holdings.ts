@@ -26,12 +26,10 @@ function istDateKey(): string {
     day: "2-digit",
   }).format(new Date());
 }
-let cached: { date: string; data: SuggestedHoldingsResult } | null = null;
+let cached: { date: string; fingerprint: string; data: SuggestedHoldingsResult } | null = null;
 
 async function loadSuggestedHoldings(): Promise<SuggestedHoldingsResult> {
   const today = istDateKey();
-  if (cached?.date === today) return cached.data;
-
   const suggestions = await fetchSuggestions({ data: { period: "current", sector: "All" } });
   const unique = new Map<string, (typeof suggestions)[number]>();
   for (const share of suggestions) {
@@ -39,6 +37,8 @@ async function loadSuggestedHoldings(): Promise<SuggestedHoldingsResult> {
     if (symbol && !unique.has(symbol)) unique.set(symbol, share);
   }
   const allShares = [...unique.values()];
+  const fingerprint = allShares.map((share) => String(share.symbol).trim().toUpperCase()).join("|");
+  if (cached?.date === today && cached.fingerprint === fingerprint) return cached.data;
   const shares = allShares;
   const qualifying: QualifyingSuggestedHolding[] = [];
   let unavailable = 0;
@@ -80,7 +80,7 @@ async function loadSuggestedHoldings(): Promise<SuggestedHoldingsResult> {
   }
   qualifying.sort((a, b) => a.name.localeCompare(b.name));
   const data = { qualifying, checked: shares.length, unavailable, totalSuggested: allShares.length };
-  cached = { date: today, data };
+  cached = { date: today, fingerprint, data };
   return data;
 }
 
