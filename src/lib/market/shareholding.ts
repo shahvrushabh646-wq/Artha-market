@@ -164,7 +164,7 @@ function parseScreener(html: string, symbol: string, url: string): ShareholdingQ
   const dii = findRow([/^diis?$/i, /^domestic institutional investors?$/i, /^domestic institutions?$/i]);
   const publicRow = findRow([/^public$/i, /^public shareholding$/i]);
   const quarters: ShareholdingQuarter[] = [];
-  for (let i = 0; i < dates.length && i < 4; i++) {
+  for (let i = 0; i < dates.length; i++) {
     const date = dates[i];
     if (!date) continue;
     const get = (row: string[] | undefined) => row ? screenerNumber(row[i + 1] || "") : null;
@@ -199,7 +199,7 @@ async function loadShareholding(symbolInput: string, refresh = false): Promise<S
     const raw = await nseJson(`https://www.nseindia.com/api/corporate-share-holdings-master?index=equities&symbol=${encodeURIComponent(symbol)}`, page);
     if (!Array.isArray(raw)) throw new Error("Unexpected response from NSE.");
     const filings = raw as Array<Record<string, unknown>>;
-    const selected = filings.filter(row => typeof row.xbrl === "string" && /^https?:\/\//i.test(row.xbrl as string)).slice(0, 4);
+    const selected = filings.filter(row => typeof row.xbrl === "string" && /^https?:\/\//i.test(row.xbrl as string)).sort((a, b) => sourceDate(String(b.date ?? "")).localeCompare(sourceDate(String(a.date ?? "")))).slice(0, 4);
     for (const filing of selected) {
       const url = String(filing.xbrl);
       try {
@@ -232,14 +232,19 @@ async function loadShareholding(symbolInput: string, refresh = false): Promise<S
   if (needsFallback) {
     try {
       const fallback = await loadScreenerFallback(symbol);
-      const usable = fallback.quarters.some(q => q.fii !== null || q.dii !== null);
-      if (usable) {
+      const fallbackLatest = fallback.quarters[0];
+      const nseLatest = base.quarters[0];
+      const fallbackIsCurrentOrNewer = !!fallbackLatest && (!nseLatest || fallbackLatest.asOnDate >= nseLatest.asOnDate);
+      const fallbackHasScreeningData = !!fallbackLatest && fallbackLatest.fii !== null && fallbackLatest.dii !== null;
+      if (fallbackIsCurrentOrNewer && fallbackHasScreeningData) {
         base.source = fallback.url;
         base.sourceName = "Screener.in";
         base.quarters = fallback.quarters;
-        base.note = "Using Screener.in as a fallback because NSE data was blocked, empty, or missing separate FII/DII values. Verify figures at the linked source. Promoter pledge is not supplied by this fallback.";
+        base.note = "Using Screener.in because its latest verified quarter is current or newer than the NSE result and includes separate FII/DII values. Verify figures at the linked source. Promoter pledge is not supplied by this fallback.";
       } else if (!base.quarters.length) {
-        base.note = "NSE and Screener.in did not return verifiable FII/DII figures. No sample values are shown.";
+        base.note = "NSE and Screener.in did not return verifiable latest-quarter FII/DII figures. No sample values are shown.";
+      } else if (fallbackLatest && nseLatest && fallbackLatest.asOnDate < nseLatest.asOnDate) {
+        base.note = "Screener.in data was older than the latest NSE filing, so it was not used to replace newer NSE data. Missing figures remain unavailable.";
       }
     } catch {
       if (!base.quarters.length) base.note = "NSE and Screener.in shareholding data could not be retrieved. Try again later; no sample figures are shown.";
