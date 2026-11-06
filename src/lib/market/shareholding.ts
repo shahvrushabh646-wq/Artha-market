@@ -200,24 +200,26 @@ async function loadShareholding(symbolInput: string, refresh = false): Promise<S
     if (!Array.isArray(raw)) throw new Error("Unexpected response from NSE.");
     const filings = raw as Array<Record<string, unknown>>;
     const selected = filings.filter(row => typeof row.xbrl === "string" && /^https?:\/\//i.test(row.xbrl as string)).sort((a, b) => sourceDate(String(b.date ?? "")).localeCompare(sourceDate(String(a.date ?? "")))).slice(0, 4);
-    for (const filing of selected) {
+    // Fetch the latest four filing documents concurrently; their order is restored by filing date below.
+    const parsedFilings = await Promise.all(selected.map(async (filing) => {
       const url = String(filing.xbrl);
       try {
         const response = await fetch(url, { headers: { "User-Agent": UA, Accept: "application/xml,text/xml,*/*", Referer: page }, cache: "no-store" });
-        if (!response.ok) continue;
+        if (!response.ok) return null;
         const parsed = parseXbrl(await response.text());
-        if (!parsed) continue;
+        if (!parsed) return null;
         const rawDate = String(filing.date ?? "");
         const date = sourceDate(rawDate);
-        base.quarters.push({
+        return {
           ...parsed,
           quarter: parseDate(date || rawDate),
           asOnDate: date || rawDate,
           sourceUrl: url,
-          sourceName: "NSE",
-        });
-      } catch { /* one unavailable filing should not hide the other quarters */ }
-    }
+          sourceName: "NSE" as const,
+        };
+      } catch { return null; }
+    }));
+    base.quarters = parsedFilings.filter((quarter): quarter is ShareholdingQuarter => quarter !== null);
     base.quarters.sort((a, b) => b.asOnDate.localeCompare(a.asOnDate));
     base.quarters = base.quarters.slice(0, 4);
     if (!base.quarters.length) base.note = "NSE filings were reachable, but no supported shareholding values could be parsed. Figures are not estimated.";
