@@ -9,7 +9,7 @@ export type QualifyingSuggestedHolding = {
   fii: number | null;
   dii: number | null;
   quarter: ShareholdingQuarter;
-  reason: "FII ≥ 15%" | "DII ≥ 15%" | "FII and DII ≥ 15%";
+  reason: "FII ≥ 15%" | "DII ≥ 15%" | "FII ≥ 15% and DII ≥ 15%";
 };
 export type SuggestedHoldingsResult = {
   qualifying: QualifyingSuggestedHolding[];
@@ -57,7 +57,7 @@ async function loadSuggestedHoldings(refresh = false): Promise<SuggestedHoldings
             ? { status: "unavailable" as const }
             : { status: "checked" as const };
         }
-        const reason = fiiPass && diiPass ? "FII and DII ≥ 15%" : fiiPass ? "FII ≥ 15%" : "DII ≥ 15%";
+        const reason = fiiPass && diiPass ? "FII ≥ 15% and DII ≥ 15%" : fiiPass ? "FII ≥ 15%" : "DII ≥ 15%";
         return {
           status: "qualifies" as const,
           share: {
