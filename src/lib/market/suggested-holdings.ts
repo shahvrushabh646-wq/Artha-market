@@ -44,8 +44,10 @@ async function loadSuggestedHoldings(refresh = false): Promise<SuggestedHoldings
   let unavailable = 0;
 
   // Screen every unique share in the current Suggestions source, using bounded concurrent batches.
-  for (let i = 0; i < shares.length; i += 8) {
-    const batch = await Promise.all(shares.slice(i, i + 8).map(async (share) => {
+  // Higher bounded concurrency reduces total scan time without creating an unbounded request burst.
+  const batchSize = 16;
+  for (let i = 0; i < shares.length; i += batchSize) {
+    const batch = await Promise.all(shares.slice(i, i + batchSize).map(async (share) => {
       try {
         const result = await fetchShareholding({ data: { symbol: share.symbol, refresh } });
         const latest = result.quarters[0];
