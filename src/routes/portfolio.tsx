@@ -66,7 +66,7 @@ function HoldingsPage() {
               <Panel key={share.symbol} className="p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <Link to="/stock" search={{ symbol: share.symbol, period: "1Y" }} className="font-semibold text-fg hover:underline">{share.name}</Link>
+                    <Link to="/shareholding" search={{ symbol: share.symbol, from: "holdings" }} className="font-semibold text-fg hover:underline">{share.name}</Link>
                     <div className="mt-1 text-xs text-muted">{share.symbol} · {share.quarter.quarter} · As on {share.quarter.asOnDate}</div>
                   </div>
                   <a href={share.quarter.sourceUrl} target="_blank" rel="noreferrer" aria-label={`Open source filing for ${share.name}`}
@@ -85,7 +85,7 @@ function HoldingsPage() {
                   </div>
                 </div>
                 <div className="mt-3 inline-flex rounded-full bg-up/10 px-3 py-1.5 text-xs font-semibold text-up">{share.reason}</div>
-                <div className="mt-3 text-[11px] text-muted">Source: NSE shareholding disclosure · <a href={share.quarter.sourceUrl} target="_blank" rel="noreferrer" className="underline underline-offset-2">Verify filing</a></div>
+                <div className="mt-3 text-[11px] text-muted">Source: {share.quarter.sourceName} shareholding disclosure · <a href={share.quarter.sourceUrl} target="_blank" rel="noreferrer" className="underline underline-offset-2">Verify filing</a></div>
               </Panel>
             ))}
           </div>
