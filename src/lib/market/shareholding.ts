@@ -187,11 +187,12 @@ async function loadScreenerFallback(symbol: string): Promise<{ url: string; quar
   return { url, quarters: parseScreener(await response.text(), symbol, url) };
 }
 
-async function loadShareholding(symbolInput: string): Promise<ShareholdingResult> {
+async function loadShareholding(symbolInput: string, refresh = false): Promise<ShareholdingResult> {
   const symbol = normalizeSymbol(symbolInput);
   if (!symbol) throw new Error("A valid NSE symbol is required.");
   const cached = cache.get(symbol);
-  if (cached && cached.expires > Date.now()) return cached.data;
+  if (!refresh && cached && cached.expires > Date.now()) return cached.data;
+  if (refresh) cache.delete(symbol);
   const page = `https://www.nseindia.com/companies-listing/corporate-filings-shareholding-pattern?symbol=${encodeURIComponent(symbol)}&tabIndex=equity`;
   const base: ShareholdingResult = { symbol, source: page, sourceName: "NSE", quarters: [], note: null };
   try {
@@ -249,5 +250,5 @@ async function loadShareholding(symbolInput: string): Promise<ShareholdingResult
 }
 
 export const fetchShareholding = createServerFn({ method: "GET" })
-  .validator((data: unknown) => z.object({ symbol: z.string().min(1).max(40) }).parse(data))
-  .handler(async ({ data }) => loadShareholding(data.symbol));
+  .validator((data: unknown) => z.object({ symbol: z.string().min(1).max(40), refresh: z.boolean().optional() }).parse(data))
+  .handler(async ({ data }) => loadShareholding(data.symbol, data.refresh));
