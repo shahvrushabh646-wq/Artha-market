@@ -58,13 +58,17 @@ function ShareholdingPage() {
     ].filter(item => item.value > 0);
   }, [latest]);
   const screening = useMemo(() => {
-    if (!latest || latest.fii == null || latest.dii == null) return { label: "Insufficient Data", detail: "Latest-quarter FII and/or DII figures could not be verified." };
-    const combined = latest.fii + latest.dii;
-    const passes = latest.fii >= 15 || latest.dii >= 15;
-    return {
-      label: passes ? "Meets 15% Rule" : "Does Not Meet 15% Rule",
-      detail: `FII ${moneyPercent(latest.fii)} · DII ${moneyPercent(latest.dii)} · Combined ${moneyPercent(combined)}. A stock qualifies when either FII or DII holding is at least 15%.`,
-    };
+    if (!latest) return { label: "Insufficient Data", detail: "No verified latest-quarter disclosure is available." };
+    const fiiPass = latest.fii !== null && Number.isFinite(latest.fii) && latest.fii >= 15;
+    const diiPass = latest.dii !== null && Number.isFinite(latest.dii) && latest.dii >= 15;
+    if (fiiPass || diiPass) {
+      const passedBy = fiiPass && diiPass ? "Both FII and DII are at least 15%." : fiiPass ? "FII is at least 15%." : "DII is at least 15%.";
+      return { label: "Meets 15% Rule", detail: `FII ${moneyPercent(latest.fii)} · DII ${moneyPercent(latest.dii)}. ${passedBy} The rule is FII ≥ 15% OR DII ≥ 15%; the percentages are not added.` };
+    }
+    if (latest.fii === null || latest.dii === null) {
+      return { label: "Insufficient Data", detail: `FII ${moneyPercent(latest.fii)} · DII ${moneyPercent(latest.dii)}. At least one figure is missing and no verified figure reaches 15%, so qualification cannot be determined.` };
+    }
+    return { label: "Does Not Meet 15% Rule", detail: `FII ${moneyPercent(latest.fii)} · DII ${moneyPercent(latest.dii)}. Neither FII nor DII reaches 15% in the latest reported quarter.` };
   }, [latest]);
   const barData = quarters.slice(-4).map(q => ({ quarter: quarterLabel(q), promoter: q.promoter, pledge: q.promoterPledge }));
   type ShareholdingKey = "fii" | "dii" | "promoter" | "public" | "promoterPledge";
