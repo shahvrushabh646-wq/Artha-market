@@ -178,12 +178,12 @@ function parseScreener(html: string, symbol: string, url: string): ShareholdingQ
   return quarters.sort((a, b) => b.asOnDate.localeCompare(a.asOnDate)).slice(0, 4);
 }
 async function loadScreenerFallback(symbol: string): Promise<{ url: string; quarters: ShareholdingQuarter[] }> {
-  const url = \`https://www.screener.in/company/\${encodeURIComponent(symbol)}/\`;
+  const url = `https://www.screener.in/company/${encodeURIComponent(symbol)}/`;
   const response = await fetch(url, {
     headers: { "User-Agent": UA, Accept: "text/html,application/xhtml+xml,*/*", "Accept-Language": "en-US,en;q=0.9" },
     cache: "no-store",
   });
-  if (!response.ok) throw new Error(\`Screener.in returned HTTP \${response.status}\`);
+  if (!response.ok) throw new Error(`Screener.in returned HTTP ${response.status}`);
   return { url, quarters: parseScreener(await response.text(), symbol, url) };
 }
 
