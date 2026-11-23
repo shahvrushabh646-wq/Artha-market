@@ -137,13 +137,13 @@ function screenerNumber(value: string): number | null {
 function parseScreener(html: string, symbol: string, url: string): ShareholdingQuarter[] {
   // Parse the actual quarterly Shareholding Pattern table. Screener labels rows
   // with a trailing "+" (e.g. "FIIs +"), which must be normalized before matching.
-  const tables = [...html.matchAll(/<table\\b[^>]*>[\\s\\S]*?<\\/table>/gi)];
-  const parseRows = (table: string) => [...table.matchAll(/<tr\\b[^>]*>([\\s\\S]*?)<\\/tr>/gi)].map(m => {
-    const cells = [...m[1].matchAll(/<t[hd]\\b[^>]*>([\\s\\S]*?)<\\/t[hd]>/gi)].map(x => htmlText(x[1]));
+  const tables = [...html.matchAll(/<table\b[^>]*>[\s\S]*?<\/table>/gi)];
+  const parseRows = (table: string) => [...table.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)].map(m => {
+    const cells = [...m[1].matchAll(/<t[hd]\b[^>]*>([\s\S]*?)<\/t[hd]>/gi)].map(x => htmlText(x[1]));
     return cells;
   }).filter(row => row.length > 1);
-  const normalizeLabel = (value: string) => htmlText(value).replace(/\\s*\\+\\s*$/, "").replace(/\\s+/g, " ").trim().toLowerCase();
-  const periodPattern = /^(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\\s+['’]?\\d{4}$/i;
+  const normalizeLabel = (value: string) => htmlText(value).replace(/\s*\+\s*$/, "").replace(/\s+/g, " ").trim().toLowerCase();
+  const periodPattern = /^(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s+['’]?\d{4}$/i;
   const candidates = tables.map(match => parseRows(match[0])).filter(rows => {
     const labels = rows.map(row => normalizeLabel(row[0] || ""));
     const hasPeriods = rows.some(row => row.slice(1).some(cell => periodPattern.test(normalizeLabel(cell))));
