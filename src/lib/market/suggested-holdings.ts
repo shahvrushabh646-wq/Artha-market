@@ -3,16 +3,13 @@ import { z } from "zod";
 import { fetchShareholding, type ShareholdingQuarter } from "@/lib/market/shareholding";
 import { fetchSuggestions } from "@/lib/market/suggestions";
 
-export type QualifyingSuggestedHolding = {
+export type SuggestedHolding = {
   symbol: string;
   name: string;
-  fii: number | null;
-  dii: number | null;
-  quarter: ShareholdingQuarter;
-  reason: "FII ≥ 15%" | "DII ≥ 15%" | "FII ≥ 15% and DII ≥ 15%";
+  quarter: ShareholdingQuarter | null;
 };
 export type SuggestedHoldingsResult = {
-  qualifying: QualifyingSuggestedHolding[];
+  holdings: SuggestedHolding[];
   checked: number;
   unavailable: number;
   totalSuggested: number;
@@ -36,52 +33,38 @@ async function loadSuggestedHoldings(refresh = false): Promise<SuggestedHoldings
     const symbol = String(share.symbol || "").trim().toUpperCase();
     if (symbol && !unique.has(symbol)) unique.set(symbol, share);
   }
-  const allShares = [...unique.values()];
-  const fingerprint = allShares.map((share) => String(share.symbol).trim().toUpperCase()).join("|");
+  const shares = [...unique.values()];
+  const fingerprint = shares.map((share) => String(share.symbol).trim().toUpperCase()).join("|");
   if (!refresh && cached?.date === today && cached.fingerprint === fingerprint) return cached.data;
-  const shares = allShares;
-  const qualifying: QualifyingSuggestedHolding[] = [];
-  let unavailable = 0;
 
-  // Screen every unique share in the current Suggestions source, using bounded concurrent batches.
-  // Higher bounded concurrency reduces total scan time without creating an unbounded request burst.
-  const batchSize = 16;
+  const holdings: SuggestedHolding[] = [];
+  let unavailable = 0;
+  // Include every current Suggestions stock; unavailable filings remain visible without fabricated percentages.
+  const batchSize = 12;
   for (let i = 0; i < shares.length; i += batchSize) {
     const batch = await Promise.all(shares.slice(i, i + batchSize).map(async (share) => {
       try {
         const result = await fetchShareholding({ data: { symbol: share.symbol, refresh } });
-        const latest = result.quarters[0];
-        if (!latest || (latest.fii === null && latest.dii === null)) return { status: "unavailable" as const };
-        const fiiPass = latest.fii !== null && Number.isFinite(latest.fii) && latest.fii >= 15;
-        const diiPass = latest.dii !== null && Number.isFinite(latest.dii) && latest.dii >= 15;
-        if (!fiiPass && !diiPass) {
-          return latest.fii === null || latest.dii === null
-            ? { status: "unavailable" as const }
-            : { status: "checked" as const };
+        const latest = result.quarters[0] ?? null;
+        if (!latest || (latest.fii === null && latest.dii === null && latest.public === null && latest.promoter === null)) {
+          return { symbol: share.symbol, name: share.name || share.symbol, quarter: null };
         }
-        const reason = fiiPass && diiPass ? "FII ≥ 15% and DII ≥ 15%" : fiiPass ? "FII ≥ 15%" : "DII ≥ 15%";
-        return {
-          status: "qualifies" as const,
-          share: {
-            symbol: share.symbol,
-            name: share.name || share.symbol,
-            fii: latest.fii,
-            dii: latest.dii,
-            quarter: latest,
-            reason,
-          } satisfies QualifyingSuggestedHolding,
-        };
+        return { symbol: share.symbol, name: share.name || share.symbol, quarter: latest };
       } catch {
-        return { status: "unavailable" as const };
+        return { symbol: share.symbol, name: share.name || share.symbol, quarter: null };
       }
     }));
     for (const item of batch) {
-      if (item.status === "unavailable") unavailable++;
-      else if (item.status === "qualifies") qualifying.push(item.share);
+      if (!item.quarter) unavailable++;
+      holdings.push(item);
     }
   }
-  qualifying.sort((a, b) => a.name.localeCompare(b.name));
-  const data = { qualifying, checked: shares.length, unavailable, totalSuggested: allShares.length };
+  holdings.sort((a, b) => {
+    const aScore = (a.quarter?.fii ?? 0) + (a.quarter?.dii ?? 0);
+    const bScore = (b.quarter?.fii ?? 0) + (b.quarter?.dii ?? 0);
+    return bScore - aScore || a.name.localeCompare(b.name);
+  });
+  const data = { holdings, checked: shares.length, unavailable, totalSuggested: shares.length };
   cached = { date: today, fingerprint, data };
   return data;
 }
