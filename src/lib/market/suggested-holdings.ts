@@ -46,7 +46,7 @@ async function loadSuggestedHoldings(refresh = false): Promise<SuggestedHoldings
   for (let i = 0; i < shares.length; i += batchSize) {
     const batch = await Promise.all(shares.slice(i, i + batchSize).map(async (share) => {
       try {
-        let result = await fetchShareholding({ data: { symbol: share.symbol, refresh } });
+        let result = await fetchShareholding({ data: { symbol: share.symbol, refresh: false } });
         // Retry empty/unavailable upstream responses once; NSE and Screener can intermittently rate-limit.
         if (!result.quarters.length) {
           result = await fetchShareholding({ data: { symbol: share.symbol, refresh: true } });
