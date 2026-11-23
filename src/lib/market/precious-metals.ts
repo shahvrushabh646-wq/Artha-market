@@ -24,6 +24,7 @@ export type MetalPrices = {
   silver60PriceKg: number;
   silver65PriceKg: number;
   silver70PriceKg: number;
+  silver75PriceKg: number;
   goldSignal: "BUY" | "WAIT" | null;
   asOf: string | null;
   source: string;
@@ -247,12 +248,13 @@ function buildPrices(
   const goldDiscount30Price10g = Math.round(gold5yHigh10g * 0.7);
   const goldDiscount40Price10g = Math.round(gold5yHigh10g * 0.6);
 
-  // User-defined silver target levels (INR per kg), independent of the 5-year-high reference.
-  const silver50PriceKg = 300000;
-  const silver55PriceKg = 260000;
-  const silver60PriceKg = 220000;
-  const silver65PriceKg = 200000;
-  const silver70PriceKg = 180000;
+  // Discount levels are calculated from the fixed 5-year-high reference (INR/kg).
+  const silver50PriceKg = Math.round(silver5yHighKg * 0.5);
+  const silver55PriceKg = Math.round(silver5yHighKg * 0.45);
+  const silver60PriceKg = Math.round(silver5yHighKg * 0.4);
+  const silver65PriceKg = Math.round(silver5yHighKg * 0.35);
+  const silver70PriceKg = Math.round(silver5yHighKg * 0.3);
+  const silver75PriceKg = Math.round(silver5yHighKg * 0.25);
 
   return {
     gold10g: Math.round(live.gold10g),
@@ -278,6 +280,7 @@ function buildPrices(
     silver60PriceKg,
     silver65PriceKg,
     silver70PriceKg,
+    silver75PriceKg,
     goldSignal:
       live.gold10g <= goldDiscount40Price10g ? "BUY" : "WAIT",
     asOf: live.asOf,
