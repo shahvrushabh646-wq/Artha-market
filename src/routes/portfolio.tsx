@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { BriefcaseBusiness, ExternalLink, RefreshCw, Search } from "lucide-react";
+import { ExternalLink, RefreshCw, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import { fetchSuggestedHoldings } from "@/lib/market/suggested-holdings";
 import { Panel } from "@/components/widgets";
