@@ -259,7 +259,9 @@ async function loadShareholding(symbolInput: string, refresh = false): Promise<S
       if (!base.quarters.length) base.note = "NSE and Screener.in shareholding data could not be retrieved. Try again later; no sample figures are shown.";
     }
   }
-  cache.set(symbol, { expires: Date.now() + 30 * 60_000, data: base });
+  // Cache only verified quarters. Empty/rate-limited responses must be retried on the next request.
+  if (base.quarters.length) cache.set(symbol, { expires: Date.now() + 30 * 60_000, data: base });
+  else cache.delete(symbol);
   return base;
 }
 
