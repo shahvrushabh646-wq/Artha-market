@@ -40,11 +40,15 @@ async function loadSuggestedHoldings(refresh = false): Promise<SuggestedHoldings
   const holdings: SuggestedHolding[] = [];
   let unavailable = 0;
   // Include every current Suggestions stock; unavailable filings remain visible without fabricated percentages.
-  const batchSize = 12;
+  const batchSize = 6;
   for (let i = 0; i < shares.length; i += batchSize) {
     const batch = await Promise.all(shares.slice(i, i + batchSize).map(async (share) => {
       try {
-        const result = await fetchShareholding({ data: { symbol: share.symbol, refresh } });
+        let result = await fetchShareholding({ data: { symbol: share.symbol, refresh } });
+        // Retry empty/unavailable upstream responses once; NSE and Screener can intermittently rate-limit.
+        if (!result.quarters.length) {
+          result = await fetchShareholding({ data: { symbol: share.symbol, refresh: true } });
+        }
         const latest = result.quarters[0] ?? null;
         if (!latest || (latest.fii === null && latest.dii === null && latest.public === null && latest.promoter === null)) {
           return { symbol: share.symbol, name: share.name || share.symbol, quarter: null };
