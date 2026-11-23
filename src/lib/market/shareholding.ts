@@ -10,10 +10,12 @@ export type ShareholdingQuarter = {
   public: number | null;
   promoterPledge: number | null;
   sourceUrl: string;
+  sourceName: "NSE" | "Screener.in";
 };
 export type ShareholdingResult = {
   symbol: string;
   source: string;
+  sourceName: "NSE" | "Screener.in";
   quarters: ShareholdingQuarter[];
   note: string | null;
 };
@@ -112,46 +114,155 @@ function parseXbrl(xml: string): Omit<ShareholdingQuarter, "quarter" | "asOnDate
   return { promoter: values.promoter, fii: values.fii, dii: values.dii, public: values.public, promoterPledge };
 }
 
-async function loadShareholding(symbolInput: string): Promise<ShareholdingResult> {
+function htmlText(value: string): string {
+  return value
+    .replace(/<script\b[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style\b[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;|&#160;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+function screenerNumber(value: string): number | null {
+  const text = htmlText(value).replace(/,/g, "").replace(/%/g, "").trim();
+  if (!text || text === "-" || text === "—" || text === "NA" || text === "N/A") return null;
+  const number = Number(text);
+  return Number.isFinite(number) && number >= 0 && number <= 100 ? number : null;
+}
+function parseScreener(html: string, symbol: string, url: string): ShareholdingQuarter[] {
+  // Parse the actual quarterly Shareholding Pattern table. Screener labels rows
+  // with a trailing "+" (e.g. "FIIs +"), which must be normalized before matching.
+  const tables = [...html.matchAll(/<table\b[^>]*>[\s\S]*?<\/table>/gi)];
+  const parseRows = (table: string) => [...table.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)].map(m => {
+    const cells = [...m[1].matchAll(/<t[hd]\b[^>]*>([\s\S]*?)<\/t[hd]>/gi)].map(x => htmlText(x[1]));
+    return cells;
+  }).filter(row => row.length > 1);
+  const normalizeLabel = (value: string) => htmlText(value).replace(/\s*\+\s*$/, "").replace(/\s+/g, " ").trim().toLowerCase();
+  const periodPattern = /^(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s+['’]?\d{4}$/i;
+  const candidates = tables.map(match => parseRows(match[0])).filter(rows => {
+    const labels = rows.map(row => normalizeLabel(row[0] || ""));
+    const hasPeriods = rows.some(row => row.slice(1).some(cell => periodPattern.test(normalizeLabel(cell))));
+    return hasPeriods && labels.some(label => /^promoters?$/.test(label)) &&
+      labels.some(label => /^fiis?$/.test(label)) &&
+      labels.some(label => /^diis?$/.test(label)) &&
+      labels.some(label => /^public$/.test(label));
+  });
+  const rows = candidates[0];
+  if (!rows || rows.length < 2) return [];
+  const header = rows.find(row => row.slice(1).some(cell => periodPattern.test(normalizeLabel(cell))));
+  if (!header) return [];
+  const dates = header.slice(1).map(value => {
+    const cleaned = htmlText(value).replace(/[’']/g, " ").trim();
+    const date = new Date(cleaned);
+    return Number.isNaN(date.getTime()) ? null : {
+      quarter: date.toLocaleDateString("en-IN", { month: "short", year: "numeric", timeZone: "UTC" }),
+      asOnDate: date.toISOString().slice(0, 10),
+    };
+  });
+  const findRow = (patterns: RegExp[]) => rows.find(row => patterns.some(pattern => pattern.test(normalizeLabel(row[0] || ""))));
+  const promoters = findRow([/^promoters?$/, /^promoter & promoter group$/]);
+  const fii = findRow([/^fiis?$/, /^foreign institutional investors?$/, /^foreign institutions?$/]);
+  const dii = findRow([/^diis?$/, /^domestic institutional investors?$/, /^domestic institutions?$/]);
+  const publicRow = findRow([/^public$/, /^public shareholding$/]);
+  const quarters: ShareholdingQuarter[] = [];
+  for (let i = 0; i < dates.length; i++) {
+    const date = dates[i];
+    if (!date) continue;
+    const get = (row: string[] | undefined) => row ? screenerNumber(row[i + 1] || "") : null;
+    const promoter = get(promoters), fiiValue = get(fii), diiValue = get(dii), publicValue = get(publicRow);
+    if (promoter === null && fiiValue === null && diiValue === null && publicValue === null) continue;
+    quarters.push({
+      ...date, promoter, fii: fiiValue, dii: diiValue, public: publicValue,
+      promoterPledge: null, sourceUrl: url, sourceName: "Screener.in",
+    });
+  }
+  return quarters.sort((a, b) => b.asOnDate.localeCompare(a.asOnDate)).slice(0, 4);
+}
+
+async function loadScreenerFallback(symbol: string): Promise<{ url: string; quarters: ShareholdingQuarter[] }> {
+  const url = `https://www.screener.in/company/${encodeURIComponent(symbol)}/`;
+  const response = await fetch(url, {
+    headers: { "User-Agent": UA, Accept: "text/html,application/xhtml+xml,*/*", "Accept-Language": "en-US,en;q=0.9" },
+    cache: "no-store",
+  });
+  if (!response.ok) throw new Error(`Screener.in returned HTTP ${response.status}`);
+  return { url, quarters: parseScreener(await response.text(), symbol, url) };
+}
+
+async function loadShareholding(symbolInput: string, refresh = false): Promise<ShareholdingResult> {
   const symbol = normalizeSymbol(symbolInput);
   if (!symbol) throw new Error("A valid NSE symbol is required.");
   const cached = cache.get(symbol);
-  if (cached && cached.expires > Date.now()) return cached.data;
+  if (!refresh && cached && cached.expires > Date.now()) return cached.data;
+  if (refresh) cache.delete(symbol);
   const page = `https://www.nseindia.com/companies-listing/corporate-filings-shareholding-pattern?symbol=${encodeURIComponent(symbol)}&tabIndex=equity`;
-  const base: ShareholdingResult = { symbol, source: page, quarters: [], note: null };
+  const base: ShareholdingResult = { symbol, source: page, sourceName: "NSE", quarters: [], note: null };
   try {
     const raw = await nseJson(`https://www.nseindia.com/api/corporate-share-holdings-master?index=equities&symbol=${encodeURIComponent(symbol)}`, page);
     if (!Array.isArray(raw)) throw new Error("Unexpected response from NSE.");
     const filings = raw as Array<Record<string, unknown>>;
-    const selected = filings.filter(row => typeof row.xbrl === "string" && /^https?:\/\//i.test(row.xbrl as string)).slice(0, 4);
-    for (const filing of selected) {
+    const selected = filings.filter(row => typeof row.xbrl === "string" && /^https?:\/\//i.test(row.xbrl as string)).sort((a, b) => sourceDate(String(b.date ?? "")).localeCompare(sourceDate(String(a.date ?? "")))).slice(0, 4);
+    // Fetch the latest four filing documents concurrently; their order is restored by filing date below.
+    const parsedFilings = await Promise.all(selected.map(async (filing) => {
       const url = String(filing.xbrl);
       try {
         const response = await fetch(url, { headers: { "User-Agent": UA, Accept: "application/xml,text/xml,*/*", Referer: page }, cache: "no-store" });
-        if (!response.ok) continue;
+        if (!response.ok) return null;
         const parsed = parseXbrl(await response.text());
-        if (!parsed) continue;
+        if (!parsed) return null;
         const rawDate = String(filing.date ?? "");
         const date = sourceDate(rawDate);
-        base.quarters.push({
+        return {
           ...parsed,
           quarter: parseDate(date || rawDate),
           asOnDate: date || rawDate,
           sourceUrl: url,
-        });
-      } catch { /* one unavailable filing should not hide the other quarters */ }
-    }
+          sourceName: "NSE" as const,
+        };
+      } catch { return null; }
+    }));
+    base.quarters = parsedFilings.filter((quarter): quarter is ShareholdingQuarter => quarter !== null);
     base.quarters.sort((a, b) => b.asOnDate.localeCompare(a.asOnDate));
     base.quarters = base.quarters.slice(0, 4);
     if (!base.quarters.length) base.note = "NSE filings were reachable, but no supported shareholding values could be parsed. Figures are not estimated.";
     else if (base.quarters.some(q => q.fii === null || q.dii === null)) base.note = "Some filings do not expose separate FII/DII values in a format this screen can verify. Missing figures remain unavailable.";
   } catch {
-    base.note = "NSE shareholding data could not be retrieved right now. Try again later; no sample figures are shown.";
+    base.note = "NSE shareholding data could not be retrieved right now.";
+  }
+
+  // Use Screener when NSE is blocked, returns no usable quarters, or lacks FII/DII figures.
+  const latestNse = base.quarters[0];
+  const needsFallback = !latestNse || latestNse.fii === null || latestNse.dii === null;
+  if (needsFallback) {
+    try {
+      const fallback = await loadScreenerFallback(symbol);
+      const fallbackLatest = fallback.quarters[0];
+      const nseLatest = base.quarters[0];
+      const fallbackIsCurrentOrNewer = !!fallbackLatest && (!nseLatest || fallbackLatest.asOnDate >= nseLatest.asOnDate);
+      const fallbackHasScreeningData = !!fallbackLatest && fallbackLatest.fii !== null && fallbackLatest.dii !== null;
+      if (fallbackIsCurrentOrNewer && fallbackHasScreeningData) {
+        base.source = fallback.url;
+        base.sourceName = "Screener.in";
+        base.quarters = fallback.quarters;
+        base.note = "Using Screener.in because its latest verified quarter is current or newer than the NSE result and includes separate FII/DII values. Verify figures at the linked source. Promoter pledge is not supplied by this fallback.";
+      } else if (!base.quarters.length) {
+        base.note = "NSE and Screener.in did not return verifiable latest-quarter FII/DII figures. No sample values are shown.";
+      } else if (fallbackLatest && nseLatest && fallbackLatest.asOnDate < nseLatest.asOnDate) {
+        base.note = "Screener.in data was older than the latest NSE filing, so it was not used to replace newer NSE data. Missing figures remain unavailable.";
+      }
+    } catch {
+      if (!base.quarters.length) base.note = "NSE and Screener.in shareholding data could not be retrieved. Try again later; no sample figures are shown.";
+    }
   }
   cache.set(symbol, { expires: Date.now() + 30 * 60_000, data: base });
   return base;
 }
 
 export const fetchShareholding = createServerFn({ method: "GET" })
-  .validator((data: unknown) => z.object({ symbol: z.string().min(1).max(40) }).parse(data))
-  .handler(async ({ data }) => loadShareholding(data.symbol));
+  .validator((data: unknown) => z.object({ symbol: z.string().min(1).max(40), refresh: z.boolean().optional() }).parse(data))
+  .handler(async ({ data }) => loadShareholding(data.symbol, data.refresh));
