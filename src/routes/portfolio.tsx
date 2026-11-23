@@ -20,11 +20,16 @@ function publicResidual(quarter: { public: number | null; fii: number | null; di
   return value >= -0.05 ? Math.max(0, value) : null;
 }
 function othersOutsidePublic(quarter: { public: number | null; promoter: number | null; fii: number | null; dii: number | null; sourceName: "NSE" | "Screener.in" } | null) {
-  if (!quarter || quarter.public === null) return null;
-  // NSE PublicShareholdingMember is the aggregate public bucket; its complement is outside public.
-  if (quarter.sourceName === "NSE") return Math.max(0, 100 - quarter.public);
-  // Screener separates Promoters, FIIs, DIIs and non-institutional Public; only the remainder is Others.
-  if (quarter.promoter === null || quarter.fii === null || quarter.dii === null) return null;
+  if (!quarter || quarter.public === null || quarter.promoter === null) return null;
+  // On NSE, Public is the aggregate non-promoter block. "Others" is the remaining
+  // government/other bucket after promoter and aggregate public are accounted for.
+  if (quarter.sourceName === "NSE") {
+    const value = 100 - quarter.promoter - quarter.public;
+    return value >= -0.05 ? Math.max(0, value) : null;
+  }
+  // Screener reports FIIs, DIIs and non-institutional Public separately; the balance
+  // is the Government/other category, and should not include promoter holdings.
+  if (quarter.fii === null || quarter.dii === null) return null;
   const value = 100 - quarter.promoter - quarter.fii - quarter.dii - quarter.public;
   return value >= -0.05 ? Math.max(0, value) : null;
 }
@@ -39,7 +44,7 @@ function HoldingsPage() {
     month: "2-digit",
     day: "2-digit",
   }).format(new Date());
-  const queryKey = ["suggested-holdings-all-v2", today];
+  const queryKey = ["suggested-holdings-all-v3", today];
   const query = useQuery({
     queryKey,
     queryFn: () => fetchSuggestedHoldings({ data: {} }),
