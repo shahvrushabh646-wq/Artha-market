@@ -19,11 +19,12 @@ export type MetalPrices = {
   goldDiscount30Price10g: number;
   goldDiscount40Price10g: number;
   silver5yHighKg: number;
-  silver25PriceKg: number;
-  silver35PriceKg: number;
-  silver45PriceKg: number;
   silver50PriceKg: number;
   silver55PriceKg: number;
+  silver60PriceKg: number;
+  silver65PriceKg: number;
+  silver70PriceKg: number;
+  silver75PriceKg: number;
   goldSignal: "BUY" | "WAIT" | null;
   asOf: string | null;
   source: string;
@@ -247,11 +248,12 @@ function buildPrices(
   const goldDiscount30Price10g = Math.round(gold5yHigh10g * 0.7);
   const goldDiscount40Price10g = Math.round(gold5yHigh10g * 0.6);
 
-  const silver25PriceKg = Math.round(silver5yHighKg * 0.75);
-  const silver35PriceKg = Math.round(silver5yHighKg * 0.65);
-  const silver45PriceKg = Math.round(silver5yHighKg * 0.55);
   const silver50PriceKg = Math.round(silver5yHighKg * 0.5);
   const silver55PriceKg = Math.round(silver5yHighKg * 0.45);
+  const silver60PriceKg = Math.round(silver5yHighKg * 0.4);
+  const silver65PriceKg = Math.round(silver5yHighKg * 0.35);
+  const silver70PriceKg = Math.round(silver5yHighKg * 0.3);
+  const silver75PriceKg = Math.round(silver5yHighKg * 0.25);
 
   return {
     gold10g: Math.round(live.gold10g),
@@ -272,11 +274,12 @@ function buildPrices(
     goldDiscount30Price10g,
     goldDiscount40Price10g,
     silver5yHighKg,
-    silver25PriceKg,
-    silver35PriceKg,
-    silver45PriceKg,
     silver50PriceKg,
     silver55PriceKg,
+    silver60PriceKg,
+    silver65PriceKg,
+    silver70PriceKg,
+    silver75PriceKg,
     goldSignal:
       live.gold10g <= goldDiscount40Price10g ? "BUY" : "WAIT",
     asOf: live.asOf,

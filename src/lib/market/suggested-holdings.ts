@@ -9,7 +9,7 @@ export type QualifyingSuggestedHolding = {
   fii: number | null;
   dii: number | null;
   quarter: ShareholdingQuarter;
-  reason: "FII ≥ 15%" | "DII ≥ 15%" | "FII and DII ≥ 15%";
+  reason: "FII ≥ 15%" | "DII ≥ 15%" | "FII ≥ 15% and DII ≥ 15%";
 };
 export type SuggestedHoldingsResult = {
   qualifying: QualifyingSuggestedHolding[];
@@ -28,7 +28,7 @@ function istDateKey(): string {
 }
 let cached: { date: string; fingerprint: string; data: SuggestedHoldingsResult } | null = null;
 
-async function loadSuggestedHoldings(): Promise<SuggestedHoldingsResult> {
+async function loadSuggestedHoldings(refresh = false): Promise<SuggestedHoldingsResult> {
   const today = istDateKey();
   const suggestions = await fetchSuggestions({ data: { period: "current", sector: "All" } });
   const unique = new Map<string, (typeof suggestions)[number]>();
@@ -38,16 +38,18 @@ async function loadSuggestedHoldings(): Promise<SuggestedHoldingsResult> {
   }
   const allShares = [...unique.values()];
   const fingerprint = allShares.map((share) => String(share.symbol).trim().toUpperCase()).join("|");
-  if (cached?.date === today && cached.fingerprint === fingerprint) return cached.data;
+  if (!refresh && cached?.date === today && cached.fingerprint === fingerprint) return cached.data;
   const shares = allShares;
   const qualifying: QualifyingSuggestedHolding[] = [];
   let unavailable = 0;
 
   // Screen every unique share in the current Suggestions source, using bounded concurrent batches.
-  for (let i = 0; i < shares.length; i += 8) {
-    const batch = await Promise.all(shares.slice(i, i + 8).map(async (share) => {
+  // Higher bounded concurrency reduces total scan time without creating an unbounded request burst.
+  const batchSize = 16;
+  for (let i = 0; i < shares.length; i += batchSize) {
+    const batch = await Promise.all(shares.slice(i, i + batchSize).map(async (share) => {
       try {
-        const result = await fetchShareholding({ data: { symbol: share.symbol } });
+        const result = await fetchShareholding({ data: { symbol: share.symbol, refresh } });
         const latest = result.quarters[0];
         if (!latest || (latest.fii === null && latest.dii === null)) return { status: "unavailable" as const };
         const fiiPass = latest.fii !== null && Number.isFinite(latest.fii) && latest.fii >= 15;
@@ -57,7 +59,7 @@ async function loadSuggestedHoldings(): Promise<SuggestedHoldingsResult> {
             ? { status: "unavailable" as const }
             : { status: "checked" as const };
         }
-        const reason = fiiPass && diiPass ? "FII and DII ≥ 15%" : fiiPass ? "FII ≥ 15%" : "DII ≥ 15%";
+        const reason = fiiPass && diiPass ? "FII ≥ 15% and DII ≥ 15%" : fiiPass ? "FII ≥ 15%" : "DII ≥ 15%";
         return {
           status: "qualifies" as const,
           share: {
@@ -88,5 +90,5 @@ export const fetchSuggestedHoldings = createServerFn({ method: "GET" })
   .validator((data: unknown) => z.object({ refresh: z.boolean().optional() }).parse(data ?? {}))
   .handler(async ({ data }) => {
     if (data.refresh) cached = null;
-    return loadSuggestedHoldings();
+    return loadSuggestedHoldings(Boolean(data.refresh));
   });
