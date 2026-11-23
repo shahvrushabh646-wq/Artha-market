@@ -293,6 +293,88 @@ async function loadPublicSiteFallback(symbol:string):Promise<{url:string;name:st
   return {url:"",name:"",quarters:[]};
 }
 
+type BseMaster = { symbolToIsin: Map<string,string>; isinToCode: Map<string,string> };
+let bseMasterCache: { expires:number; data:BseMaster } | null = null;
+function parseCsvLine(line:string):string[] {
+  const cells:string[]=[]; let value="",quoted=false;
+  for(let i=0;i<line.length;i++){
+    const ch=line[i];
+    if(ch==='"' && quoted && line[i+1]==='"'){value+='"';i++;}
+    else if(ch==='"')quoted=!quoted;
+    else if(ch===","&&!quoted){cells.push(value.trim());value="";}
+    else value+=ch;
+  }
+  cells.push(value.trim()); return cells;
+}
+async function loadBseMaster():Promise<BseMaster>{
+  if(bseMasterCache&&bseMasterCache.expires>Date.now())return bseMasterCache.data;
+  const headers={"User-Agent":UA,Accept:"text/csv,text/plain,*/*","Accept-Language":"en-IN,en;q=0.9"};
+  const [nseRes,bseRes]=await Promise.all([
+    fetch("https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv",{headers,cache:"no-store"}),
+    fetch("https://www.bseindia.com/downloads1/Equity.csv",{headers,cache:"no-store"})
+  ]);
+  if(!nseRes.ok||!bseRes.ok)throw new Error("Exchange security master unavailable");
+  const nseLines=(await nseRes.text()).split(/\r?\n/).filter(Boolean),bseLines=(await bseRes.text()).split(/\r?\n/).filter(Boolean);
+  const nseHeader=parseCsvLine(nseLines.shift()??"").map(x=>x.toUpperCase());
+  const bseHeader=parseCsvLine(bseLines.shift()??"").map(x=>x.toUpperCase());
+  const ni=nseHeader.indexOf("SYMBOL"),nis=nseHeader.findIndex(x=>x.includes("ISIN"));
+  const bc=bseHeader.findIndex(x=>x.includes("SECURITY CODE")||x==="SC_CODE"||x==="SCRIP CODE");
+  const bi=bseHeader.findIndex(x=>x.includes("ISIN"));
+  if(ni<0||nis<0||bc<0||bi<0)throw new Error("Exchange master columns changed");
+  const symbolToIsin=new Map<string,string>();
+  for(const line of nseLines){const row=parseCsvLine(line);const sym=(row[ni]??"").toUpperCase(),isin=(row[nis]??"").toUpperCase();if(sym&&/^[A-Z0-9]{12}$/.test(isin))symbolToIsin.set(sym,isin);}
+  const isinToCode=new Map<string,string>();
+  for(const line of bseLines){const row=parseCsvLine(line),code=(row[bc]??"").replace(/\D/g,""),isin=(row[bi]??"").toUpperCase();if(code&&isin)isinToCode.set(isin,code);}
+  const data={symbolToIsin,isinToCode};bseMasterCache={expires:Date.now()+24*60*60_000,data};return data;
+}
+async function loadBseFallback(symbol:string):Promise<{url:string;quarters:ShareholdingQuarter[]}>{
+  const master=await loadBseMaster(),isin=master.symbolToIsin.get(symbol),code=isin?master.isinToCode.get(isin):undefined;
+  if(!code)throw new Error("BSE code/ISIN mapping unavailable for "+symbol);
+  // BSE's endpoint requires Referer and User-Agent; do not send Origin.
+  const headers={"User-Agent":UA,Accept:"application/json,text/plain,*/*",Referer:"https://www.bseindia.com/"};
+  const indexUrl="https://api.bseindia.com/BseIndiaAPI/api/Corp_Shareholding_ng/w?scripcode="+code+"&flag=0&indtype=";
+  const indexRes=await fetch(indexUrl,{headers,cache:"no-store"});
+  if(!indexRes.ok)throw new Error("BSE filing index HTTP "+indexRes.status);
+  const index=await indexRes.json() as {Table?:Array<Record<string,unknown>>};
+  const filings=(index.Table??[]).filter(x=>Number(x.IsXBRL)===1&&typeof x.XBRLAttachment==="string"&&/^\d{4}-\d{2}-\d{2}/.test(String(x.EndDate??""))).sort((a,b)=>String(b.EndDate).localeCompare(String(a.EndDate))).slice(0,4);
+  const quarters:ShareholdingQuarter[]=[];
+  for(const filing of filings){
+    const attachment=String(filing.XBRLAttachment),url=attachment.startsWith("http")?attachment:"https://www.bseindia.com"+(attachment.startsWith("/")?attachment:"/"+attachment);
+    try{
+      const response=await fetch(url,{headers:{...headers,Accept:"text/html,application/xhtml+xml,*/*"},cache:"no-store"});
+      if(!response.ok)continue;
+      const html=await response.text(),contexts=new Map<string,string[]>();
+      for(const ctx of html.matchAll(/<(?:[\w.-]+:)?context\b[^>]*\bid=["']([^"']+)["'][^>]*>([\s\S]*?)<\/(?:[\w.-]+:)?context>/gi)){
+        const members=[...ctx[2].matchAll(/<(?:[\w.-]+:)?(?:explicitMember|typedMember)\b[^>]*>([\s\S]*?)<\/(?:[\w.-]+:)?(?:explicitMember|typedMember)>/gi)].map(m=>localName(htmlText(m[1])).toLowerCase());
+        contexts.set(ctx[1],members);
+      }
+      const values:Record<string,number[]>={promoter:[],fii:[],dii:[],public:[]};
+      for(const fact of html.matchAll(/<(?:ix:)?nonFraction\b([^>]*?)>([\s\S]*?)<\/(?:ix:)?nonFraction>/gi)){
+        const attrs=fact[1],concept=(attrs.match(/\bname=["']([^"']+)["']/i)?.[1]??"").split(":").pop()?.toLowerCase()??"";
+        if(!concept.includes("shareholdingasapercentageoftotalnumberofshares"))continue;
+        const context=attrs.match(/\bcontextref=["']([^"']+)["']/i)?.[1],members=contexts.get(context??"")??[];
+        if(!members.length||members.length>3)continue;
+        let value=Number(htmlText(fact[2]).replace(/,/g,"").trim());
+        const scale=Number(attrs.match(/\bscale=["'](-?\d+)["']/i)?.[1]??"0");if(Number.isFinite(scale)&&scale!==0)value*=10**scale;
+        if(!Number.isFinite(value)||value<0||value>100)continue;
+        const joined=members.join(" ");
+        if(/promoterandpromotergroup/.test(joined))values.promoter.push(value);
+        else if(/foreigninstitutions|foreignportfolio|fpi|fii/.test(joined))values.fii.push(value);
+        else if(/domesticinstitutions|domesticinstitutional|dii/.test(joined))values.dii.push(value);
+        else if(/publicshareholding|publicshareholder/.test(joined))values.public.push(value);
+      }
+      const sum=(a:number[])=>a.length?Math.round(a.reduce((x,y)=>x+y,0)*10000)/10000:null;
+      const promoter=sum(values.promoter),fii=sum(values.fii),dii=sum(values.dii),publicValue=sum(values.public);
+      if(fii===null||dii===null)continue;
+      const asOnDate=String(filing.EndDate).slice(0,10),date=new Date(asOnDate+"T00:00:00Z");
+      quarters.push({quarter:date.toLocaleDateString("en-IN",{month:"short",year:"numeric",timeZone:"UTC"}),asOnDate,promoter,fii,dii,public:publicValue,promoterPledge:null,sourceUrl:url,sourceName:"BSE"});
+    }catch{continue;}
+  }
+  quarters.sort((a,b)=>b.asOnDate.localeCompare(a.asOnDate));
+  return {url:"https://www.bseindia.com/corporates/Sharehold_Searchnew.aspx",quarters:quarters.slice(0,4)};
+}
+
+
 async function loadShareholding(symbolInput: string, refresh = false): Promise<ShareholdingResult> {
   const symbol = normalizeSymbol(symbolInput);
   if (!symbol) throw new Error("A valid NSE symbol is required.");
