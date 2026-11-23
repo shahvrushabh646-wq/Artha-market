@@ -7,6 +7,7 @@ export type SuggestedHolding = {
   symbol: string;
   name: string;
   quarter: ShareholdingQuarter | null;
+  note: string | null;
 };
 export type SuggestedHoldingsResult = {
   holdings: SuggestedHolding[];
@@ -23,7 +24,7 @@ function istDateKey(): string {
     day: "2-digit",
   }).format(new Date());
 }
-let cached: { date: string; fingerprint: string; data: SuggestedHoldingsResult } | null = null;
+let cached: { date: string; fingerprint: string; expires: number; data: SuggestedHoldingsResult } | null = null;
 
 async function loadSuggestedHoldings(refresh = false): Promise<SuggestedHoldingsResult> {
   const today = istDateKey();
@@ -35,7 +36,8 @@ async function loadSuggestedHoldings(refresh = false): Promise<SuggestedHoldings
   }
   const shares = [...unique.values()];
   const fingerprint = shares.map((share) => String(share.symbol).trim().toUpperCase()).join("|");
-  if (!refresh && cached?.date === today && cached.fingerprint === fingerprint) return cached.data;
+  // Keep the universe synchronized with Suggestions by fingerprint; refresh filing data periodically as well.
+  if (!refresh && cached?.date === today && cached.fingerprint === fingerprint && cached.expires > Date.now()) return cached.data;
 
   const holdings: SuggestedHolding[] = [];
   let unavailable = 0;
@@ -51,11 +53,12 @@ async function loadSuggestedHoldings(refresh = false): Promise<SuggestedHoldings
         }
         const latest = result.quarters[0] ?? null;
         if (!latest || (latest.fii === null && latest.dii === null && latest.public === null && latest.promoter === null)) {
-          return { symbol: share.symbol, name: share.name || share.symbol, quarter: null };
+          return { symbol: share.symbol, name: share.name || share.symbol, quarter: null, note: result.note || "No supported latest-quarter shareholding values were returned by NSE or the fallback source." };
         }
-        return { symbol: share.symbol, name: share.name || share.symbol, quarter: latest };
-      } catch {
-        return { symbol: share.symbol, name: share.name || share.symbol, quarter: null };
+        return { symbol: share.symbol, name: share.name || share.symbol, quarter: latest, note: result.note };
+      } catch (error) {
+        const note = error instanceof Error ? error.message : "Shareholding source request failed.";
+        return { symbol: share.symbol, name: share.name || share.symbol, quarter: null, note };
       }
     }));
     for (const item of batch) {
@@ -69,7 +72,7 @@ async function loadSuggestedHoldings(refresh = false): Promise<SuggestedHoldings
     return bScore - aScore || a.name.localeCompare(b.name);
   });
   const data = { holdings, checked: shares.length, unavailable, totalSuggested: shares.length };
-  cached = { date: today, fingerprint, data };
+  cached = { date: today, fingerprint, expires: Date.now() + 25 * 60_000, data };
   return data;
 }
 
