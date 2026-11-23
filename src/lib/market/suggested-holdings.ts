@@ -42,7 +42,7 @@ async function loadSuggestedHoldings(refresh = false): Promise<SuggestedHoldings
   const holdings: SuggestedHolding[] = [];
   let unavailable = 0;
   // Include every current Suggestions stock; unavailable filings remain visible without fabricated percentages.
-  const batchSize = 6;
+  const batchSize = 2;
   for (let i = 0; i < shares.length; i += batchSize) {
     const batch = await Promise.all(shares.slice(i, i + batchSize).map(async (share) => {
       try {
