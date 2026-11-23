@@ -152,6 +152,7 @@ function HoldingsPage() {
                       {q ? `Source: ${q.sourceName} · Latest available quarterly disclosure` : "Source: NSE / Screener.in · no verifiable latest-quarter values"}
                       {q?.sourceUrl && <> · <a href={q.sourceUrl} target="_blank" rel="noreferrer" className="underline underline-offset-2">Verify source</a></>}
                     </div>
+                    {!q && share.note && <div className="mt-2 break-words text-[11px] text-muted">Diagnostic: {share.note}</div>}
                   </Panel>
                 );
               })}
