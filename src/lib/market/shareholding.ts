@@ -135,34 +135,40 @@ function screenerNumber(value: string): number | null {
   return Number.isFinite(number) && number >= 0 && number <= 100 ? number : null;
 }
 function parseScreener(html: string, symbol: string, url: string): ShareholdingQuarter[] {
-  // Screener publishes quarterly ownership in a table titled "Shareholding Pattern".
-  const tables = [...html.matchAll(/<table\b[^>]*>[\s\S]*?<\/table>/gi)];
-  const tableMatch = tables.find(match => {
-    const before = html.slice(Math.max(0, (match.index ?? 0) - 1800), match.index ?? 0);
-    return /Shareholding\s*Pattern/i.test(htmlText(match[0])) || /Shareholding\s*Pattern/i.test(htmlText(before));
-  });
-  const table = tableMatch?.[0];
-  if (!table) return [];
-  const rows = [...table.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)].map(m => {
-    const cells = [...m[1].matchAll(/<t[hd]\b[^>]*>([\s\S]*?)<\/t[hd]>/gi)].map(x => htmlText(x[1]));
+  // Parse the actual quarterly Shareholding Pattern table. Screener labels rows
+  // with a trailing "+" (e.g. "FIIs +"), which must be normalized before matching.
+  const tables = [...html.matchAll(/<table\\b[^>]*>[\\s\\S]*?<\\/table>/gi)];
+  const parseRows = (table: string) => [...table.matchAll(/<tr\\b[^>]*>([\\s\\S]*?)<\\/tr>/gi)].map(m => {
+    const cells = [...m[1].matchAll(/<t[hd]\\b[^>]*>([\\s\\S]*?)<\\/t[hd]>/gi)].map(x => htmlText(x[1]));
     return cells;
   }).filter(row => row.length > 1);
-  if (rows.length < 2) return [];
-  const header = rows.find(row => row.some(cell => /(?:Mar|Jun|Sep|Dec|Jan|Feb|Apr|May|Jul|Aug|Oct|Nov)\s*['’]?\d{2,4}/i.test(cell)));
+  const normalizeLabel = (value: string) => htmlText(value).replace(/\\s*\\+\\s*$/, "").replace(/\\s+/g, " ").trim().toLowerCase();
+  const periodPattern = /^(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\\s+['’]?\\d{4}$/i;
+  const candidates = tables.map(match => parseRows(match[0])).filter(rows => {
+    const labels = rows.map(row => normalizeLabel(row[0] || ""));
+    const hasPeriods = rows.some(row => row.slice(1).some(cell => periodPattern.test(normalizeLabel(cell))));
+    return hasPeriods && labels.some(label => /^promoters?$/.test(label)) &&
+      labels.some(label => /^fiis?$/.test(label)) &&
+      labels.some(label => /^diis?$/.test(label)) &&
+      labels.some(label => /^public$/.test(label));
+  });
+  const rows = candidates[0];
+  if (!rows || rows.length < 2) return [];
+  const header = rows.find(row => row.slice(1).some(cell => periodPattern.test(normalizeLabel(cell))));
   if (!header) return [];
   const dates = header.slice(1).map(value => {
-    const cleaned = value.replace(/[’']/g, " ").trim();
+    const cleaned = htmlText(value).replace(/[’']/g, " ").trim();
     const date = new Date(cleaned);
     return Number.isNaN(date.getTime()) ? null : {
       quarter: date.toLocaleDateString("en-IN", { month: "short", year: "numeric", timeZone: "UTC" }),
       asOnDate: date.toISOString().slice(0, 10),
     };
   });
-  const findRow = (patterns: RegExp[]) => rows.find(row => patterns.some(pattern => pattern.test(row[0] || "")));
-  const promoters = findRow([/^promoters?$/i, /^promoter\s*&\s*promoter group$/i]);
-  const fii = findRow([/^fiis?$/i, /^foreign institutional investors?$/i, /^foreign institutions?$/i]);
-  const dii = findRow([/^diis?$/i, /^domestic institutional investors?$/i, /^domestic institutions?$/i]);
-  const publicRow = findRow([/^public$/i, /^public shareholding$/i]);
+  const findRow = (patterns: RegExp[]) => rows.find(row => patterns.some(pattern => pattern.test(normalizeLabel(row[0] || ""))));
+  const promoters = findRow([/^promoters?$/, /^promoter & promoter group$/]);
+  const fii = findRow([/^fiis?$/, /^foreign institutional investors?$/, /^foreign institutions?$/]);
+  const dii = findRow([/^diis?$/, /^domestic institutional investors?$/, /^domestic institutions?$/]);
+  const publicRow = findRow([/^public$/, /^public shareholding$/]);
   const quarters: ShareholdingQuarter[] = [];
   for (let i = 0; i < dates.length; i++) {
     const date = dates[i];
@@ -177,6 +183,7 @@ function parseScreener(html: string, symbol: string, url: string): ShareholdingQ
   }
   return quarters.sort((a, b) => b.asOnDate.localeCompare(a.asOnDate)).slice(0, 4);
 }
+
 async function loadScreenerFallback(symbol: string): Promise<{ url: string; quarters: ShareholdingQuarter[] }> {
   const url = `https://www.screener.in/company/${encodeURIComponent(symbol)}/`;
   const response = await fetch(url, {
