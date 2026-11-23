@@ -11,14 +11,22 @@ type SortMode = "institutional" | "alphabetical";
 function percent(value: number | null | undefined) {
   return value === null || value === undefined || !Number.isFinite(value) ? "—" : `${value.toFixed(2)}%`;
 }
-function publicResidual(quarter: { public: number | null; fii: number | null; dii: number | null } | null) {
-  if (!quarter || quarter.public === null || quarter.fii === null || quarter.dii === null) return null;
+function publicResidual(quarter: { public: number | null; fii: number | null; dii: number | null; sourceName: "NSE" | "Screener.in" } | null) {
+  if (!quarter || quarter.public === null) return null;
+  // Screener reports FIIs/DIIs separately from its non-institutional Public row.
+  if (quarter.sourceName === "Screener.in") return quarter.public;
+  if (quarter.fii === null || quarter.dii === null) return null;
   const value = quarter.public - quarter.fii - quarter.dii;
   return value >= -0.05 ? Math.max(0, value) : null;
 }
-function othersOutsidePublic(quarter: { public: number | null } | null) {
-  if (!quarter || quarter.public === null || !Number.isFinite(quarter.public)) return null;
-  return Math.max(0, 100 - quarter.public);
+function othersOutsidePublic(quarter: { public: number | null; promoter: number | null; fii: number | null; dii: number | null; sourceName: "NSE" | "Screener.in" } | null) {
+  if (!quarter || quarter.public === null) return null;
+  // NSE PublicShareholdingMember is the aggregate public bucket; its complement is outside public.
+  if (quarter.sourceName === "NSE") return Math.max(0, 100 - quarter.public);
+  // Screener separates Promoters, FIIs, DIIs and non-institutional Public; only the remainder is Others.
+  if (quarter.promoter === null || quarter.fii === null || quarter.dii === null) return null;
+  const value = 100 - quarter.promoter - quarter.fii - quarter.dii - quarter.public;
+  return value >= -0.05 ? Math.max(0, value) : null;
 }
 
 function HoldingsPage() {
@@ -146,7 +154,7 @@ function HoldingsPage() {
           )}
         </>
       )}
-      <p className="mt-5 text-xs text-subtle">* Public is the reported public total minus FII and DII (when all three values are available); FII and DII are included in the public total. ** Others is the balance outside reported public. Percentages come from the latest source filing available to Artha, not live ownership. Missing or inconsistent figures are shown as —, never estimated. Sorted by FII + DII percentage; A–Z mode is scrollable.</p>
+      <p className="mt-5 text-xs text-subtle">* NSE Public is its aggregate public bucket less FII/DII; Screener.in Public is its separate non-institutional Public row. ** Others is the remaining source-reported balance. Categories are source-specific to avoid double counting. Latest disclosed quarterly data only; missing or inconsistent values show —, never estimated. Sorted by FII + DII percentage; A–Z mode is scrollable.</p>
     </div>
   );
 }
