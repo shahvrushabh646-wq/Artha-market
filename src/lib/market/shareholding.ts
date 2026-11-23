@@ -224,101 +224,78 @@ async function loadPublicSiteFallback(symbol: string): Promise<{url:string; name
 }
 
 
-async function loadBseFallback(symbol:string):Promise<{url:string;quarters:ShareholdingQuarter[]}> {
-  const headers={ "User-Agent":UA, Accept:"application/json, text/plain, */*", Referer:"https://www.bseindia.com/" };
-  const lookupUrl="https://api.bseindia.com/BseIndiaAPI/api/PeerSmartSearch/w?Type=SS&text="+encodeURIComponent(symbol);
-  const lookup=await fetch(lookupUrl,{headers,cache:"no-store"});
-  if(!lookup.ok)throw new Error("BSE company lookup failed");
-  const lookupText=await lookup.text();
-  const row=lookupText.split(/<[^>]+>/).find(x=>x.toUpperCase().includes(symbol.toUpperCase()))??lookupText;
-  const codeMatch=row.match(/(?:scripcode|scrip_code|scrip_cd|securityid|security_id)[^0-9]{0,24}(\d{6})/i)
-    ??lookupText.match(new RegExp("(\\d{6})[^<>]{0,180}"+symbol,"i"));
-  const code=codeMatch?.[1];
-  if(!code)throw new Error("BSE scrip code not resolved for "+symbol);
+type BseMaster = { symbolToIsin: Map<string,string>; isinToCode: Map<string,string> };
+let bseMasterCache: { expires:number; data:BseMaster } | null = null;
+function parseCsvLine(line:string):string[] {
+  const cells:string[]=[]; let value="",quoted=false;
+  for(let i=0;i<line.length;i++){
+    const ch=line[i];
+    if(ch==='"' && quoted && line[i+1]==='"'){value+='"';i++;}
+    else if(ch==='"')quoted=!quoted;
+    else if(ch===","&&!quoted){cells.push(value.trim());value="";}
+    else value+=ch;
+  }
+  cells.push(value.trim()); return cells;
+}
+async function loadBseMaster():Promise<BseMaster>{
+  if(bseMasterCache&&bseMasterCache.expires>Date.now())return bseMasterCache.data;
+  const headers={"User-Agent":UA,Accept:"text/csv,text/plain,*/*","Accept-Language":"en-IN,en;q=0.9"};
+  const [nseRes,bseRes]=await Promise.all([
+    fetch("https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv",{headers,cache:"no-store"}),
+    fetch("https://www.bseindia.com/downloads1/Equity.csv",{headers,cache:"no-store"})
+  ]);
+  if(!nseRes.ok||!bseRes.ok)throw new Error("Exchange security master unavailable");
+  const nseLines=(await nseRes.text()).split(/\r?\n/).filter(Boolean),bseLines=(await bseRes.text()).split(/\r?\n/).filter(Boolean);
+  const nseHeader=parseCsvLine(nseLines.shift()??"").map(x=>x.toUpperCase());
+  const bseHeader=parseCsvLine(bseLines.shift()??"").map(x=>x.toUpperCase());
+  const ni=nseHeader.indexOf("SYMBOL"),nis=nseHeader.findIndex(x=>x.includes("ISIN"));
+  const bc=bseHeader.findIndex(x=>x.includes("SECURITY CODE")||x==="SC_CODE"||x==="SCRIP CODE");
+  const bi=bseHeader.findIndex(x=>x.includes("ISIN"));
+  if(ni<0||nis<0||bc<0||bi<0)throw new Error("Exchange master columns changed");
+  const symbolToIsin=new Map<string,string>();
+  for(const line of nseLines){const row=parseCsvLine(line);const sym=(row[ni]??"").toUpperCase(),isin=(row[nis]??"").toUpperCase();if(sym&&/^[A-Z0-9]{12}$/.test(isin))symbolToIsin.set(sym,isin);}
+  const isinToCode=new Map<string,string>();
+  for(const line of bseLines){const row=parseCsvLine(line),code=(row[bc]??"").replace(/\D/g,""),isin=(row[bi]??"").toUpperCase();if(code&&isin)isinToCode.set(isin,code);}
+  const data={symbolToIsin,isinToCode};bseMasterCache={expires:Date.now()+24*60*60_000,data};return data;
+}
+async function loadBseFallback(symbol:string):Promise<{url:string;quarters:ShareholdingQuarter[]}>{
+  const master=await loadBseMaster(),isin=master.symbolToIsin.get(symbol),code=isin?master.isinToCode.get(isin):undefined;
+  if(!code)throw new Error("BSE code/ISIN mapping unavailable for "+symbol);
+  // BSE's endpoint requires Referer and User-Agent; do not send Origin.
+  const headers={"User-Agent":UA,Accept:"application/json,text/plain,*/*",Referer:"https://www.bseindia.com/"};
   const indexUrl="https://api.bseindia.com/BseIndiaAPI/api/Corp_Shareholding_ng/w?scripcode="+code+"&flag=0&indtype=";
   const indexRes=await fetch(indexUrl,{headers,cache:"no-store"});
-  if(!indexRes.ok)throw new Error("BSE shareholding index unavailable");
+  if(!indexRes.ok)throw new Error("BSE filing index HTTP "+indexRes.status);
   const index=await indexRes.json() as {Table?:Array<Record<string,unknown>>};
   const filings=(index.Table??[]).filter(x=>Number(x.IsXBRL)===1&&typeof x.XBRLAttachment==="string"&&/^\d{4}-\d{2}-\d{2}/.test(String(x.EndDate??""))).sort((a,b)=>String(b.EndDate).localeCompare(String(a.EndDate))).slice(0,4);
   const quarters:ShareholdingQuarter[]=[];
   for(const filing of filings){
-    const attachment=String(filing.XBRLAttachment);
-    const url=attachment.startsWith("http")?attachment:"https://www.bseindia.com"+(attachment.startsWith("/")?attachment:"/"+attachment);
+    const attachment=String(filing.XBRLAttachment),url=attachment.startsWith("http")?attachment:"https://www.bseindia.com"+(attachment.startsWith("/")?attachment:"/"+attachment);
     try{
-      const res=await fetch(url,{headers:{...headers,Accept:"text/html,application/xhtml+xml,*/*"},cache:"no-store"});
-      if(!res.ok)continue;
-      const html=await res.text(),contexts=new Map<string,string[]>();
-      for(const m of html.matchAll(/<(?:[\w.-]+:)?context\b[^>]*\bid=["']([^"']+)["'][^>]*>([\s\S]*?)<\/(?:[\w.-]+:)?context>/gi)){
-        const members=[...m[2].matchAll(/<(?:[\w.-]+:)?explicitMember\b[^>]*>([^<]+)<\/(?:[\w.-]+:)?explicitMember>/gi)].map(x=>localName(x[1].trim()).toLowerCase());
-        contexts.set(m[1],members);
+      const response=await fetch(url,{headers:{...headers,Accept:"text/html,application/xhtml+xml,*/*"},cache:"no-store"});
+      if(!response.ok)continue;
+      const html=await response.text(),contexts=new Map<string,string[]>();
+      for(const ctx of html.matchAll(/<(?:[\w.-]+:)?context\b[^>]*\bid=["']([^"']+)["'][^>]*>([\s\S]*?)<\/(?:[\w.-]+:)?context>/gi)){
+        const members=[...ctx[2].matchAll(/<(?:[\w.-]+:)?(?:explicitMember|typedMember)\b[^>]*>([\s\S]*?)<\/(?:[\w.-]+:)?(?:explicitMember|typedMember)>/gi)].map(m=>localName(htmlText(m[1])).toLowerCase());
+        contexts.set(ctx[1],members);
       }
-      const vals:Record<string,number[]>={promoter:[],fii:[],dii:[],public:[]};
+      const values:Record<string,number[]>={promoter:[],fii:[],dii:[],public:[]};
       for(const fact of html.matchAll(/<(?:ix:)?nonFraction\b([^>]*?)>([\s\S]*?)<\/(?:ix:)?nonFraction>/gi)){
-        const attrs=fact[1],name=(attrs.match(/\bname=["']([^"']+)["']/i)?.[1]??"").toLowerCase();
-        if(!name.includes("shareholdingasapercentageoftotalnumberofshares"))continue;
+        const attrs=fact[1],concept=(attrs.match(/\bname=["']([^"']+)["']/i)?.[1]??"").split(":").pop()?.toLowerCase()??"";
+        if(!concept.includes("shareholdingasapercentageoftotalnumberofshares"))continue;
         const context=attrs.match(/\bcontextref=["']([^"']+)["']/i)?.[1],members=contexts.get(context??"")??[];
-        if(!members.length||members.length>2)continue;
-        const value=Number(htmlText(fact[2]).replace(/,/g,"").trim());
+        if(!members.length||members.length>3)continue;
+        let value=Number(htmlText(fact[2]).replace(/,/g,"").trim());
+        const scale=Number(attrs.match(/\bscale=["'](-?\d+)["']/i)?.[1]??"0");if(Number.isFinite(scale)&&scale!==0)value*=10**scale;
         if(!Number.isFinite(value)||value<0||value>100)continue;
         const joined=members.join(" ");
-        if(/promoterandpromotergroup/.test(joined))vals.promoter.push(value);
-        else if(/foreign|fpi|fii/.test(joined))vals.fii.push(value);
-        else if(/domestic|dii/.test(joined))vals.dii.push(value);
-        else if(/publicshareholding|publicshareholdermember/.test(joined))vals.public.push(value);
+        if(/promoterandpromotergroup/.test(joined))values.promoter.push(value);
+        else if(/foreigninstitutions|foreignportfolio|fpi|fii/.test(joined))values.fii.push(value);
+        else if(/domesticinstitutions|domesticinstitutional|dii/.test(joined))values.dii.push(value);
+        else if(/publicshareholding|publicshareholder/.test(joined))values.public.push(value);
       }
-      const sum=(arr:number[])=>arr.length?Math.round(arr.reduce((a,b)=>a+b,0)*10000)/10000:null;
-      const promoter=sum(vals.promoter),fii=sum(vals.fii),dii=sum(vals.dii),publicValue=sum(vals.public);
-      if(fii===null||dii===null)continue;
-      const asOnDate=String(filing.EndDate).slice(0,10),date=new Date(asOnDate+"T00:00:00Z");
-      quarters.push({quarter:date.toLocaleDateString("en-IN",{month:"short",year:"numeric",timeZone:"UTC"}),asOnDate,promoter,fii,dii,public:publicValue,promoterPledge:null,sourceUrl:url,sourceName:"BSE"});
-    }catch{continue;}
-  }
-  quarters.sort((a,b)=>b.asOnDate.localeCompare(a.asOnDate));
-  return {url:"https://www.bseindia.com/corporates/Sharehold_Searchnew.aspx",quarters:quarters.slice(0,4)};
-}
-
-async function loadShareholding(symbolInput: string, refresh = false): Promise<ShareholdingResult> {");
-  const rowMatch=lookupText.match(new RegExp("[^<>]{0,240}"+escaped+"[^<>]{0,240}","i"));
-  const row=rowMatch?.[0]??lookupText;
-  const codeMatch=row.match(/(?:scripcode|scrip_code|scrip_cd|scripcode=|securityid|security_id)[^0-9]{0,24}(\\d{6})/i)
-    ??lookupText.match(new RegExp("(?:^|[^0-9])(\\d{6})(?=[^<>]{0,160}"+escaped+")","i"));
-  const code=codeMatch?.[1];
-  if(!code)throw new Error("BSE scrip code not resolved for "+symbol);
-  const indexUrl="https://api.bseindia.com/BseIndiaAPI/api/Corp_Shareholding_ng/w?scripcode="+code+"&flag=0&indtype=";
-  const indexRes=await fetch(indexUrl,{headers,cache:"no-store"});
-  if(!indexRes.ok)throw new Error("BSE shareholding index unavailable");
-  const index=await indexRes.json() as {Table?:Array<Record<string,unknown>>};
-  const filings=(index.Table??[]).filter(x=>Number(x.IsXBRL)===1&&typeof x.XBRLAttachment==="string"&&String(x.EndDate??"").slice(0,10).match(/^\\d{4}-\\d{2}-\\d{2}$/)).sort((a,b)=>String(b.EndDate).localeCompare(String(a.EndDate))).slice(0,4);
-  const quarters:ShareholdingQuarter[]=[];
-  for(const filing of filings){
-    const attachment=String(filing.XBRLAttachment);
-    const url=attachment.startsWith("http")?attachment:"https://www.bseindia.com"+(attachment.startsWith("/")?attachment:"/"+attachment);
-    try{
-      const res=await fetch(url,{headers:{...headers,Accept:"text/html,application/xhtml+xml,*/*"},cache:"no-store"});
-      if(!res.ok)continue;
-      const html=await res.text();
-      const contexts=new Map<string,string[]>();
-      for(const m of html.matchAll(/<(?:[\\w.-]+:)?context\\b[^>]*\\bid=["']([^"']+)["'][^>]*>([\\s\\S]*?)<\\/(?:[\\w.-]+:)?context>/gi)){
-        const members=[...m[2].matchAll(/<(?:[\\w.-]+:)?explicitMember\\b[^>]*>([^<]+)<\\/(?:[\\w.-]+:)?explicitMember>/gi)].map(x=>localName(x[1].trim()).toLowerCase());
-        contexts.set(m[1],members);
-      }
-      const vals:Record<string,number[]>={promoter:[],fii:[],dii:[],public:[]};
-      for(const fact of html.matchAll(/<(?:ix:)?nonFraction\\b([^>]*?)>([\\s\\S]*?)<\\/(?:ix:)?nonFraction>/gi)){
-        const attrs=fact[1], name=(attrs.match(/\\bname=["']([^"']+)["']/i)?.[1]??"").toLowerCase();
-        if(!name.includes("shareholdingasapercentageoftotalnumberofshares"))continue;
-        const context=attrs.match(/\\bcontextref=["']([^"']+)["']/i)?.[1];
-        const members=contexts.get(context??"")??[];
-        if(!members.length||members.length>2)continue;
-        const raw=htmlText(fact[2]).replace(/,/g,"").trim(), value=Number(raw);
-        if(!Number.isFinite(value)||value<0||value>100)continue;
-        const joined=members.join(" ");
-        if(/promoterandpromotergroup/.test(joined))vals.promoter.push(value);
-        else if(/foreign|fpi|fii/.test(joined))vals.fii.push(value);
-        else if(/domestic|dii/.test(joined))vals.dii.push(value);
-        else if(/publicshareholding|publicshareholdermember/.test(joined))vals.public.push(value);
-      }
-      const sum=(arr:number[])=>arr.length?Math.round(arr.reduce((a,b)=>a+b,0)*10000)/10000:null;
-      const promoter=sum(vals.promoter),fii=sum(vals.fii),dii=sum(vals.dii),publicValue=sum(vals.public);
+      const sum=(a:number[])=>a.length?Math.round(a.reduce((x,y)=>x+y,0)*10000)/10000:null;
+      const promoter=sum(values.promoter),fii=sum(values.fii),dii=sum(values.dii),publicValue=sum(values.public);
       if(fii===null||dii===null)continue;
       const asOnDate=String(filing.EndDate).slice(0,10),date=new Date(asOnDate+"T00:00:00Z");
       quarters.push({quarter:date.toLocaleDateString("en-IN",{month:"short",year:"numeric",timeZone:"UTC"}),asOnDate,promoter,fii,dii,public:publicValue,promoterPledge:null,sourceUrl:url,sourceName:"BSE"});
@@ -393,7 +370,20 @@ async function loadShareholding(symbolInput: string, refresh = false): Promise<S
       if (!base.quarters.length) base.note = "NSE and Screener.in shareholding data could not be retrieved. Try again later; no sample figures are shown.";
     }
   }
-  // BSE is a second exchange filing source. It is tried before aggregator-only pages.\n  if (!base.quarters[0] || base.quarters[0].fii===null || base.quarters[0].dii===null) {\n    try {\n      const bse=await loadBseFallback(symbol);\n      const latest=bse.quarters[0], current=base.quarters[0];\n      if(latest && (!current || latest.asOnDate>=current.asOnDate)){\n        base.source=latest.sourceUrl; base.sourceName="BSE"; base.quarters=bse.quarters;\n        base.note="Using BSE exchange-filed shareholding pattern. Quarter and separate FII/DII values were parsed from the filing; pledge is not available from this parser.";\n      }\n    } catch { /* continue to the other public sources */ }\n  }\n
+  // BSE exchange filing fallback, mapped by ISIN to avoid symbol/name collisions.
+  if (!base.quarters[0] || base.quarters[0].fii === null || base.quarters[0].dii === null) {
+    try {
+      const bse = await loadBseFallback(symbol);
+      const latest = bse.quarters[0], current = base.quarters[0];
+      if (latest && (!current || latest.asOnDate >= current.asOnDate)) {
+        base.source = latest.sourceUrl;
+        base.sourceName = "BSE";
+        base.quarters = bse.quarters;
+        base.note = "Using BSE exchange-filed shareholding pattern, mapped by company ISIN. Values are parsed from the dated filing; unavailable categories are not estimated.";
+      }
+    } catch { /* keep trying other providers */ }
+  }
+
   // If exchange/Screener sources did not yield complete institutional data,
   // try independent public finance sites. Only a parsed, dated quarter with both
   // FII and DII is eligible; never blend percentages from different providers.
