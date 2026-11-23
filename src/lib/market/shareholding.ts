@@ -10,12 +10,12 @@ export type ShareholdingQuarter = {
   public: number | null;
   promoterPledge: number | null;
   sourceUrl: string;
-  sourceName: "NSE" | "Screener.in";
+  sourceName: string;
 };
 export type ShareholdingResult = {
   symbol: string;
   source: string;
-  sourceName: "NSE" | "Screener.in";
+  sourceName: string;
   quarters: ShareholdingQuarter[];
   note: string | null;
 };
@@ -194,6 +194,35 @@ async function loadScreenerFallback(symbol: string): Promise<{ url: string; quar
   return { url, quarters: parseScreener(await response.text(), symbol, url) };
 }
 
+
+// Additional public-site fallbacks. They are best-effort HTML sources; every result
+// must contain parsed quarter headers plus separate FII/DII values before use.
+async function loadPublicSiteFallback(symbol: string): Promise<{url:string; name:string; quarters:ShareholdingQuarter[]}> {
+  const providers = [
+    {name:"Trendlyne", url:`https://trendlyne.com/equity/shareholding/${encodeURIComponent(symbol)}/`},
+    {name:"Tickertape", url:`https://www.tickertape.in/stocks/${encodeURIComponent(symbol.toLowerCase())}/shareholding`},
+    {name:"Moneycontrol", url:`https://www.moneycontrol.com/india/stockpricequote/${encodeURIComponent(symbol.toLowerCase())}`},
+    {name:"Tijori Finance", url:`https://www.tijorifinance.com/company/${encodeURIComponent(symbol.toLowerCase())}/`},
+  ];
+  for (const provider of providers) {
+    try {
+      const response = await fetch(provider.url, {
+        headers:{ "User-Agent":UA, Accept:"text/html,application/xhtml+xml,*/*", "Accept-Language":"en-IN,en;q=0.9" },
+        cache:"no-store",
+      });
+      if (!response.ok) continue;
+      const html=await response.text();
+      // Reuse the strict quarterly-table parser: do not scrape unrelated summary
+      // percentages or infer missing categories from totals.
+      const quarters=parseScreener(html,symbol,provider.url).map(q=>({...q,sourceName:provider.name}));
+      if (quarters.length && quarters[0].fii!==null && quarters[0].dii!==null) {
+        return {url:provider.url,name:provider.name,quarters};
+      }
+    } catch { /* continue to the next independent public source */ }
+  }
+  return {url:"",name:"",quarters:[]};
+}
+
 async function loadShareholding(symbolInput: string, refresh = false): Promise<ShareholdingResult> {
   const symbol = normalizeSymbol(symbolInput);
   if (!symbol) throw new Error("A valid NSE symbol is required.");
@@ -259,6 +288,21 @@ async function loadShareholding(symbolInput: string, refresh = false): Promise<S
       if (!base.quarters.length) base.note = "NSE and Screener.in shareholding data could not be retrieved. Try again later; no sample figures are shown.";
     }
   }
+  // If exchange/Screener sources did not yield complete institutional data,
+  // try independent public finance sites. Only a parsed, dated quarter with both
+  // FII and DII is eligible; never blend percentages from different providers.
+  if (!base.quarters[0] || base.quarters[0].fii===null || base.quarters[0].dii===null) {
+    const extra=await loadPublicSiteFallback(symbol);
+    const extraLatest=extra.quarters[0];
+    const current=base.quarters[0];
+    if (extraLatest && (!current || extraLatest.asOnDate>=current.asOnDate)) {
+      base.source=extra.url;
+      base.sourceName=extra.name;
+      base.quarters=extra.quarters;
+      base.note=`Using ${extra.name} public shareholding table because it had a complete quarter no older than the exchange/Screener result. Verify at the linked source; missing pledge remains unavailable.`;
+    }
+  }
+
   // Cache only verified quarters. Empty/rate-limited responses must be retried on the next request.
   if (base.quarters.length) cache.set(symbol, { expires: Date.now() + 30 * 60_000, data: base });
   else cache.delete(symbol);
