@@ -245,7 +245,7 @@ function parseScreener(html: string, symbol: string, url: string): ShareholdingQ
       promoterPledge: null, sourceUrl: url, sourceName: "Screener.in",
     });
   }
-  return quarters.sort((a, b) => b.asOnDate.localeCompare(a.asOnDate)).slice(0, 12);
+  return quarters.sort((a, b) => b.asOnDate.localeCompare(a.asOnDate)).slice(0, 16);
 }
 
 async function loadScreenerFallback(symbol: string): Promise<{ url: string; quarters: ShareholdingQuarter[] }> {
@@ -296,7 +296,7 @@ function parseProviderTable(html:string,url:string,sourceName:string):Shareholdi
       if(fv===null||dv===null)continue;
       out.push({...d,promoter:p,fii:fv,dii:dv,public:pv,promoterPledge:null,sourceUrl:url,sourceName});
     }
-    if(out.length)return out.sort((a,b)=>b.asOnDate.localeCompare(a.asOnDate)).slice(0,12);
+    if(out.length)return out.sort((a,b)=>b.asOnDate.localeCompare(a.asOnDate)).slice(0,16);
   }
   return [];
 }
