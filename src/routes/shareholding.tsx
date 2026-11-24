@@ -128,23 +128,29 @@ function ShareholdingPage() {
 
       <Section title="Promoter holding & pledge" hint="Independent year and quarter tabs · one pie: pledged promoter shares, unpledged promoter shares and other shareholders">
         {(() => {
-          const promoterActiveYear = promoterYear ?? latestDate.getUTCFullYear();
-          const promoterActiveQuarter = promoterQuarter ?? Math.floor(latestDate.getUTCMonth() / 3) + 1;
+          const latestPromoterPledgeQuarter = [...quarters].reverse().find(q => q.promoter != null && q.promoterPledge != null) ?? latest;
+          const promoterDefaultDate = latestPromoterPledgeQuarter ? new Date(latestPromoterPledgeQuarter.asOnDate + "T00:00:00Z") : latestDate;
+          const promoterActiveYear = promoterYear ?? promoterDefaultDate.getUTCFullYear();
+          const promoterActiveQuarter = promoterQuarter ?? Math.floor(promoterDefaultDate.getUTCMonth() / 3) + 1;
           const promoterQuarterData = quarters.find(q => {
             const date = new Date(q.asOnDate + "T00:00:00Z");
             return date.getUTCFullYear() === promoterActiveYear && Math.floor(date.getUTCMonth() / 3) + 1 === promoterActiveQuarter;
           }) ?? null;
           const holding = promoterQuarterData?.promoter;
           const pledgeRate = promoterQuarterData?.promoterPledge;
-          const verified = holding != null && pledgeRate != null && holding >= 0 && holding <= 100 && pledgeRate >= 0 && pledgeRate <= 100;
-          const pledged = verified ? holding * pledgeRate / 100 : 0;
-          const unpledged = verified ? holding - pledged : 0;
-          const other = verified ? 100 - holding : 0;
-          const slices = [
-            { name: "Promoter pledged", value: pledged, color: COLORS.Pledge },
-            { name: "Promoter unpledged", value: unpledged, color: COLORS.Promoter },
-            { name: "Other shareholders", value: other, color: COLORS.Other },
-          ].filter(x => x.value > 0);
+          const holdingVerified = holding != null && Number.isFinite(holding) && holding >= 0 && holding <= 100;
+          const pledgeVerified = holdingVerified && pledgeRate != null && Number.isFinite(pledgeRate) && pledgeRate >= 0 && pledgeRate <= 100;
+          const pledged = pledgeVerified ? holding! * pledgeRate! / 100 : null;
+          const unpledged = pledgeVerified ? holding! - (holding! * pledgeRate! / 100) : null;
+          const other = holdingVerified ? 100 - holding! : null;
+          const slices = pledgeVerified ? [
+            { name: "Promoter pledged", value: pledged as number, color: COLORS.Pledge },
+            { name: "Promoter unpledged", value: unpledged as number, color: COLORS.Promoter },
+            { name: "Other shareholders", value: other as number, color: COLORS.Other },
+          ].filter(x => x.value > 0) : holdingVerified ? [
+            { name: "Promoter holding", value: holding as number, color: COLORS.Promoter },
+            { name: "Other shareholders", value: other as number, color: COLORS.Other },
+          ].filter(x => x.value > 0) : [];
           return <Panel className="p-4 sm:p-6">
             <div className="mb-5 space-y-3">
               <div className="flex flex-wrap items-center gap-2"><span className="mr-1 text-xs font-medium uppercase tracking-wider text-subtle">Year</span>{yearTabs.map(year => <button key={year} type="button" onClick={() => setPromoterYear(year)} className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${promoterActiveYear===year?"bg-accent text-white shadow-sm":"bg-surface-2 text-muted hover:text-fg"}`}>{year}</button>)}</div>
@@ -154,10 +160,10 @@ function ShareholdingPage() {
               <Stat label="Promoter holding" value={moneyPercent(holding)} />
               <Stat label="Pledge (% of promoter holding)" value={pledgeRate != null ? moneyPercent(pledgeRate) : "Not verified"} />
             </div> : null}
-            {verified ? <>
+            {holdingVerified ? <>
               <div className="mx-auto h-[320px] w-full max-w-2xl"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={slices} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={66} outerRadius={132} paddingAngle={2} labelLine={false} label={InsidePieLabel} isAnimationActive={false}>{slices.map(item => <Cell key={item.name} fill={item.color} stroke="var(--surface)" strokeWidth={2}/>)}</Pie><Tooltip formatter={value => moneyPercent(Number(value))}/></PieChart></ResponsiveContainer></div>
               <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">{slices.map(item => <div key={item.name} className="flex items-center gap-2 rounded-xl border border-[var(--border)] bg-surface-2 px-3 py-3 text-xs text-muted"><span className="size-3 shrink-0 rounded-full" style={{backgroundColor:item.color}}/><span className="min-w-0"><span className="block">{item.name}</span><strong className="mt-1 block tabular text-base font-semibold text-fg">{moneyPercent(item.value)}</strong></span></div>)}</div>
-              <p className="mt-4 border-t border-[var(--border)] pt-3 text-xs leading-5 text-subtle">Filing as on {promoterQuarterData?.asOnDate}. Pledged shares = reported promoter holding × reported pledge rate (pledge as % of promoter holding). The three slices add up to 100% of company shareholding.</p>
+              <p className="mt-4 border-t border-[var(--border)] pt-3 text-xs leading-5 text-subtle">Filing as on {promoterQuarterData?.asOnDate}. {pledgeVerified ? "Pledged shares = reported promoter holding × reported pledge rate (pledge as % of promoter holding). The three slices add up to 100% of company shareholding." : "Pledge percentage is not verified for this quarter, so the pie shows promoter holding and other shareholders only. Select a quarter with verified pledge data to see pledged and unpledged promoter slices."}</p>
             </> : <Panel><p className="text-sm text-muted">{holding != null ? `Promoter holding ${moneyPercent(holding)} is verified for Q${promoterActiveQuarter} ${promoterActiveYear}, but the filing does not provide a separately verified promoter pledge rate for this period. The pledge pie is withheld rather than treating missing pledge as zero.` : `Promoter holding data is not verified for Q${promoterActiveQuarter} ${promoterActiveYear}. No estimated pie is shown.`}</p></Panel>}
           </Panel>;
         })()}
