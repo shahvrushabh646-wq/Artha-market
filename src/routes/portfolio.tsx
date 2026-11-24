@@ -83,9 +83,12 @@ function HoldingsPage() {
     const hydrate = async () => {
       const symbols = query.data!.holdings.map((item) => item.symbol);
       let checked = 0, unavailable = 0;
-      for (let start = 0; start < symbols.length; start += 200) {
+      // Small batches let the UI show progress while provider lookups are still running.
+      // A single 163-symbol request can exceed the server request timeout and leave
+      // the dashboard counters stuck at their initial zero values.
+      for (let start = 0; start < symbols.length; start += 8) {
         if (cancelled) return;
-        const batch = symbols.slice(start, start + 200);
+        const batch = symbols.slice(start, start + 8);
         try {
           const results = await fetchSuggestedHoldingsBatch({ data: { symbols: batch, refresh: true } });
           if (cancelled) return;
