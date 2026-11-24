@@ -658,13 +658,13 @@ async function loadBseFallback(symbol:string):Promise<{url:string;quarters:Share
       // Pledge may be reported as pledged shares, % of company shares, or
       // directly as % of promoter holding. Keep null when the denominator is absent.
       let promoterShares:number|null=null,pledgedShares:number|null=null,pledgeCompanyPct:number|null=null,pledgePromoterPct:number|null=null;
-      for(const fact of html.matchAll(/<(?:ix:)?nonFraction\\b([^>]*?)>([\\s\\S]*?)<\\/(?:ix:)?nonFraction>/gi)){
-        const attrs=fact[1],concept=(attrs.match(/\\bname=["']([^"']+)["']/i)?.[1]??"").split(":").pop()?.toLowerCase()??"";
-        const context=attrs.match(/\\bcontextref=["']([^"']+)["']/i)?.[1],members=contexts.get(context??"")??[];
+      for(const fact of html.matchAll(/<(?:ix:)?nonFraction\b([^>]*?)>([\s\S]*?)<\/(?:ix:)?nonFraction>/gi)){
+        const attrs=fact[1],concept=(attrs.match(/\bname=["']([^"']+)["']/i)?.[1]??"").split(":").pop()?.toLowerCase()??"";
+        const context=attrs.match(/\bcontextref=["']([^"']+)["']/i)?.[1],members=contexts.get(context??"")??[];
         const joined=members.join(" ");
         if(!/promoterandpromotergroup/.test(joined)||members.length>3)continue;
         let value=Number(htmlText(fact[2]).replace(/,/g,"").trim());
-        const scale=Number(attrs.match(/\\bscale=["'](-?\\d+)["']/i)?.[1]??"0");
+        const scale=Number(attrs.match(/\bscale=["'](-?\d+)["']/i)?.[1]??"0");
         if(!Number.isFinite(value))continue;if(Number.isFinite(scale)&&scale!==0)value*=10**scale;
         if(value<0)continue;
         if(/pledged|encumbered/.test(concept)){
