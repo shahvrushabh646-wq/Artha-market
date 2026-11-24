@@ -245,7 +245,7 @@ function parseScreener(html: string, symbol: string, url: string): ShareholdingQ
       promoterPledge: null, sourceUrl: url, sourceName: "Screener.in",
     });
   }
-  return quarters.sort((a, b) => b.asOnDate.localeCompare(a.asOnDate)).slice(0, 4);
+  return quarters.sort((a, b) => b.asOnDate.localeCompare(a.asOnDate)).slice(0, 12);
 }
 
 async function loadScreenerFallback(symbol: string): Promise<{ url: string; quarters: ShareholdingQuarter[] }> {
@@ -296,7 +296,7 @@ function parseProviderTable(html:string,url:string,sourceName:string):Shareholdi
       if(fv===null||dv===null)continue;
       out.push({...d,promoter:p,fii:fv,dii:dv,public:pv,promoterPledge:null,sourceUrl:url,sourceName});
     }
-    if(out.length)return out.sort((a,b)=>b.asOnDate.localeCompare(a.asOnDate)).slice(0,4);
+    if(out.length)return out.sort((a,b)=>b.asOnDate.localeCompare(a.asOnDate)).slice(0,12);
   }
   return [];
 }
@@ -400,7 +400,7 @@ async function loadBseFallback(symbol:string):Promise<{url:string;quarters:Share
   const indexRes=await fetch(indexUrl,{headers,cache:"no-store"});
   if(!indexRes.ok)throw new Error("BSE filing index HTTP "+indexRes.status);
   const index=await indexRes.json() as {Table?:Array<Record<string,unknown>>};
-  const filings=(index.Table??[]).filter(x=>Number(x.IsXBRL)===1&&typeof x.XBRLAttachment==="string"&&/^\d{4}-\d{2}-\d{2}/.test(String(x.EndDate??""))).sort((a,b)=>String(b.EndDate).localeCompare(String(a.EndDate))).slice(0,4);
+  const filings=(index.Table??[]).filter(x=>Number(x.IsXBRL)===1&&typeof x.XBRLAttachment==="string"&&/^\d{4}-\d{2}-\d{2}/.test(String(x.EndDate??""))).sort((a,b)=>String(b.EndDate).localeCompare(String(a.EndDate))).slice(0,12);
   const quarters:ShareholdingQuarter[]=[];
   for(const filing of filings){
     const attachment=String(filing.XBRLAttachment),url=attachment.startsWith("http")?attachment:"https://www.bseindia.com"+(attachment.startsWith("/")?attachment:"/"+attachment);
@@ -487,8 +487,12 @@ async function loadShareholding(symbolInput: string, refresh = false): Promise<S
   try {
     const quarter = (await loadNseHistorySnapshot(refresh)).get(symbol);
     if (quarter) {
-      const data: ShareholdingResult = { symbol, source: quarter.sourceUrl, sourceName: quarter.sourceName, quarters: [quarter], note: "Latest available quarterly values parsed from NSE XBRL filings in a public historical dataset. Quarter date is shown per company; a newer filing may not yet be indexed." };
-      cache.set(symbol, { expires: Date.now() + 6 * 60 * 60_000, data });
+      // The signals CSV is a latest-period snapshot. On company drill-down,
+      // enrich it with dated historical quarters from independent public filing sources.
+      const supplemental = await loadSupplementalShareholding(symbol);
+      const quarters = mergeSameQuarterSources(symbol, [quarter, ...supplemental]);
+      const data: ShareholdingResult = { symbol, source: quarter.sourceUrl, sourceName: quarter.sourceName, quarters, note: "Latest NSE historical snapshot enriched with dated quarterly filings from public exchange/provider sources. Each quarter is kept by its exact as-on date; missing history is not interpolated." };
+      cache.set(symbol, { expires: Date.now() + 30 * 60_000, data });
       return data;
     }
   } catch { /* use live exchange/provider fallback below */ }
