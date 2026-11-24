@@ -23,7 +23,7 @@ function othersOutsidePublic(quarter: { public: number | null; promoter: number 
   if (!quarter || quarter.public === null || quarter.promoter === null) return null;
   // On NSE, Public is the aggregate non-promoter block. "Others" is the remaining
   // government/other bucket after promoter and aggregate public are accounted for.
-  if (quarter.sourceName === "NSE") {
+  if (quarter.sourceName === "NSE" || quarter.sourceName === "NSE XBRL historical dataset") {
     const value = 100 - quarter.promoter - quarter.public;
     return value >= -0.05 ? Math.max(0, value) : null;
   }
