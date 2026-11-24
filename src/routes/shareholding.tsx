@@ -134,7 +134,7 @@ function ShareholdingPage() {
 
       <Section title="Promoter holding & pledge" hint="Independent year and quarter tabs · pledge split within promoter holding only">
         {(() => {
-          const latestPromoterPledgeQuarter = [...quarters].reverse().find(q => q.promoter != null && q.promoterPledge != null) ?? latest;
+          const latestPromoterPledgeQuarter = quarters.find(q => q.promoter != null && q.promoterPledge != null) ?? latest;
           const promoterDefaultDate = latestPromoterPledgeQuarter ? new Date(latestPromoterPledgeQuarter.asOnDate + "T00:00:00Z") : latestDate;
           const promoterActiveYear = promoterYear ?? promoterDefaultDate.getUTCFullYear();
           const promoterActiveQuarter = promoterQuarter ?? Math.floor(promoterDefaultDate.getUTCMonth() / 3) + 1;
