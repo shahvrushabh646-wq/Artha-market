@@ -26,7 +26,7 @@ const NSE_HISTORY_CSV = "https://raw.githubusercontent.com/yurukatsu/nse-histori
 let nseHistoryCache: { expires: number; data: Map<string, ShareholdingQuarter> } | null = null;
 let nseHistoryLoadPromise: Promise<Map<string, ShareholdingQuarter>> | null = null;
 
-async function loadNseHistorySnapshot(): Promise<Map<string, ShareholdingQuarter>> {
+async function loadNseHistorySnapshotFresh(): Promise<Map<string, ShareholdingQuarter>> {
   if (nseHistoryCache && nseHistoryCache.expires > Date.now()) return nseHistoryCache.data;
   const response = await fetch(NSE_HISTORY_CSV, { headers: { "User-Agent": UA, Accept: "text/csv,text/plain,*/*" }, cache: "no-store" });
   if (!response.ok) throw new Error(`NSE XBRL history dataset HTTP ${response.status}`);
