@@ -38,6 +38,7 @@ function HoldingsPage() {
   const queryClient = useQueryClient();
   const [sortMode, setSortMode] = useState<SortMode>("institutional");
   const [search, setSearch] = useState("");
+  const [hydrateKey, setHydrateKey] = useState(0);
   const processedRef = useRef(false);
   const today = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Kolkata",
@@ -82,7 +83,7 @@ function HoldingsPage() {
     };
     void hydrate();
     return () => { cancelled = true; };
-  }, [query.data?.totalSuggested, query.data?.holdings.length]);
+  }, [query.data?.totalSuggested, query.data?.holdings.length, hydrateKey]);
   const rows = useMemo(() => {
     const needle = search.trim().toLowerCase();
     const list = (data?.holdings ?? []).filter((share) =>
@@ -96,11 +97,14 @@ function HoldingsPage() {
     });
   }, [data?.holdings, search, sortMode]);
 
-  const refresh = () => void queryClient.fetchQuery({
-    queryKey,
-    queryFn: () => fetchSuggestedHoldings({ data: { refresh: true } }),
-    staleTime: 0,
-  });
+  const refresh = () => {
+    processedRef.current = false;
+    void queryClient.fetchQuery({
+      queryKey,
+      queryFn: () => fetchSuggestedHoldings({ data: { refresh: true } }),
+      staleTime: 0,
+    }).then(() => setHydrateKey((v) => v + 1));
+  };
 
   return (
     <div className="mx-auto max-w-5xl pb-10">
