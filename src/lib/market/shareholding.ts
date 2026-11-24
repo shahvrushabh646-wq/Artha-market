@@ -29,7 +29,7 @@ async function loadNseHistorySnapshot(): Promise<Map<string, ShareholdingQuarter
   if (nseHistoryCache && nseHistoryCache.expires > Date.now()) return nseHistoryCache.data;
   const response = await fetch(NSE_HISTORY_CSV, { headers: { "User-Agent": UA, Accept: "text/csv,text/plain,*/*" }, cache: "no-store" });
   if (!response.ok) throw new Error(`NSE XBRL history dataset HTTP ${response.status}`);
-  const lines = (await response.text()).split(/\\r?\\n/).filter(Boolean);
+  const lines = (await response.text()).split(/\r?\n/).filter(Boolean);
   const header = (lines.shift() ?? "").split(",");
   const index = (name: string) => header.indexOf(name);
   const ix = { symbol: index("ticker"), period: index("latest_period"), promoter: index("latest_promoter"), fii: index("latest_fii"), dii: index("latest_dii"), public: index("latest_public"), pledge: index("latest_pledge") };
@@ -38,7 +38,7 @@ async function loadNseHistorySnapshot(): Promise<Map<string, ShareholdingQuarter
   for (const line of lines) {
     const row = line.split(",");
     const symbol = normalizeSymbol(row[ix.symbol] ?? ""), period = row[ix.period] ?? "";
-    if (!symbol || !/^\\d{4}-\\d{2}$/.test(period)) continue;
+    if (!symbol || !/^\d{4}-\d{2}$/.test(period)) continue;
     const [year, month] = period.split("-").map(Number);
     const date = new Date(Date.UTC(year, month, 0)), asOnDate = date.toISOString().slice(0, 10);
     const quarter = date.toLocaleDateString("en-IN", { month: "short", year: "numeric", timeZone: "UTC" });
