@@ -206,16 +206,16 @@ function parseXbrl(xml: string): Omit<ShareholdingQuarter, "quarter" | "asOnDate
   // Read pledge facts across standard XBRL and inline-XBRL filings. NSE uses
   // multiple concept names and may encode facts as ix:nonFraction elements.
   let pledgePctOfCompany: number | null = null;
-  const pledgeFacts = /<(?:[\\w.-]+:)?([\\w.-]+)\\b([^>]*)>([\\d.,-]+)<\\/(?:[\\w.-]+:)?\\1\\s*>/gi;
+  const pledgeFacts = /<(?:[\w.-]+:)?([\w.-]+)\b([^>]*)>([\d.,-]+)<\/(?:[\w.-]+:)?\1\s*>/gi;
   for (const fact of xml.matchAll(pledgeFacts)) {
     const concept = (fact[2].match(/\bname=["']([^"']+)["']/i)?.[1] ?? fact[1]).split(":").pop() ?? fact[1];
     if (!/(?:pledged|encumbered)/i.test(concept) || !/(?:percentage|percent|totalnumberofshares)/i.test(concept)) continue;
     const attrs = fact[2];
-    const contextRef = attrs.match(/\\bcontextRef=["']([^"']+)["']/i)?.[1];
+    const contextRef = attrs.match(/\bcontextRef=["']([^"']+)["']/i)?.[1];
     const members = contexts.get(contextRef ?? "") ?? [];
     if (!members.includes("ShareholdingOfPromoterAndPromoterGroupMember") || members.length > 2) continue;
     let value = Number(fact[3].replace(/,/g, ""));
-    const scale = Number(attrs.match(/\\bscale=["'](-?\\d+)["']/i)?.[1] ?? "0");
+    const scale = Number(attrs.match(/\bscale=["'](-?\d+)["']/i)?.[1] ?? "0");
     if (!Number.isFinite(value)) continue;
     if (Number.isFinite(scale) && scale !== 0) value *= 10 ** scale;
     if (value >= 0 && value <= 100) { pledgePctOfCompany = value; break; }
@@ -225,11 +225,11 @@ function parseXbrl(xml: string): Omit<ShareholdingQuarter, "quarter" | "asOnDate
   // pledge % of promoter holding directly. This is the requested denominator.
   let promoterShares: number | null = null;
   let pledgedShares: number | null = null;
-  const shareFacts = /<(?:[\\w.-]+:)?([\\w.-]+)\\b([^>]*)>([\\d.,-]+)<\\/(?:[\\w.-]+:)?\\1\\s*>/gi;
+  const shareFacts = /<(?:[\w.-]+:)?([\w.-]+)\b([^>]*)>([\d.,-]+)<\/(?:[\w.-]+:)?\1\s*>/gi;
   for (const fact of xml.matchAll(shareFacts)) {
     const concept = (fact[2].match(/\bname=["']([^"']+)["']/i)?.[1] ?? fact[1]).split(":").pop() ?? fact[1];
     const attrs = fact[2];
-    const contextRef = attrs.match(/\\bcontextRef=["']([^"']+)["']/i)?.[1];
+    const contextRef = attrs.match(/\bcontextRef=["']([^"']+)["']/i)?.[1];
     const members = contexts.get(contextRef ?? "") ?? [];
     if (!members.includes("ShareholdingOfPromoterAndPromoterGroupMember") || members.length > 2) continue;
     const raw = Number(fact[3].replace(/,/g, ""));
