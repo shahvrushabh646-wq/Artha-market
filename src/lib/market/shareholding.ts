@@ -24,6 +24,60 @@ export type ShareholdingResult = {
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/138 Safari/537.36";
 const cache = new Map<string, { expires: number; data: ShareholdingResult }>();
 const NSE_HISTORY_CSV = "https://raw.githubusercontent.com/yurukatsu/nse-historical-membership/main/shareholding_history/data/parsed/_signals.csv";
+const NSE_FLAT_HISTORY_CSV = "https://raw.githubusercontent.com/aditya-jha/nse-historical-membership/main/shareholding_history/data/parsed/_flat.csv";
+let nseFlatHistoryCache: { expires: number; data: Map<string, ShareholdingQuarter[]> } | null = null;
+let nseFlatHistoryPromise: Promise<Map<string, ShareholdingQuarter[]>> | null = null;
+
+function parseNseFlatHistory(csv: string): Map<string, ShareholdingQuarter[]> {
+  const lines = csv.replace(/\r/g, "").split("\n").filter(Boolean);
+  const headers = parseCsvLine(lines.shift() ?? "").map(value => value.trim().toLowerCase());
+  const idx = (name: string) => headers.indexOf(name);
+  const tickerIdx = idx("ticker"), periodIdx = idx("period"), promoterIdx = idx("promoter_pct");
+  const fiiIdx = idx("fii_pct"), diiIdx = idx("dii_pct"), publicIdx = idx("public_pct");
+  if ([tickerIdx, periodIdx, promoterIdx, fiiIdx, diiIdx, publicIdx].some(i => i < 0)) {
+    throw new Error("Historical shareholding CSV columns changed");
+  }
+  const bySymbol = new Map<string, ShareholdingQuarter[]>();
+  for (const line of lines) {
+    const cells = parseCsvLine(line), symbol = normalizeSymbol(cells[tickerIdx] ?? "");
+    const period = cells[periodIdx] ?? "";
+    if (!symbol || !/^\d{4}-\d{2}$/.test(period)) continue;
+    const [year, month] = period.split("-").map(Number);
+    if (month < 1 || month > 12) continue;
+    const date = new Date(Date.UTC(year, month, 0)), asOnDate = date.toISOString().slice(0, 10);
+    const val = (column: number) => safeNumber(cells[column] ?? null);
+    const promoter = val(promoterIdx), fii = val(fiiIdx), dii = val(dii), publicValue = val(publicIdx);
+    if (promoter === null && fii === null && dii === null && publicValue === null) continue;
+    const quarter: ShareholdingQuarter = {
+      quarter: date.toLocaleDateString("en-IN", { month: "short", year: "numeric", timeZone: "UTC" }),
+      asOnDate, promoter, fii, dii, public: publicValue, promoterPledge: null,
+      sourceUrl: NSE_FLAT_HISTORY_CSV, sourceName: "NSE historical XBRL dataset",
+    };
+    const rows = bySymbol.get(symbol) ?? [];
+    rows.push(quarter);
+    bySymbol.set(symbol, rows);
+  }
+  for (const rows of bySymbol.values()) rows.sort((a, b) => b.asOnDate.localeCompare(a.asOnDate));
+  return bySymbol;
+}
+
+async function loadNseFlatHistory(symbol: string): Promise<ShareholdingQuarter[]> {
+  if (nseFlatHistoryCache && nseFlatHistoryCache.expires > Date.now()) return nseFlatHistoryCache.data.get(symbol) ?? [];
+  if (nseFlatHistoryPromise) return (await nseFlatHistoryPromise).get(symbol) ?? [];
+  const load = (async () => {
+    const response = await fetch(NSE_FLAT_HISTORY_CSV, {
+      headers: { "User-Agent": UA, Accept: "text/csv,text/plain,*/*" }, cache: "no-store",
+    });
+    if (!response.ok) throw new Error("NSE parsed historical shareholding CSV unavailable");
+    const parsed = parseNseFlatHistory(await response.text());
+    nseFlatHistoryCache = { expires: Date.now() + 6 * 60 * 60_000, data: parsed };
+    return parsed;
+  })();
+  nseFlatHistoryPromise = load;
+  try { return (await load).get(symbol) ?? []; }
+  finally { if (nseFlatHistoryPromise === load) nseFlatHistoryPromise = null; }
+}
+
 let nseHistoryCache: { expires: number; data: Map<string, ShareholdingQuarter> } | null = null;
 let nseHistoryLoadPromise: Promise<Map<string, ShareholdingQuarter>> | null = null;
 
@@ -513,8 +567,14 @@ async function loadShareholding(symbolInput: string, refresh = false): Promise<S
     if (quarter) {
       // The signals CSV is a latest-period snapshot. On company drill-down,
       // enrich it with dated historical quarters from independent public filing sources.
-      const supplemental = await loadSupplementalShareholding(symbol);
-      const quarters = mergeSameQuarterSources(symbol, [quarter, ...supplemental]);
+      const [flatHistory, supplemental] = await Promise.all([
+        loadNseFlatHistory(symbol).catch(() => []),
+        loadSupplementalShareholding(symbol),
+      ]);
+      // The full parsed NSE XBRL table contains dated historical promoter values;
+      // the signals CSV is only a latest-quarter snapshot. Preserve the full history
+      // and merge exact period dates only. Pledge stays null unless separately reported.
+      const quarters = mergeSameQuarterSources(symbol, [quarter, ...flatHistory, ...supplemental]);
       const data: ShareholdingResult = { symbol, source: quarter.sourceUrl, sourceName: quarter.sourceName, quarters, note: "Latest NSE historical snapshot enriched with dated quarterly filings from public exchange/provider sources. Each quarter is kept by its exact as-on date; missing history is not interpolated." };
       cache.set(symbol, { expires: Date.now() + 30 * 60_000, data });
       return data;
