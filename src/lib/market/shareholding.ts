@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import { NSE_SHAREHOLDING_DATA } from "./nse-shareholding-data";
 
 export type ShareholdingQuarter = {
   quarter: string;
@@ -22,43 +23,25 @@ export type ShareholdingResult = {
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/138 Safari/537.36";
 const cache = new Map<string, { expires: number; data: ShareholdingResult }>();
-const NSE_HISTORY_CSV = "https://raw.githubusercontent.com/yurukatsu/nse-historical-membership/main/shareholding_history/data/parsed/_signals.csv";
+const NSE_HISTORY_CSV = "https://github.com/yurukatsu/nse-historical-membership/blob/main/shareholding_history/data/parsed/_signals.csv";
 let nseHistoryCache: { expires: number; data: Map<string, ShareholdingQuarter> } | null = null;
-let nseHistoryLoadPromise: Promise<Map<string, ShareholdingQuarter>> | null = null;
-
-async function loadNseHistorySnapshotFresh(): Promise<Map<string, ShareholdingQuarter>> {
+function loadNseHistorySnapshot(): Map<string, ShareholdingQuarter> {
   if (nseHistoryCache && nseHistoryCache.expires > Date.now()) return nseHistoryCache.data;
-  const response = await fetch(NSE_HISTORY_CSV, { headers: { "User-Agent": UA, Accept: "text/csv,text/plain,*/*" }, cache: "no-store" });
-  if (!response.ok) throw new Error(`NSE XBRL history dataset HTTP ${response.status}`);
-  const lines = (await response.text()).split(/\r?\n/).filter(Boolean);
-  const header = (lines.shift() ?? "").split(",");
-  const index = (name: string) => header.indexOf(name);
-  const ix = { symbol: index("ticker"), period: index("latest_period"), promoter: index("latest_promoter"), fii: index("latest_fii"), dii: index("latest_dii"), public: index("latest_public"), pledge: index("latest_pledge") };
-  if (Object.values(ix).some(value => value < 0)) throw new Error("NSE XBRL history dataset schema changed");
   const parsed = new Map<string, ShareholdingQuarter>();
-  for (const line of lines) {
-    const row = line.split(",");
-    const symbol = normalizeSymbol(row[ix.symbol] ?? ""), period = row[ix.period] ?? "";
-    if (!symbol || !/^\d{4}-\d{2}$/.test(period)) continue;
+  for (const [rawSymbol, row] of Object.entries(NSE_SHAREHOLDING_DATA)) {
+    const symbol = normalizeSymbol(rawSymbol), period = row[0] ?? "";
+    if (!symbol || !/^\\d{4}-\\d{2}$/.test(period)) continue;
     const [year, month] = period.split("-").map(Number);
-    const date = new Date(Date.UTC(year, month, 0)), asOnDate = date.toISOString().slice(0, 10);
+    const date = new Date(Date.UTC(year, month, 0));
+    const asOnDate = date.toISOString().slice(0, 10);
     const quarter = date.toLocaleDateString("en-IN", { month: "short", year: "numeric", timeZone: "UTC" });
-    const value = (column: number) => safeNumber(row[column] ?? "");
-    const fii = value(ix.fii), dii = value(ix.dii);
+    const value = (raw: string | null) => safeNumber(raw);
+    const fii = value(row[2]), dii = value(row[3]);
     if (fii === null && dii === null) continue;
-    parsed.set(symbol, { quarter, asOnDate, promoter: value(ix.promoter), fii, dii, public: value(ix.public), promoterPledge: value(ix.pledge), sourceUrl: NSE_HISTORY_CSV, sourceName: "NSE XBRL historical dataset" });
+    parsed.set(symbol, { quarter, asOnDate, promoter: value(row[1]), fii, dii, public: value(row[4]), promoterPledge: value(row[5]), sourceUrl: NSE_HISTORY_CSV, sourceName: "NSE XBRL historical dataset" });
   }
-  if (!parsed.size) throw new Error("NSE XBRL history dataset contained no parsed shareholding rows");
   nseHistoryCache = { expires: Date.now() + 6 * 60 * 60_000, data: parsed };
   return parsed;
-}
-
-async function loadNseHistorySnapshot(): Promise<Map<string, ShareholdingQuarter>> {
-  if (nseHistoryCache && nseHistoryCache.expires > Date.now()) return nseHistoryCache.data;
-  if (!nseHistoryLoadPromise) {
-    nseHistoryLoadPromise = loadNseHistorySnapshotFresh().finally(() => { nseHistoryLoadPromise = null; });
-  }
-  return nseHistoryLoadPromise;
 }
 
 function normalizeSymbol(symbol: string) {
@@ -459,7 +442,7 @@ async function loadShareholding(symbolInput: string, refresh = false): Promise<S
   const symbol = normalizeSymbol(symbolInput);
   if (!symbol) throw new Error("A valid NSE symbol is required.");
   try {
-    const quarter = (await loadNseHistorySnapshot()).get(symbol);
+    const quarter = loadNseHistorySnapshot().get(symbol);
     if (quarter) {
       const data: ShareholdingResult = { symbol, source: quarter.sourceUrl, sourceName: quarter.sourceName, quarters: [quarter], note: "Latest available quarterly values parsed from NSE XBRL filings in a public historical dataset. Quarter date is shown per company; a newer filing may not yet be indexed." };
       cache.set(symbol, { expires: Date.now() + 6 * 60 * 60_000, data });
