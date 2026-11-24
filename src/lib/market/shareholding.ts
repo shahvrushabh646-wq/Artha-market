@@ -559,18 +559,20 @@ async function loadMoneycontrolFallback(symbol:string):Promise<{url:string;quart
   return {url:stockUrl,quarters:quarters.sort((a,b)=>b.asOnDate.localeCompare(a.asOnDate)).slice(0,40)};
 }
 
+async function loadTrendlyneFallback(symbol:string):Promise<{url:string;quarters:ShareholdingQuarter[]}>{
+  const url="https://trendlyne.com/equity/shareholding/"+encodeURIComponent(symbol)+"/";
+  const response=await fetch(url,{headers:{"User-Agent":UA,Accept:"text/html,application/xhtml+xml,*/*","Accept-Language":"en-IN,en;q=0.9"},cache:"no-store"});
+  if(!response.ok)throw new Error("Trendlyne shareholding page unavailable");
+  return {url,quarters:parseProviderTable(await response.text(),url,"Trendlyne")};
+}
 async function loadPublicSiteFallback(symbol:string):Promise<{url:string;name:string;quarters:ShareholdingQuarter[]}>{
   try{
     const mc=await loadMoneycontrolFallback(symbol);
     if(mc.quarters.length)return {url:mc.url,name:"Moneycontrol",quarters:mc.quarters};
   }catch{/* continue */}
-  const trendlyneUrl="https://trendlyne.com/equity/shareholding/"+encodeURIComponent(symbol)+"/";
   try{
-    const response=await fetch(trendlyneUrl,{headers:{"User-Agent":UA,Accept:"text/html,application/xhtml+xml,*/*","Accept-Language":"en-IN,en;q=0.9"},cache:"no-store"});
-    if(response.ok){
-      const quarters=parseProviderTable(await response.text(),trendlyneUrl,"Trendlyne");
-      if(quarters.length)return {url:trendlyneUrl,name:"Trendlyne",quarters};
-    }
+    const trendlyne=await loadTrendlyneFallback(symbol);
+    if(trendlyne.quarters.length)return {url:trendlyne.url,name:"Trendlyne",quarters:trendlyne.quarters};
   }catch{/* continue */}
   try{
     const tt=await loadTickertapeFallback(symbol);
@@ -694,6 +696,8 @@ async function loadSupplementalShareholding(symbol:string):Promise<ShareholdingQ
     loadNsePledgeSnapshot(symbol),
     loadScreenerFallback(symbol),
     loadBseFallback(symbol),
+    loadMoneycontrolFallback(symbol).then(value=>({...value,name:"Moneycontrol"})),
+    loadTrendlyneFallback(symbol).then(value=>({...value,name:"Trendlyne"})),
     loadPublicSiteFallback(symbol),
   ]);
   const quarters:ShareholdingQuarter[]=[];
