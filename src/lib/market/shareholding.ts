@@ -287,22 +287,35 @@ async function loadNsePledgeSnapshot(symbol: string): Promise<ShareholdingQuarte
     const d = new Date(rawDate);
     return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
   };
+  const quarters: ShareholdingQuarter[] = [];
   for (const sourceRow of records) {
     const row = normalized(sourceRow);
     const rowSymbol = normalizeSymbol(String(row.symbol ?? row.sym ?? ""));
     if (rowSymbol !== symbol) continue;
-    const pledge = number(row.percpromotershares ?? row.percpledgedpromotershares ?? row.pledgedpercentageofpromoterholding ?? row.promoterpledgepct);
+    const pledge = number(
+      row.percpromotershares ?? row.percpledgedpromotershares ??
+      row.pledgedpercentageofpromoterholding ?? row.promoterpledgepct ??
+      row.promoterpledgepercentage ?? row.promotersharespledgedpercentage ??
+      row.pledgedsharespercentofpromoterholding ?? row.promoterpledgedpct
+    );
     const promoter = number(row.percpromoterholding ?? row.promoterholdingpct);
     const period = parseNsePeriod(row.shpquarter ?? row.shp ?? row.periodend ?? row.asondt ?? row.asondatetime ?? row.disclosuredate);
     if (pledge === null || pledge < 0 || pledge > 100 || !period) continue;
     const date = new Date(period + "T00:00:00Z");
-    return [{
+    quarters.push({
       quarter: date.toLocaleDateString("en-IN", { month: "short", year: "numeric", timeZone: "UTC" }),
       asOnDate: period, promoter, fii: null, dii: null, public: null,
       promoterPledge: pledge, sourceUrl: page, sourceName: "NSE Pledged Data",
-    }];
+    });
   }
-  return [];
+  // The NSE pledged-data response can contain several dated rows. Keep the full
+  // history instead of returning from the first (often oldest) matching record.
+  const byDate = new Map<string, ShareholdingQuarter>();
+  for (const quarter of quarters.sort((a, b) => b.asOnDate.localeCompare(a.asOnDate))) {
+    const existing = byDate.get(quarter.asOnDate);
+    if (!existing || (existing.promoterPledge == null && quarter.promoterPledge != null)) byDate.set(quarter.asOnDate, quarter);
+  }
+  return [...byDate.values()];
 }
 
 async function loadNseFilingHistory(symbol: string): Promise<ShareholdingQuarter[]> {
@@ -312,7 +325,7 @@ async function loadNseFilingHistory(symbol: string): Promise<ShareholdingQuarter
   const filings = (raw as Array<Record<string, unknown>>)
     .filter(row => typeof row.xbrl === "string" && /^https?:\/\//i.test(row.xbrl as string))
     .sort((a,b) => sourceDate(String(b.date ?? "")).localeCompare(sourceDate(String(a.date ?? ""))))
-    .slice(0, 40);
+    .slice(0, 100);
   const parsed = await Promise.all(filings.map(async filing => {
     const url = String(filing.xbrl);
     try {
@@ -715,7 +728,7 @@ function mergeSameQuarterSources(symbol:string, sources:ShareholdingQuarter[]):S
       sourceName:[...used].sort((a,b)=>priority(a)-priority(b)).join(" + ")||source.sourceName,
     });
   }
-  return merged.sort((a,b)=>b.asOnDate.localeCompare(a.asOnDate)).slice(0, 40);
+  return merged.sort((a,b)=>b.asOnDate.localeCompare(a.asOnDate)).slice(0, 100);
 }
 async function loadSupplementalShareholding(symbol:string):Promise<ShareholdingQuarter[]> {
   const results=await Promise.allSettled([
