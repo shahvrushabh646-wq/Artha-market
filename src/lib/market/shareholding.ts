@@ -491,7 +491,68 @@ async function loadTickertapeFallback(symbol:string):Promise<{url:string;quarter
   if(!response.ok)throw new Error("Tickertape stock page unavailable");
   return {url,quarters:parseTickertapeHoldings(await response.text(),url)};
 }
+async function loadMoneycontrolFallback(symbol:string):Promise<{url:string;quarters:ShareholdingQuarter[]}>{
+  const searchUrl="https://www.moneycontrol.com/mccode/common/autosuggestion.aspx?query="+encodeURIComponent(symbol)+"&type=1&format=json";
+  const headers={"User-Agent":UA,Accept:"application/json,text/plain,*/*","Accept-Language":"en-IN,en;q=0.9"};
+  const search=await fetch(searchUrl,{headers,cache:"no-store"});
+  if(!search.ok)throw new Error("Moneycontrol stock search unavailable");
+  const payload=await search.json() as unknown;
+  const candidates:Record<string,unknown>[]=[];
+  const visit=(value:unknown)=>{
+    if(Array.isArray(value)){value.forEach(visit);return;}
+    if(!value||typeof value!=="object")return;
+    const row=value as Record<string,unknown>;
+    const text=Object.values(row).map(v=>String(v??"")).join(" ");
+    if(/moneycontrol\.com/i.test(text)&&/(?:stockpricequote|stocks|shareholding)/i.test(text))candidates.push(row);
+    Object.values(row).forEach(visit);
+  };
+  visit(payload);
+  const item=candidates.find(row=>{
+    const values=Object.values(row).map(v=>String(v??"").toUpperCase());
+    return values.some(v=>v===symbol||v.includes("("+symbol+")")||v.endsWith("/"+symbol));
+  })??candidates[0];
+  if(!item)throw new Error("Moneycontrol company page not resolved");
+  const rawUrl=Object.values(item).map(v=>String(v??"")).find(v=>/^https?:\/\/(?:www\.)?moneycontrol\.com\//i.test(v)&&/(?:stockpricequote|stocks|shareholding)/i.test(v));
+  if(!rawUrl)throw new Error("Moneycontrol URL not found in search result");
+  const stockUrl=rawUrl.split("?")[0].replace(/\/+$/,"")+"/";
+  const response=await fetch(stockUrl,{headers:{...headers,Accept:"text/html,application/xhtml+xml,*/*"},cache:"no-store"});
+  if(!response.ok)throw new Error("Moneycontrol stock page unavailable");
+  const html=await response.text();
+  const tables=[...html.matchAll(/<table\b[^>]*>[\s\S]*?<\/table>/gi)];
+  const rowsFor=(table:string)=>[...table.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)].map(m=>[...m[1].matchAll(/<t[hd]\b[^>]*>([\s\S]*?)<\/t[hd]>/gi)].map(x=>htmlText(x[1]))).filter(r=>r.length>1);
+  const norm=(v:string)=>htmlText(v).replace(/\s+/g," ").trim().toLowerCase();
+  const datesFor=(header:string[])=>header.map(parseProviderQuarter);
+  const quarters:ShareholdingQuarter[]=[];
+  for(const table of tables){
+    const rows=rowsFor(table[0]);if(!rows.length)continue;
+    const header=rows.find(row=>row.slice(1).some(cell=>!!parseProviderQuarter(cell)));
+    if(!header)continue;
+    const dates=datesFor(header.slice(1));
+    const pledgeRow=rows.find(row=>/pledge|pledged|encumbered/i.test(norm(row[0]??""))&&/(?:promoter|shareholding|stake|%|percent|pledge)/i.test(norm(row[0]??"")));
+    if(!pledgeRow)continue;
+    const promoterRow=rows.find(row=>/^(?:promoters?|promoter & promoter group|promoter and promoter group)$/.test(norm(row[0]??"")));
+    for(let i=0;i<dates.length;i++){
+      const date=dates[i];if(!date)continue;
+      const raw=screenerNumber(pledgeRow[i+1]??"");
+      if(raw===null)continue;
+      const label=norm(pledgeRow[0]??"");
+      let promoterPledge:number|null=raw;
+      if(/(?:% of total|of total shares|company shares|share capital)/i.test(label)){
+        const promoter=promoterRow?screenerNumber(promoterRow[i+1]??""):null;
+        promoterPledge=promoter&&promoter>0?Math.round(raw/promoter*10000)/100:null;
+      }
+      if(promoterPledge===null||promoterPledge<0||promoterPledge>100)continue;
+      quarters.push({...date,promoter:null,fii:null,dii:null,public:null,promoterPledge,sourceUrl:stockUrl,sourceName:"Moneycontrol"});
+    }
+  }
+  return {url:stockUrl,quarters:quarters.sort((a,b)=>b.asOnDate.localeCompare(a.asOnDate)).slice(0,40)};
+}
+
 async function loadPublicSiteFallback(symbol:string):Promise<{url:string;name:string;quarters:ShareholdingQuarter[]}>{
+  try{
+    const mc=await loadMoneycontrolFallback(symbol);
+    if(mc.quarters.length)return {url:mc.url,name:"Moneycontrol",quarters:mc.quarters};
+  }catch{/* continue */}
   const trendlyneUrl="https://trendlyne.com/equity/shareholding/"+encodeURIComponent(symbol)+"/";
   try{
     const response=await fetch(trendlyneUrl,{headers:{"User-Agent":UA,Accept:"text/html,application/xhtml+xml,*/*","Accept-Language":"en-IN,en;q=0.9"},cache:"no-store"});
