@@ -50,16 +50,18 @@ export const fetchSuggestedHoldingsBatch = createServerFn({ method: "GET" })
     for (let start = 0; start < data.symbols.length; start += 8) {
       const batch = data.symbols.slice(start, start + 8);
       const results = await Promise.all(batch.map(async (symbol) => {
-      try {
-        const result = await fetchShareholding({ data: { symbol, refresh: Boolean(data.refresh) } });
-        const latest = result.quarters[0] ?? null;
-        if (!latest || (latest.fii === null && latest.dii === null && latest.public === null && latest.promoter === null)) {
-          return { symbol, quarter: null, note: result.note || "No verified latest-quarter shareholding values returned." };
+        try {
+          const result = await fetchShareholding({ data: { symbol, refresh: Boolean(data.refresh) } });
+          const latest = result.quarters[0] ?? null;
+          if (!latest || (latest.fii === null && latest.dii === null && latest.public === null && latest.promoter === null)) {
+            return { symbol, quarter: null, note: result.note || "No verified latest-quarter shareholding values returned." };
+          }
+          return { symbol, quarter: latest, note: result.note };
+        } catch (error) {
+          return { symbol, quarter: null, note: error instanceof Error ? error.message : "Shareholding provider request failed." };
         }
-        return { symbol, quarter: latest, note: result.note };
-      } catch (error) {
-        return { symbol, quarter: null, note: error instanceof Error ? error.message : "Shareholding provider request failed." };
-      }
-    }));
+      }));
+      items.push(...results);
+    }
     return items;
   });
