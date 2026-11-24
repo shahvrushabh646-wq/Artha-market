@@ -178,6 +178,28 @@ function parseXbrl(xml: string): Omit<ShareholdingQuarter, "quarter" | "asOnDate
   return { promoter: values.promoter, fii: values.fii, dii: values.dii, public: values.public, promoterPledge };
 }
 
+async function loadNseFilingHistory(symbol: string): Promise<ShareholdingQuarter[]> {
+  const page = `https://www.nseindia.com/companies-listing/corporate-filings-shareholding-pattern?symbol=${encodeURIComponent(symbol)}&tabIndex=equity`;
+  const raw = await nseJson(`https://www.nseindia.com/api/corporate-share-holdings-master?index=equities&symbol=${encodeURIComponent(symbol)}`, page);
+  if (!Array.isArray(raw)) return [];
+  const filings = (raw as Array<Record<string, unknown>>)
+    .filter(row => typeof row.xbrl === "string" && /^https?:\/\//i.test(row.xbrl as string))
+    .sort((a,b) => sourceDate(String(b.date ?? "")).localeCompare(sourceDate(String(a.date ?? ""))))
+    .slice(0, 16);
+  const parsed = await Promise.all(filings.map(async filing => {
+    const url = String(filing.xbrl);
+    try {
+      const response = await fetch(url, { headers: { "User-Agent": UA, Accept: "application/xml,text/xml,*/*", Referer: page }, cache: "no-store" });
+      if (!response.ok) return null;
+      const values = parseXbrl(await response.text());
+      if (!values) return null;
+      const rawDate = String(filing.date ?? ""), asOnDate = sourceDate(rawDate) || rawDate;
+      return { ...values, quarter: parseDate(asOnDate), asOnDate, sourceUrl: url, sourceName: "NSE" } satisfies ShareholdingQuarter;
+    } catch { return null; }
+  }));
+  return parsed.filter((q): q is ShareholdingQuarter => q !== null);
+}
+
 function htmlText(value: string): string {
   return value
     .replace(/<script\b[\s\S]*?<\/script>/gi, " ")
@@ -468,6 +490,7 @@ function mergeSameQuarterSources(symbol:string, sources:ShareholdingQuarter[]):S
 }
 async function loadSupplementalShareholding(symbol:string):Promise<ShareholdingQuarter[]> {
   const results=await Promise.allSettled([
+    loadNseFilingHistory(symbol),
     loadScreenerFallback(symbol),
     loadBseFallback(symbol),
     loadPublicSiteFallback(symbol),
