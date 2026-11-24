@@ -1,8 +1,8 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ExternalLink, RefreshCw, Search } from "lucide-react";
-import { useMemo, useState } from "react";
-import { fetchSuggestedHoldings } from "@/lib/market/suggested-holdings";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { fetchSuggestedHoldings, fetchSuggestedHoldingsBatch } from "@/lib/market/suggested-holdings";
 import { Panel } from "@/components/widgets";
 
 export const Route = createFileRoute("/portfolio")({ component: HoldingsPage });
@@ -38,6 +38,7 @@ function HoldingsPage() {
   const queryClient = useQueryClient();
   const [sortMode, setSortMode] = useState<SortMode>("institutional");
   const [search, setSearch] = useState("");
+  const processedRef = useRef(false);
   const today = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Kolkata",
     year: "numeric",
@@ -55,6 +56,33 @@ function HoldingsPage() {
     retry: 1,
   });
   const data = query.data;
+  useEffect(() => {
+    if (!query.data || processedRef.current) return;
+    processedRef.current = true;
+    let cancelled = false;
+    const hydrate = async () => {
+      const symbols = query.data!.holdings.map((item) => item.symbol);
+      let checked = 0, unavailable = 0;
+      for (let start = 0; start < symbols.length; start += 6) {
+        if (cancelled) return;
+        const batch = symbols.slice(start, start + 6);
+        try {
+          const results = await fetchSuggestedHoldingsBatch({ data: { symbols: batch } });
+          if (cancelled) return;
+          checked += results.length; unavailable += results.filter((item) => !item.quarter).length;
+          queryClient.setQueryData(queryKey, (previous: typeof query.data) => previous ? {
+            ...previous, checked, unavailable,
+            holdings: previous.holdings.map((holding) => {
+              const result = results.find((item) => item.symbol.toUpperCase() === holding.symbol.toUpperCase());
+              return result ? { ...holding, quarter: result.quarter, note: result.note } : holding;
+            }),
+          } : previous);
+        } catch { checked += batch.length; unavailable += batch.length; }
+      }
+    };
+    void hydrate();
+    return () => { cancelled = true; };
+  }, [query.data?.totalSuggested, query.data?.holdings.length]);
   const rows = useMemo(() => {
     const needle = search.trim().toLowerCase();
     const list = (data?.holdings ?? []).filter((share) =>
