@@ -8,6 +8,25 @@ import { Panel } from "@/components/widgets";
 export const Route = createFileRoute("/portfolio")({ component: HoldingsPage });
 
 type SortMode = "institutional" | "alphabetical";
+const SUGGESTIONS_STORAGE_KEYS = ["artha:suggestions:v13", "artha:suggestions:v12", "artha:suggestions:v11", "artha:suggestions:v10"];
+function savedSuggestionFallback(): Array<{ symbol: string; name: string }> {
+  if (typeof window === "undefined") return [];
+  for (const key of SUGGESTIONS_STORAGE_KEYS) {
+    try {
+      const parsed = JSON.parse(window.localStorage.getItem(key) || "null");
+      if (!Array.isArray(parsed)) continue;
+      const rows = parsed.map((item: unknown) => {
+        if (!item || typeof item !== "object") return null;
+        const row = item as { symbol?: unknown; name?: unknown };
+        const symbol = typeof row.symbol === "string" ? row.symbol.trim().toUpperCase() : "";
+        if (!symbol) return null;
+        return { symbol, name: typeof row.name === "string" ? row.name : symbol };
+      }).filter((item): item is { symbol: string; name: string } => !!item);
+      if (rows.length) return rows;
+    } catch { /* Try the older Suggestions cache key. */ }
+  }
+  return [];
+}
 function percent(value: number | null | undefined) {
   return value === null || value === undefined || !Number.isFinite(value) ? "—" : `${value.toFixed(2)}%`;
 }
@@ -49,7 +68,7 @@ function HoldingsPage() {
   const queryKey = ["suggested-holdings-all-v3", today];
   const query = useQuery({
     queryKey,
-    queryFn: async () => { processedRef.current = false; return fetchSuggestedHoldings({ data: {} }); },
+    queryFn: async () => { processedRef.current = false; return fetchSuggestedHoldings({ data: { fallback: savedSuggestionFallback() } }); },
     staleTime: 5 * 60_000,
     gcTime: 30 * 60_000,
     refetchOnWindowFocus: true,
@@ -109,7 +128,7 @@ function HoldingsPage() {
     processedRef.current = false;
     void queryClient.fetchQuery({
       queryKey,
-      queryFn: () => fetchSuggestedHoldings({ data: { refresh: true } }),
+      queryFn: () => fetchSuggestedHoldings({ data: { refresh: true, fallback: savedSuggestionFallback() } }),
       staleTime: 0,
     }).then(() => setHydrateKey((v) => v + 1));
   };
