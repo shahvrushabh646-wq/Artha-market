@@ -5,7 +5,7 @@ import { AlertTriangle, ArrowLeft, ExternalLink, UsersRound } from "lucide-react
 import { Bar, BarChart, CartesianGrid, Cell, LabelList, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { fetchShareholding, type ShareholdingQuarter } from "@/lib/market/shareholding";
 import { displaySymbol } from "@/lib/market/config";
-import { Panel, Section, SkeletonBlock } from "@/components/widgets";
+import { Panel, Section, SkeletonBlock, Stat } from "@/components/widgets";
 
 type Search = { symbol: string };
 export const Route = createFileRoute("/shareholding")({
@@ -44,7 +44,7 @@ function ShareholdingPage() {
   const now = new Date();
   const [selectedYear, setSelectedYear] = useState(String(now.getFullYear()));
   const [selectedQuarter, setSelectedQuarter] = useState(`Q${Math.floor(now.getMonth() / 3) + 1}`);
-  const quarters = useMemo(() => [...(data?.quarters ?? [])].sort((a, b) => a.asOnDate.localeCompare(b.asOnDate)), [data?.quarters]);
+  const quarters = useMemo(() => { const byDate = new Map<string, ShareholdingQuarter>(); for (const q of [...(data?.quarters ?? [])].sort((a, b) => a.asOnDate.localeCompare(b.asOnDate))) byDate.set(q.asOnDate, q); return [...byDate.values()]; }, [data?.quarters]);
   const latest = quarters.at(-1) ?? null;
   const selectedQuarterData = quarters.find(q => {
     const date = new Date(q.asOnDate + "T00:00:00Z");
@@ -72,7 +72,7 @@ function ShareholdingPage() {
       detail: `FII ${moneyPercent(latest.fii)} · DII ${moneyPercent(latest.dii)} · Combined ${moneyPercent(combined)}. A stock qualifies when FII > 15%, DII > 15%, or FII + DII > 15%.`,
     };
   }, [latest]);
-  const barData = quarters.map(q => ({ quarter: quarterLabel(q), promoter: q.promoter, pledge: q.promoterPledge }));
+  const barData = quarters.slice(-4).map(q => ({ quarter: quarterLabel(q), promoter: q.promoter, pledge: q.promoterPledge }));
   type ShareholdingKey = "fii" | "dii" | "promoter" | "public" | "promoterPledge";
   const tableRows = [
     { label: "FII", key: "fii" as const },
@@ -87,7 +87,7 @@ function ShareholdingPage() {
     return a == null || b == null ? "—" : `${b - a > 0 ? "+" : ""}${(b - a).toFixed(2)} pp`;
   };
 
-  return <div className="space-y-5">
+  return <div className="space-y-8 pb-6">
     <div className="flex items-start gap-3">
       <a href="/suggestions" className="mt-1 flex size-9 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-muted" aria-label="Back to suggestions"><ArrowLeft className="size-4"/></a>
       <div className="min-w-0 flex-1"><p className="text-xs uppercase tracking-[0.2em] text-subtle">Artha · Suggestion Box</p><h1 className="mt-1 font-display text-2xl tracking-tight text-fg">Shareholding Analysis</h1><p className="mt-1 text-sm text-muted">{displaySymbol(symbol)} · quarterly exchange disclosures</p></div>
@@ -97,30 +97,30 @@ function ShareholdingPage() {
     {query.isLoading ? <div className="space-y-3"><SkeletonBlock className="h-64"/><SkeletonBlock className="h-56"/><SkeletonBlock className="h-52"/></div> : query.isError || !data ? <Panel><p className="text-sm text-muted">Shareholding data is temporarily unavailable. No estimated figures are displayed.</p></Panel> : <>
       <Panel className="p-4">
         <div className="flex flex-wrap items-center justify-between gap-2"><div><p className="text-xs uppercase tracking-wider text-subtle">15% FII / DII screening</p><h2 className="mt-1 text-lg font-semibold text-fg">{screening.label}</h2></div><span className={`rounded-full px-3 py-1 text-xs font-semibold ${screening.label === "Meets 15% Rule" ? "bg-up/10 text-up" : screening.label === "Insufficient Data" ? "bg-surface-2 text-muted" : "bg-down/10 text-down"}`}>{screening.label === "Meets 15% Rule" ? "Qualifies" : screening.label === "Insufficient Data" ? "Not verified" : "Does not qualify"}</span></div>
-        <p className="mt-2 text-sm text-muted">{screening.detail}</p>
+        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3"><Stat label="Foreign institutions · FII" value={latest ? moneyPercent(latest.fii) : "—"} /><Stat label="Domestic institutions · DII" value={latest ? moneyPercent(latest.dii) : "—"} /><Stat label="FII + DII combined" value={latest ? moneyPercent((latest.fii ?? 0) + (latest.dii ?? 0)) : "—"} /></div><p className="mt-4 text-sm leading-6 text-muted">{screening.detail}</p>
         {latest ? <p className="mt-2 text-xs text-subtle">Latest reported quarter: {latest.quarter} · as on {latest.asOnDate}</p> : null}
       </Panel>
 
       <Section title="Quarterly shareholding pattern" hint="Choose a year and quarter to view that dated filing">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div className="flex gap-2"><select aria-label="Shareholding quarter" value={selectedQuarter} onChange={event=>setSelectedQuarter(event.target.value)} className="rounded-lg bg-surface-2 px-3 py-2 text-sm text-fg">{["Q1","Q2","Q3","Q4"].map(q=><option key={q} value={q}>{q}</option>)}</select><select aria-label="Shareholding year" value={selectedYear} onChange={event=>setSelectedYear(event.target.value)} className="rounded-lg bg-surface-2 px-3 py-2 text-sm text-fg">{Array.from({length:4},(_,i)=>now.getFullYear()-3+i).map(y=><option key={y} value={String(y)}>{y}</option>)}</select></div><span className="text-xs text-muted">{selectedQuarter} {selectedYear}</span></div>
+        <Panel className="p-4 sm:p-5"><div className="mb-5 flex flex-wrap items-center justify-between gap-3"><div className="flex gap-2"><select aria-label="Shareholding quarter" value={selectedQuarter} onChange={event=>setSelectedQuarter(event.target.value)} className="rounded-lg bg-surface-2 px-3 py-2 text-sm text-fg">{["Q1","Q2","Q3","Q4"].map(q=><option key={q} value={q}>{q}</option>)}</select><select aria-label="Shareholding year" value={selectedYear} onChange={event=>setSelectedYear(event.target.value)} className="rounded-lg bg-surface-2 px-3 py-2 text-sm text-fg">{Array.from({length:4},(_,i)=>now.getFullYear()-3+i).map(y=><option key={y} value={String(y)}>{y}</option>)}</select></div><span className="text-xs text-muted">{selectedQuarter} {selectedYear}</span></div>
         {pieData.length ? <>
-          <div className="h-[290px] w-full">
+          <div className="mx-auto h-[320px] w-full max-w-2xl">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
-                <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={112} labelLine={false} label={InsidePieLabel} isAnimationActive={false}>
+                <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={128} labelLine={false} label={InsidePieLabel} isAnimationActive={false}>
                   {pieData.map(entry => <Cell key={entry.name} fill={entry.color}/>)}
                 </Pie>
                 <Tooltip formatter={(value) => moneyPercent(Number(value))}/>
               </PieChart>
             </ResponsiveContainer>
           </div>
-          <div className="flex flex-wrap justify-center gap-x-4 gap-y-2 text-xs text-muted">{pieData.map(entry => <span key={entry.name} className="inline-flex items-center gap-1.5"><span className="size-2.5 rounded-sm" style={{ backgroundColor: entry.color }}/>{entry.displayName}: {moneyPercent(entry.value)}</span>)}</div>
-          <p className="mt-3 text-xs text-subtle">As on {selectedQuarterData?.asOnDate}. * Public slice excludes FII and DII so the pie does not double-count them. Public (total) remains available in the comparison table. White labels appear inside segments where there is enough room.</p>
+          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">{pieData.map(entry => <span key={entry.name} className="flex items-center gap-2 rounded-lg bg-surface-2 px-3 py-2.5 text-xs text-muted"><span className="size-3 shrink-0 rounded-sm" style={{ backgroundColor: entry.color }}/><span className="min-w-0"><span className="block">{entry.displayName}</span><strong className="mt-0.5 block tabular text-sm text-fg">{moneyPercent(entry.value)}</strong></span>)}</div>
+          <p className="mt-4 border-t border-[var(--border)] pt-3 text-xs leading-5 text-subtle">Filing as on {selectedQuarterData?.asOnDate}. * Public slice excludes FII and DII to avoid double-counting; total public holding is shown in the comparison table.</p>
         </> : <Panel><p className="text-sm text-muted">No verified filing found for {selectedQuarter} {selectedYear}. Try another quarter. Historical figures are not estimated.</p></Panel>}
       </Section>
 
-      <Section title="Promoter holding & pledge" hint="Four reported quarters · Q1 oldest to Q4 latest">
-        {barData.length ? <div className="h-[300px] w-full">
+      <Section title="Promoter holding & pledge" hint="Latest four verified filings · oldest to newest">
+        {barData.length ? <Panel className="p-4 sm:p-5"><div className="h-[300px] w-full">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={barData} margin={{ top: 22, right: 8, left: -16, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" opacity={0.45}/>
@@ -139,17 +139,17 @@ function ShareholdingPage() {
         <p className="mt-2 text-xs text-subtle">Pledge is expressed as pledged shares divided by promoter-group shares. If the filing does not provide enough information to calculate it, the value is left blank.</p>
       </Section>
 
-      <Section title="Four-quarter comparison" hint="Change is latest minus oldest, in percentage points (pp)">
+      <Section title="Quarterly comparison" hint="Reported filings · change is latest minus oldest, in percentage points (pp)">
         {quarters.length ? <div className="overflow-x-auto rounded-xl shadow-[var(--shadow-border)]">
-          <table className="w-full min-w-[680px] border-collapse text-left text-xs">
-            <thead className="bg-surface-2 text-muted"><tr><th className="p-3 font-medium">Category</th>{quarters.map(q => <th key={q.asOnDate} className="p-3 font-medium">{quarterLabel(q)}</th>)}<th className="p-3 font-medium">Change</th></tr></thead>
-            <tbody>{tableRows.map(row => <tr key={row.key} className="border-t border-[var(--border)]"><th className="p-3 font-medium text-fg">{row.label}</th>{quarters.map(q => <td key={q.asOnDate} className="p-3 tabular text-fg">{moneyPercent(q[row.key])}</td>)}<td className="p-3 tabular text-fg">{delta(row.key)}</td></tr>)}</tbody>
+          <table className="w-full min-w-[860px] border-collapse text-left text-xs">
+            <thead className="bg-surface-2 text-muted"><tr><th className="sticky left-0 z-10 bg-surface-2 p-3 font-medium">Category</th>{quarters.map(q => <th key={q.asOnDate} className="p-3 font-medium">{quarterLabel(q)}</th>)}<th className="p-3 font-medium">Change</th></tr></thead>
+            <tbody>{tableRows.map(row => <tr key={row.key} className="border-t border-[var(--border)] hover:bg-surface-2/50"><th className="sticky left-0 z-10 bg-surface p-3 font-medium text-fg">{row.label}</th>{quarters.map(q => <td key={q.asOnDate} className="whitespace-nowrap p-3 tabular text-fg">{moneyPercent(q[row.key])}</td>)}<td className="p-3 tabular text-fg">{delta(row.key)}</td></tr>)}</tbody>
           </table>
         </div> : <Panel><p className="text-sm text-muted">No verified quarterly comparison is available.</p></Panel>}
       </Section>
 
       {data.note ? <Panel className="flex items-start gap-2 p-3"><AlertTriangle className="mt-0.5 size-4 shrink-0 text-muted"/><p className="text-xs text-muted">{data.note}</p></Panel> : null}
-      <Panel className="p-4"><div className="flex items-center justify-between gap-3"><div><p className="text-xs uppercase tracking-wider text-subtle">Data source</p><p className="mt-1 text-sm text-fg">{data.sourceName || "Exchange filing"} · Shareholding Pattern</p></div><a href={data.source} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-muted underline">Open source <ExternalLink className="size-3"/></a></div><p className="mt-2 text-xs text-subtle">Only verified values are shown. FII/DII screening uses the same latest reported quarter; exactly 15.00% does not pass the strict above-15% threshold.</p></Panel>
+      <Panel className="mt-6 p-5"><div className="flex items-center justify-between gap-3"><div><p className="text-xs uppercase tracking-wider text-subtle">Data source</p><p className="mt-1 text-sm text-fg">{data.sourceName || "Exchange filing"} · Shareholding Pattern</p></div><a href={data.source} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-muted underline">Open source <ExternalLink className="size-3"/></a></div><p className="mt-2 text-xs text-subtle">Only verified values are shown. FII/DII screening uses the same latest reported quarter; exactly 15.00% does not pass the strict above-15% threshold.</p></Panel>
     </>}
   </div>;
 }
