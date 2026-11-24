@@ -184,7 +184,7 @@ function parseXbrl(xml: string): (Omit<ShareholdingQuarter, "quarter" | "asOnDat
     const memberPattern = /<(?:[\w.-]+:)?explicitMember\b[^>]*>([^<]+)<\/(?:[\w.-]+:)?explicitMember>/g;
     for (const member of match[2].matchAll(memberPattern)) members.push(localName(member[1].trim()));
     contexts.set(match[1], members);
-    const period = match[2].match(/<(?:[\\w.-]+:)?(?:instant|endDate)\\b[^>]*>(\\d{4}-\\d{2}-\\d{2})<\\/(?:[\\w.-]+:)?(?:instant|endDate)>/i)?.[1];
+    const period = match[2].match(/<(?:[\w.-]+:)?(?:instant|endDate)\b[^>]*>(\d{4}-\d{2}-\d{2})<\/(?:[\w.-]+:)?(?:instant|endDate)>/i)?.[1];
     if (period) contextDates.set(match[1], period);
   }
 
