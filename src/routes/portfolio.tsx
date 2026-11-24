@@ -3,7 +3,6 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { ExternalLink, RefreshCw, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { fetchSuggestedHoldings, fetchSuggestedHoldingsBatch } from "@/lib/market/suggested-holdings";
-import { fetchShareholding, type ShareholdingQuarter } from "@/lib/market/shareholding";
 import { Panel } from "@/components/widgets";
 
 export const Route = createFileRoute("/portfolio")({ component: HoldingsPage });
@@ -40,11 +39,6 @@ function HoldingsPage() {
   const [sortMode, setSortMode] = useState<SortMode>("institutional");
   const [search, setSearch] = useState("");
   const [hydrateKey, setHydrateKey] = useState(0);
-  const [expandedSymbol, setExpandedSymbol] = useState<string | null>(null);
-  const [historyBySymbol, setHistoryBySymbol] = useState<Record<string, ShareholdingQuarter[]>>({});
-  const [historyLoading, setHistoryLoading] = useState<string | null>(null);
-  const [selectedQuarter, setSelectedQuarter] = useState("Q4");
-  const [selectedYear, setSelectedYear] = useState("2023");
   const processedRef = useRef(false);
   const today = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Kolkata",
@@ -180,7 +174,7 @@ function HoldingsPage() {
                       <div className="flex min-w-0 gap-3">
                         <span className="mt-0.5 w-7 shrink-0 text-xs tabular text-subtle">{index + 1}</span>
                         <div className="min-w-0">
-                          <button type="button" onClick={async () => { const opening = expandedSymbol !== share.symbol; setExpandedSymbol(opening ? share.symbol : null); if (opening && !historyBySymbol[share.symbol]) { setHistoryLoading(share.symbol); try { const result = await fetchShareholding({ data: { symbol: share.symbol, refresh: false } }); setHistoryBySymbol(previous => ({ ...previous, [share.symbol]: result.quarters })); } catch { setHistoryBySymbol(previous => ({ ...previous, [share.symbol]: [] })); } finally { setHistoryLoading(null); } } }} className="text-left font-semibold text-fg hover:underline">{share.name}</button>
+                          <Link to="/shareholding" search={{ symbol: share.symbol }} className="text-left font-semibold text-fg hover:underline">{share.name}</Link>
                           <div className="mt-1 text-xs text-muted">{share.symbol}{q ? ` · ${q.quarter} · As on ${q.asOnDate}` : " · Filing unavailable"}</div>
                           {score !== null && <div className="mt-2 inline-flex items-center rounded-lg border border-up/30 bg-up/10 px-3 py-1.5 text-sm font-bold tabular text-up sm:text-base">FII + DII: {score.toFixed(2)}%</div>}
                         </div>
@@ -188,37 +182,6 @@ function HoldingsPage() {
                       {q?.sourceUrl && <a href={q.sourceUrl} target="_blank" rel="noreferrer" aria-label={`Open source filing for ${share.name}`}
                         className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-muted hover:text-fg"><ExternalLink className="size-4" /></a>}
                     </div>
-                    {expandedSymbol === share.symbol && (() => {
-                      const history = historyBySymbol[share.symbol] ?? [];
-                      const quarterMonths: Record<string, number[]> = { Q1: [1,2,3], Q2: [4,5,6], Q3: [7,8,9], Q4: [10,11,12] };
-                      const chosen = history.find(item => { const date = new Date(item.asOnDate + "T00:00:00Z"); return date.getUTCFullYear() === Number(selectedYear) && quarterMonths[selectedQuarter].includes(date.getUTCMonth()+1); }) ?? null;
-                      const pub = publicResidual(chosen);
-                      const other = othersOutsidePublic(chosen);
-                      const parts = [{name:"Promoter",value:chosen?.promoter??null,color:"#22a06b"},{name:"FII",value:chosen?.fii??null,color:"#e05252"},{name:"DII",value:chosen?.dii??null,color:"#e6ad27"},{name:"Public",value:pub,color:"#f4f4f5"},{name:"Others",value:other,color:"#4388e8"}].filter(item => item.value !== null && item.value > 0) as Array<{name:string;value:number;color:string}>;
-                      const total = parts.reduce((sum,item)=>sum+item.value,0);
-                      let cumulative = 0;
-                      const gradient = parts.length ? "conic-gradient("+parts.map(item=>{const start=cumulative; cumulative += item.value/total*100; return item.color+" "+start.toFixed(2)+"% "+cumulative.toFixed(2)+"%";}).join(",")+")" : "var(--surface-2)";
-                      return <div className="mt-4 rounded-xl border border-line/60 bg-surface p-4">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div><p className="text-sm font-semibold text-fg">Shareholding pattern</p><p className="mt-1 text-xs text-muted">Selected quarter · verified source data</p></div>
-                          <div className="flex gap-2">
-                            <select aria-label="Select quarter" value={selectedQuarter} onChange={event=>setSelectedQuarter(event.target.value)} className="rounded-lg bg-surface-2 px-3 py-2 text-sm text-fg">
-                              {["Q1","Q2","Q3","Q4"].map(q=><option key={q} value={q}>{q}</option>)}
-                            </select>
-                            <select aria-label="Select year" value={selectedYear} onChange={event=>setSelectedYear(event.target.value)} className="rounded-lg bg-surface-2 px-3 py-2 text-sm text-fg">
-                              {[2023,2024,2025,2026].map(y=><option key={y} value={String(y)}>{y}</option>)}
-                            </select>
-                          </div>
-                        </div>
-                        {historyLoading === share.symbol ? <p className="py-8 text-center text-sm text-muted">Loading dated shareholding filings…</p> : !chosen ? <p className="py-8 text-center text-sm text-muted">No verified filing found for {selectedQuarter} {selectedYear}. Try another quarter. Historical values are not estimated.</p> : <div className="mt-4 flex flex-col items-center gap-5 sm:flex-row">
-                          <div className="size-44 shrink-0 rounded-full" role="img" aria-label={parts.map(p=>p.name+" "+p.value.toFixed(2)+"%").join(", ")} style={{background:gradient}}/>
-                          <div className="w-full space-y-2">
-                            {parts.map(item=><div key={item.name} className="flex items-center justify-between gap-3 text-sm"><span className="flex items-center gap-2 text-muted"><span className="size-3 rounded-sm" style={{background:item.color}}/>{item.name}</span><span className="font-semibold tabular text-fg">{item.value.toFixed(2)}%</span></div>)}
-                            <div className="border-t border-line/60 pt-2 text-xs text-muted">As on {chosen.asOnDate} · {chosen.sourceName}{chosen.sourceUrl && <> · <a href={chosen.sourceUrl} target="_blank" rel="noreferrer" className="underline">Source</a></>}</div>
-                          </div>
-                        </div>}
-                      </div>;
-                    })()}
                     <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
                       <div className="rounded-lg bg-surface-2 p-3"><div className="text-xs text-muted">FII</div><div className="mt-1 text-base font-semibold tabular text-fg">{percent(q?.fii)}</div></div>
                       <div className="rounded-lg bg-surface-2 p-3"><div className="text-xs text-muted">DII</div><div className="mt-1 text-base font-semibold tabular text-fg">{percent(q?.dii)}</div></div>
