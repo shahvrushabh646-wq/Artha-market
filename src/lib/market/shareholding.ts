@@ -56,7 +56,7 @@ function parseNseHistoryCsv(csv: string): Map<string, ShareholdingQuarter> {
 
 async function loadNseHistorySnapshot(refresh = false): Promise<Map<string, ShareholdingQuarter>> {
   if (!refresh && nseHistoryCache && nseHistoryCache.expires > Date.now()) return nseHistoryCache.data;
-  if (!refresh && nseHistoryLoadPromise) return nseHistoryLoadPromise;
+  if (nseHistoryLoadPromise) return nseHistoryLoadPromise;
   const load = (async () => {
     try {
       const response = await fetch(NSE_HISTORY_CSV, { headers: { "User-Agent": UA, Accept: "text/csv,text/plain,*/*" }, cache: "no-store" });
