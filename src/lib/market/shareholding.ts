@@ -257,7 +257,7 @@ async function loadNseFilingHistory(symbol: string): Promise<ShareholdingQuarter
   const filings = (raw as Array<Record<string, unknown>>)
     .filter(row => typeof row.xbrl === "string" && /^https?:\/\//i.test(row.xbrl as string))
     .sort((a,b) => sourceDate(String(b.date ?? "")).localeCompare(sourceDate(String(a.date ?? ""))))
-    .slice(0, 16);
+    .slice(0, 40);
   const parsed = await Promise.all(filings.map(async filing => {
     const url = String(filing.xbrl);
     try {
@@ -390,7 +390,7 @@ function parseProviderTable(html:string,url:string,sourceName:string):Shareholdi
       if(fv===null||dv===null)continue;
       out.push({...d,promoter:p,fii:fv,dii:dv,public:pv,promoterPledge:null,sourceUrl:url,sourceName});
     }
-    if(out.length)return out.sort((a,b)=>b.asOnDate.localeCompare(a.asOnDate)).slice(0,16);
+    if(out.length)return out.sort((a,b)=>b.asOnDate.localeCompare(a.asOnDate)).slice(0,40);
   }
   return [];
 }
