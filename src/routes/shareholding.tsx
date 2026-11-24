@@ -114,7 +114,7 @@ function ShareholdingPage() {
               </PieChart>
             </ResponsiveContainer>
           </div>
-          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">{pieData.map(entry => <span key={entry.name} className="flex items-center gap-2 rounded-lg bg-surface-2 px-3 py-2.5 text-xs text-muted"><span className="size-3 shrink-0 rounded-sm" style={{ backgroundColor: entry.color }}/><span className="min-w-0"><span className="block">{entry.displayName}</span><strong className="mt-0.5 block tabular text-sm text-fg">{moneyPercent(entry.value)}</strong></span>)}</div>
+          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">{pieData.map(entry => <span key={entry.name} className="flex items-center gap-2 rounded-lg bg-surface-2 px-3 py-2.5 text-xs text-muted"><span className="size-3 shrink-0 rounded-sm" style={{ backgroundColor: entry.color }}/><span className="min-w-0"><span className="block">{entry.displayName}</span><strong className="mt-0.5 block tabular text-sm text-fg">{moneyPercent(entry.value)}</strong></span></span>)}</div>
           <p className="mt-4 border-t border-[var(--border)] pt-3 text-xs leading-5 text-subtle">Filing as on {selectedQuarterData?.asOnDate}. * Public slice excludes FII and DII to avoid double-counting; total public holding is shown in the comparison table.</p>
         </> : <Panel><p className="text-sm text-muted">No verified filing found for {selectedQuarter} {selectedYear}. Try another quarter. Historical figures are not estimated.</p></Panel>}
         </Panel>
