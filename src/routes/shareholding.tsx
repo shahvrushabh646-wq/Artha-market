@@ -117,6 +117,7 @@ function ShareholdingPage() {
           <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">{pieData.map(entry => <span key={entry.name} className="flex items-center gap-2 rounded-lg bg-surface-2 px-3 py-2.5 text-xs text-muted"><span className="size-3 shrink-0 rounded-sm" style={{ backgroundColor: entry.color }}/><span className="min-w-0"><span className="block">{entry.displayName}</span><strong className="mt-0.5 block tabular text-sm text-fg">{moneyPercent(entry.value)}</strong></span>)}</div>
           <p className="mt-4 border-t border-[var(--border)] pt-3 text-xs leading-5 text-subtle">Filing as on {selectedQuarterData?.asOnDate}. * Public slice excludes FII and DII to avoid double-counting; total public holding is shown in the comparison table.</p>
         </> : <Panel><p className="text-sm text-muted">No verified filing found for {selectedQuarter} {selectedYear}. Try another quarter. Historical figures are not estimated.</p></Panel>}
+        </Panel>
       </Section>
 
       <Section title="Promoter holding & pledge" hint="Latest four verified filings · oldest to newest">
@@ -135,14 +136,14 @@ function ShareholdingPage() {
               </Bar>
             </BarChart>
           </ResponsiveContainer>
-        </div> : <Panel><p className="text-sm text-muted">Insufficient Data: no quarterly promoter figures were verified.</p></Panel>}
+        </div></Panel> : <Panel><p className="text-sm text-muted">Insufficient Data: no quarterly promoter figures were verified.</p></Panel>}
         <p className="mt-2 text-xs text-subtle">Pledge is expressed as pledged shares divided by promoter-group shares. If the filing does not provide enough information to calculate it, the value is left blank.</p>
       </Section>
 
       <Section title="Quarterly comparison" hint="Reported filings · change is latest minus oldest, in percentage points (pp)">
         {quarters.length ? <div className="overflow-x-auto rounded-xl shadow-[var(--shadow-border)]">
           <table className="w-full min-w-[860px] border-collapse text-left text-xs">
-            <thead className="bg-surface-2 text-muted"><tr><th className="sticky left-0 z-10 bg-surface-2 p-3 font-medium">Category</th>{quarters.map(q => <th key={q.asOnDate} className="p-3 font-medium">{quarterLabel(q)}</th>)}<th className="p-3 font-medium">Change</th></tr></thead>
+            <thead className="bg-surface-2 text-muted"><tr><th className="sticky left-0 z-10 bg-surface-2 p-3 font-medium">Category</th>{quarters.map(q => <th key={q.asOnDate} className="whitespace-nowrap p-3 font-medium"><span className="block">{quarterLabel(q)}</span><span className="mt-1 block text-[10px] text-subtle">{q.asOnDate}</span></th>)}<th className="p-3 font-medium">Change</th></tr></thead>
             <tbody>{tableRows.map(row => <tr key={row.key} className="border-t border-[var(--border)] hover:bg-surface-2/50"><th className="sticky left-0 z-10 bg-surface p-3 font-medium text-fg">{row.label}</th>{quarters.map(q => <td key={q.asOnDate} className="whitespace-nowrap p-3 tabular text-fg">{moneyPercent(q[row.key])}</td>)}<td className="p-3 tabular text-fg">{delta(row.key)}</td></tr>)}</tbody>
           </table>
         </div> : <Panel><p className="text-sm text-muted">No verified quarterly comparison is available.</p></Panel>}
