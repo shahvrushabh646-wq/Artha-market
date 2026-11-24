@@ -518,7 +518,7 @@ async function loadShareholding(symbolInput: string, refresh = false): Promise<S
     currentLatest.dii===null || currentLatest.public===null || currentLatest.promoterPledge===null;
   if(needsFieldMerge){
     const supplemental=await loadSupplementalShareholding(symbol);
-    const combined=mergeSameQuarterSources(symbol,[...base.quarters,...supplemental]);
+    const combined=mergeSameQuarterSources([...base.quarters,...supplemental]);
     const mergedLatest=combined[0],oldLatest=base.quarters[0];
     if(mergedLatest && (!oldLatest || mergedLatest.asOnDate>=oldLatest.asOnDate)){
       base.quarters=combined;
