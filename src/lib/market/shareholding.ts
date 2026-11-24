@@ -464,7 +464,7 @@ function mergeSameQuarterSources(symbol:string, sources:ShareholdingQuarter[]):S
       sourceName:[...used].sort((a,b)=>priority(a)-priority(b)).join(" + ")||source.sourceName,
     });
   }
-  return merged.sort((a,b)=>b.asOnDate.localeCompare(a.asOnDate)).slice(0,4);
+  return merged.sort((a,b)=>b.asOnDate.localeCompare(a.asOnDate)).slice(0,12);
 }
 async function loadSupplementalShareholding(symbol:string):Promise<ShareholdingQuarter[]> {
   const results=await Promise.allSettled([
