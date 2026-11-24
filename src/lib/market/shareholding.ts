@@ -174,15 +174,18 @@ async function nseJson(url: string, referer: string): Promise<unknown> {
   return response.json();
 }
 
-function parseXbrl(xml: string): Omit<ShareholdingQuarter, "quarter" | "asOnDate" | "sourceUrl"> | null {
+function parseXbrl(xml: string): (Omit<ShareholdingQuarter, "quarter" | "asOnDate" | "sourceUrl"> & { periodEnd?: string }) | null {
   if (!xml.trim().startsWith("<") || !/ShareholdingAsAPercentageOfTotalNumberOfShares/.test(xml)) return null;
   const contexts = new Map<string, string[]>();
+  const contextDates = new Map<string, string>();
   const contextPattern = /<(?:[\w.-]+:)?context\b[^>]*\bid="([^"]+)"[^>]*>([\s\S]*?)<\/(?:[\w.-]+:)?context>/g;
   for (const match of xml.matchAll(contextPattern)) {
     const members: string[] = [];
     const memberPattern = /<(?:[\w.-]+:)?explicitMember\b[^>]*>([^<]+)<\/(?:[\w.-]+:)?explicitMember>/g;
     for (const member of match[2].matchAll(memberPattern)) members.push(localName(member[1].trim()));
     contexts.set(match[1], members);
+    const period = match[2].match(/<(?:[\\w.-]+:)?(?:instant|endDate)\\b[^>]*>(\\d{4}-\\d{2}-\\d{2})<\\/(?:[\\w.-]+:)?(?:instant|endDate)>/i)?.[1];
+    if (period) contextDates.set(match[1], period);
   }
 
   const categories: Record<string, string[]> = {
@@ -192,6 +195,7 @@ function parseXbrl(xml: string): Omit<ShareholdingQuarter, "quarter" | "asOnDate
     dii: ["InstitutionsDomesticMember"],
   };
   const values: Record<string, number | null> = { promoter: null, public: null, fii: null, dii: null };
+  let periodEnd: string | undefined;
   const factPattern = /<(?:[\w.-]+:)?ShareholdingAsAPercentageOfTotalNumberOfShares\b[^>]*\bcontextRef="([^"]+)"[^>]*>([-\d.]+)<\/(?:[\w.-]+:)?ShareholdingAsAPercentageOfTotalNumberOfShares>/g;
   for (const fact of xml.matchAll(factPattern)) {
     const members = contexts.get(fact[1]) ?? [];
@@ -199,7 +203,10 @@ function parseXbrl(xml: string): Omit<ShareholdingQuarter, "quarter" | "asOnDate
     const raw = Number(fact[2]);
     if (!Number.isFinite(raw)) continue;
     for (const [category, names] of Object.entries(categories)) {
-      if (values[category] === null && members.some(member => names.includes(member))) values[category] = raw;
+      if (values[category] === null && members.some(member => names.includes(member))) {
+        values[category] = raw;
+        if (category === "promoter") periodEnd = contextDates.get(fact[1]) ?? periodEnd;
+      }
     }
   }
 
@@ -247,7 +254,7 @@ function parseXbrl(xml: string): Omit<ShareholdingQuarter, "quarter" | "asOnDate
       ? Math.round((pledgePctOfCompany * scale / values.promoter) * 10000) / 100
       : null;
   if (Object.values(values).every(v => v === null)) return null;
-  return { promoter: values.promoter, fii: values.fii, dii: values.dii, public: values.public, promoterPledge };
+  return { promoter: values.promoter, fii: values.fii, dii: values.dii, public: values.public, promoterPledge, periodEnd };
 }
 
 async function loadNsePledgeSnapshot(symbol: string): Promise<ShareholdingQuarter[]> {
@@ -313,8 +320,9 @@ async function loadNseFilingHistory(symbol: string): Promise<ShareholdingQuarter
       if (!response.ok) return null;
       const values = parseXbrl(await response.text());
       if (!values) return null;
-      const rawDate = String(filing.date ?? ""), asOnDate = sourceDate(rawDate) || rawDate;
-      return { ...values, quarter: parseDate(asOnDate), asOnDate, sourceUrl: url, sourceName: "NSE" } satisfies ShareholdingQuarter;
+      const rawDate = String(filing.date ?? ""), asOnDate = values.periodEnd ?? (sourceDate(rawDate) || rawDate);
+      const { periodEnd: _periodEnd, ...quarterValues } = values;
+      return { ...quarterValues, quarter: parseDate(asOnDate), asOnDate, sourceUrl: url, sourceName: "NSE" } satisfies ShareholdingQuarter;
     } catch { return null; }
   }));
   return parsed.filter((q): q is ShareholdingQuarter => q !== null);
