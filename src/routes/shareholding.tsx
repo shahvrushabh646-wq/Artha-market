@@ -57,11 +57,16 @@ function ShareholdingPage() {
   const pieData = useMemo(() => {
     const quarter = selectedQuarterData;
     if (!quarter || quarter.promoter == null || quarter.public == null) return [];
-    // FII and DII are subcategories of Public. Use the remaining public float as the fourth, non-overlapping slice.
-    // Public includes FII and DII; show total Public as one slice to avoid overlap/double-counting.
+    // FII and DII are included within total Public. Split them out and show the residual
+    // as Other Public so the pie has all reported categories without double-counting.
+    const fii = quarter.fii ?? 0;
+    const dii = quarter.dii ?? 0;
+    const otherPublic = Math.max(0, quarter.public - fii - dii);
     return [
       { name: "Promoter", displayName: "Promoter", value: quarter.promoter, color: COLORS.Promoter },
-      { name: "Public", displayName: "Public", value: quarter.public, color: COLORS.Public },
+      { name: "FII", displayName: "FII", value: fii, color: COLORS.FII },
+      { name: "DII", displayName: "DII", value: dii, color: COLORS.DII },
+      { name: "Other Public", displayName: "Other Public", value: otherPublic, color: COLORS.Public },
     ].filter(item => item.value > 0);
   }, [selectedQuarterData]);
   const screening = useMemo(() => {
@@ -116,7 +121,7 @@ function ShareholdingPage() {
             </ResponsiveContainer>
           </div>
           <div className="mt-3 grid grid-cols-2 gap-3">{pieData.map(entry => <span key={entry.name} className="flex items-center gap-2 rounded-xl border border-[var(--border)] bg-surface-2 px-3 py-3 text-xs text-muted"><span className="size-3 shrink-0 rounded-full" style={{ backgroundColor: entry.color }}/><span className="min-w-0"><span className="block">{entry.displayName}</span><strong className="mt-1 block tabular text-base font-semibold text-fg">{moneyPercent(entry.value)}</strong></span></span>)}</div>
-          <p className="mt-4 border-t border-[var(--border)] pt-3 text-xs leading-5 text-subtle">Filing as on {selectedQuarterData?.asOnDate}. Public includes FII and DII; the pie shows Promoter and total Public as the two non-overlapping ownership groups. FII and DII breakdowns are shown above.</p>
+          <p className="mt-4 border-t border-[var(--border)] pt-3 text-xs leading-5 text-subtle">Filing as on {selectedQuarterData?.asOnDate}. Pie shows Promoter, FII, DII and Other Public. FII and DII are part of total Public, so Other Public is calculated as total Public minus FII and DII to avoid double-counting.</p>
         </> : <Panel><p className="text-sm text-muted">No verified filing found for {activeQuarter} {activeYear}. Try another quarter. Historical figures are not estimated.</p></Panel>}
         </Panel>
       </Section>
