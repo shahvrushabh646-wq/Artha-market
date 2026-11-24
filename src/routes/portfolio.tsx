@@ -49,11 +49,11 @@ function HoldingsPage() {
   const queryKey = ["suggested-holdings-all-v3", today];
   const query = useQuery({
     queryKey,
-    queryFn: () => fetchSuggestedHoldings({ data: {} }),
+    queryFn: async () => { processedRef.current = false; return fetchSuggestedHoldings({ data: {} }); },
     staleTime: 5 * 60_000,
     gcTime: 30 * 60_000,
     refetchOnWindowFocus: true,
-    refetchInterval: 5 * 60_000,
+    refetchInterval: 6 * 60 * 60_000,
     retry: 1,
   });
   const data = query.data;
@@ -68,7 +68,7 @@ function HoldingsPage() {
         if (cancelled) return;
         const batch = symbols.slice(start, start + 200);
         try {
-          const results = await fetchSuggestedHoldingsBatch({ data: { symbols: batch } });
+          const results = await fetchSuggestedHoldingsBatch({ data: { symbols: batch, refresh: true } });
           if (cancelled) return;
           checked += results.length; unavailable += results.filter((item) => !item.quarter).length;
           queryClient.setQueryData(queryKey, (previous: typeof query.data) => previous ? {
@@ -91,7 +91,7 @@ function HoldingsPage() {
     };
     void hydrate();
     return () => { cancelled = true; };
-  }, [query.data?.totalSuggested, query.data?.holdings.length, hydrateKey]);
+  }, [query.data?.totalSuggested, query.data?.holdings.length, query.dataUpdatedAt, hydrateKey]);
   const rows = useMemo(() => {
     const needle = search.trim().toLowerCase();
     const list = (data?.holdings ?? []).filter((share) =>
