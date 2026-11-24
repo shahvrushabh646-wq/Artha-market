@@ -203,30 +203,48 @@ function parseXbrl(xml: string): Omit<ShareholdingQuarter, "quarter" | "asOnDate
     }
   }
 
-  // Prefer the filing’s explicit pledge percentage; otherwise calculate from pledged and promoter share counts.
-  let pledgePctRaw: number | null = null;
-  const pledgePattern = /<(?:[\w.-]+:)?PledgedOrEncumberedSharesHeldAsPercentageOfTotalNumberOfShares\b[^>]*\bcontextRef="([^"]+)"[^>]*>([-\d.]+)<\/(?:[\w.-]+:)?PledgedOrEncumberedSharesHeldAsPercentageOfTotalNumberOfShares>/g;
-  for (const fact of xml.matchAll(pledgePattern)) {
-    const members = contexts.get(fact[1]) ?? [];
-    const value = Number(fact[2]);
-    if (members.length <= 2 && members.includes("ShareholdingOfPromoterAndPromoterGroupMember") && Number.isFinite(value)) { pledgePctRaw = value; break; }
+  // Read pledge facts across standard XBRL and inline-XBRL filings. NSE uses
+  // multiple concept names and may encode facts as ix:nonFraction elements.
+  let pledgePctOfCompany: number | null = null;
+  const pledgeFacts = /<(?:[\\w.-]+:)?([\\w.-]+)\\b([^>]*)>([\\d.,-]+)<\\/(?:[\\w.-]+:)?\\1\\s*>/gi;
+  for (const fact of xml.matchAll(pledgeFacts)) {
+    const concept = fact[1].split(":").pop() ?? fact[1];
+    if (!/(?:pledged|encumbered)/i.test(concept) || !/(?:percentage|percent|totalnumberofshares)/i.test(concept)) continue;
+    const attrs = fact[2];
+    const contextRef = attrs.match(/\\bcontextRef=["']([^"']+)["']/i)?.[1];
+    const members = contexts.get(contextRef ?? "") ?? [];
+    if (!members.includes("ShareholdingOfPromoterAndPromoterGroupMember") || members.length > 2) continue;
+    let value = Number(fact[3].replace(/,/g, ""));
+    const scale = Number(attrs.match(/\\bscale=["'](-?\\d+)["']/i)?.[1] ?? "0");
+    if (!Number.isFinite(value)) continue;
+    if (Number.isFinite(scale) && scale !== 0) value *= 10 ** scale;
+    if (value >= 0 && value <= 100) { pledgePctOfCompany = value; break; }
   }
-  const shareCounts: Record<string, number | null> = { promoter: null, pledged: null };
-  const countPattern = /<(?:[\w.-]+:)?(NumberOfShares|NumberOfSharesPledgedOrOtherwiseEncumbered)\b[^>]*\bcontextRef="([^"]+)"[^>]*>(\d+)<\/(?:[\w.-]+:)?\1>/g;
-  for (const fact of xml.matchAll(countPattern)) {
-    const tag = fact[1], members = contexts.get(fact[2]) ?? [], raw = Number(fact[3]);
-    if (members.length > 2 || !Number.isFinite(raw)) continue;
-    if (tag === "NumberOfShares" && members.includes("ShareholdingOfPromoterAndPromoterGroupMember") && shareCounts.promoter === null) shareCounts.promoter = raw;
-    if (tag === "NumberOfSharesPledgedOrOtherwiseEncumbered" && members.includes("ShareholdingOfPromoterAndPromoterGroupMember") && shareCounts.pledged === null) shareCounts.pledged = raw;
+
+  // If the filing reports pledged and total promoter share counts, calculate
+  // pledge % of promoter holding directly. This is the requested denominator.
+  let promoterShares: number | null = null;
+  let pledgedShares: number | null = null;
+  const shareFacts = /<(?:[\\w.-]+:)?([\\w.-]+)\\b([^>]*)>([\\d.,-]+)<\\/(?:[\\w.-]+:)?\\1\\s*>/gi;
+  for (const fact of xml.matchAll(shareFacts)) {
+    const concept = fact[1].split(":").pop() ?? fact[1];
+    const attrs = fact[2];
+    const contextRef = attrs.match(/\\bcontextRef=["']([^"']+)["']/i)?.[1];
+    const members = contexts.get(contextRef ?? "") ?? [];
+    if (!members.includes("ShareholdingOfPromoterAndPromoterGroupMember") || members.length > 2) continue;
+    const raw = Number(fact[3].replace(/,/g, ""));
+    if (!Number.isFinite(raw) || raw < 0) continue;
+    if (/^NumberOfShares$/i.test(concept) && promoterShares === null) promoterShares = raw;
+    if (/NumberOfSharesPledgedOrOtherwiseEncumbered|PledgedShares/i.test(concept) && pledgedShares === null) pledgedShares = raw;
   }
 
   const sum = (values.promoter ?? 0) + (values.public ?? 0);
   const scale = sum > 1000 ? 0.01 : sum > 0 && sum < 2 ? 100 : 1;
   for (const key of ["promoter", "public", "fii", "dii"] as const) if (values[key] !== null) values[key] = Math.round((values[key] as number) * scale * 10000) / 10000;
-  const promoterPledge = pledgePctRaw !== null && values.promoter !== null && values.promoter > 0
-    ? Math.round((pledgePctRaw * scale / values.promoter) * 10000) / 100
-    : shareCounts.promoter && shareCounts.pledged !== null
-      ? Math.round((shareCounts.pledged / shareCounts.promoter) * 10000) / 100
+  const promoterPledge = promoterShares !== null && promoterShares > 0 && pledgedShares !== null
+    ? Math.round((pledgedShares / promoterShares) * 10000) / 100
+    : pledgePctOfCompany !== null && values.promoter !== null && values.promoter > 0
+      ? Math.round((pledgePctOfCompany * scale / values.promoter) * 10000) / 100
       : null;
   if (Object.values(values).every(v => v === null)) return null;
   return { promoter: values.promoter, fii: values.fii, dii: values.dii, public: values.public, promoterPledge };
