@@ -64,9 +64,9 @@ function HoldingsPage() {
     const hydrate = async () => {
       const symbols = query.data!.holdings.map((item) => item.symbol);
       let checked = 0, unavailable = 0;
-      for (let start = 0; start < symbols.length; start += 6) {
+      for (let start = 0; start < symbols.length; start += 2) {
         if (cancelled) return;
-        const batch = symbols.slice(start, start + 6);
+        const batch = symbols.slice(start, start + 2);
         try {
           const results = await fetchSuggestedHoldingsBatch({ data: { symbols: batch } });
           if (cancelled) return;
@@ -78,7 +78,15 @@ function HoldingsPage() {
               return result ? { ...holding, quarter: result.quarter, note: result.note } : holding;
             }),
           } : previous);
-        } catch { checked += batch.length; unavailable += batch.length; }
+        } catch (error) {
+          checked += batch.length; unavailable += batch.length;
+          const note = error instanceof Error ? `Provider batch failed: ${error.message}` : "Provider batch failed or timed out.";
+          queryClient.setQueryData(queryKey, (previous: typeof query.data) => previous ? {
+            ...previous, checked, unavailable,
+            holdings: previous.holdings.map((holding) => batch.some((symbol) => symbol.toUpperCase() === holding.symbol.toUpperCase())
+              ? { ...holding, note } : holding),
+          } : previous);
+        }
       }
     };
     void hydrate();
