@@ -42,11 +42,14 @@ export const fetchSuggestedHoldings = createServerFn({ method: "GET" })
 
 export const fetchSuggestedHoldingsBatch = createServerFn({ method: "GET" })
   .validator((data: unknown) => z.object({
-    symbols: z.array(z.string().min(1).max(40)).min(1).max(8),
+    symbols: z.array(z.string().min(1).max(40)).min(1).max(200),
     refresh: z.boolean().optional(),
   }).parse(data))
   .handler(async ({ data }) => {
-    const items = await Promise.all(data.symbols.map(async (symbol) => {
+    const items: Array<{ symbol: string; quarter: ShareholdingQuarter | null; note: string | null }> = [];
+    for (let start = 0; start < data.symbols.length; start += 8) {
+      const batch = data.symbols.slice(start, start + 8);
+      const results = await Promise.all(batch.map(async (symbol) => {
       try {
         const result = await fetchShareholding({ data: { symbol, refresh: Boolean(data.refresh) } });
         const latest = result.quarters[0] ?? null;
