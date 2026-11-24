@@ -250,6 +250,54 @@ function parseXbrl(xml: string): Omit<ShareholdingQuarter, "quarter" | "asOnDate
   return { promoter: values.promoter, fii: values.fii, dii: values.dii, public: values.public, promoterPledge };
 }
 
+async function loadNsePledgeSnapshot(symbol: string): Promise<ShareholdingQuarter[]> {
+  const page = "https://www.nseindia.com/companies-listing/corporate-filings-pledged-data?symbol=" + encodeURIComponent(symbol) + "&tabIndex=equity";
+  const raw = await nseJson("https://www.nseindia.com/api/corporate-pledgedata?index=equities", page);
+  const records: Record<string, unknown>[] = [];
+  const visit = (value: unknown) => {
+    if (Array.isArray(value)) { value.forEach(visit); return; }
+    if (!value || typeof value !== "object") return;
+    const row = value as Record<string, unknown>;
+    const keys = Object.keys(row).map(key => key.toLowerCase());
+    if (keys.some(key => key.includes("symbol") || key === "sym") &&
+        keys.some(key => key.includes("promotershares") || key.includes("pledged") || key.includes("encumber"))) records.push(row);
+    Object.values(row).forEach(visit);
+  };
+  visit(raw);
+  const normalized = (row: Record<string, unknown>) => Object.fromEntries(Object.entries(row).map(([key, value]) => [key.toLowerCase().replace(/[^a-z0-9]/g, ""), value]));
+  const number = (value: unknown): number | null => {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value !== "string") return null;
+    const cleaned = value.replace(/,/g, "").replace(/%/g, "").trim();
+    if (!cleaned || cleaned === "-" || cleaned.toLowerCase() === "na") return null;
+    const parsed = Number(cleaned); return Number.isFinite(parsed) ? parsed : null;
+  };
+  const parseNsePeriod = (value: unknown): string | null => {
+    if (typeof value !== "string" || !value.trim()) return null;
+    const rawDate = value.trim();
+    const parsed = sourceDate(rawDate);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(parsed)) return parsed;
+    const d = new Date(rawDate);
+    return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+  };
+  for (const sourceRow of records) {
+    const row = normalized(sourceRow);
+    const rowSymbol = normalizeSymbol(String(row.symbol ?? row.sym ?? ""));
+    if (rowSymbol !== symbol) continue;
+    const pledge = number(row.percpromotershares ?? row.percpledgedpromotershares ?? row.pledgedpercentageofpromoterholding ?? row.promoterpledgepct);
+    const promoter = number(row.percpromoterholding ?? row.promoterholdingpct);
+    const period = parseNsePeriod(row.shpquarter ?? row.shp ?? row.periodend ?? row.asondt ?? row.asondatetime ?? row.disclosuredate);
+    if (pledge === null || pledge < 0 || pledge > 100 || !period) continue;
+    const date = new Date(period + "T00:00:00Z");
+    return [{
+      quarter: date.toLocaleDateString("en-IN", { month: "short", year: "numeric", timeZone: "UTC" }),
+      asOnDate: period, promoter, fii: null, dii: null, public: null,
+      promoterPledge: pledge, sourceUrl: page, sourceName: "NSE Pledged Data",
+    }];
+  }
+  return [];
+}
+
 async function loadNseFilingHistory(symbol: string): Promise<ShareholdingQuarter[]> {
   const page = `https://www.nseindia.com/companies-listing/corporate-filings-shareholding-pattern?symbol=${encodeURIComponent(symbol)}&tabIndex=equity`;
   const raw = await nseJson(`https://www.nseindia.com/api/corporate-share-holdings-master?index=equities&symbol=${encodeURIComponent(symbol)}`, page);
@@ -563,6 +611,7 @@ function mergeSameQuarterSources(symbol:string, sources:ShareholdingQuarter[]):S
 async function loadSupplementalShareholding(symbol:string):Promise<ShareholdingQuarter[]> {
   const results=await Promise.allSettled([
     loadNseFilingHistory(symbol),
+    loadNsePledgeSnapshot(symbol),
     loadScreenerFallback(symbol),
     loadBseFallback(symbol),
     loadPublicSiteFallback(symbol),
