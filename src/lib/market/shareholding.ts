@@ -24,6 +24,7 @@ const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/
 const cache = new Map<string, { expires: number; data: ShareholdingResult }>();
 const NSE_HISTORY_CSV = "https://raw.githubusercontent.com/yurukatsu/nse-historical-membership/main/shareholding_history/data/parsed/_signals.csv";
 let nseHistoryCache: { expires: number; data: Map<string, ShareholdingQuarter> } | null = null;
+let nseHistoryLoadPromise: Promise<Map<string, ShareholdingQuarter>> | null = null;
 
 async function loadNseHistorySnapshot(): Promise<Map<string, ShareholdingQuarter>> {
   if (nseHistoryCache && nseHistoryCache.expires > Date.now()) return nseHistoryCache.data;
@@ -50,6 +51,14 @@ async function loadNseHistorySnapshot(): Promise<Map<string, ShareholdingQuarter
   if (!parsed.size) throw new Error("NSE XBRL history dataset contained no parsed shareholding rows");
   nseHistoryCache = { expires: Date.now() + 6 * 60 * 60_000, data: parsed };
   return parsed;
+}
+
+async function loadNseHistorySnapshot(): Promise<Map<string, ShareholdingQuarter>> {
+  if (nseHistoryCache && nseHistoryCache.expires > Date.now()) return nseHistoryCache.data;
+  if (!nseHistoryLoadPromise) {
+    nseHistoryLoadPromise = loadNseHistorySnapshotFresh().finally(() => { nseHistoryLoadPromise = null; });
+  }
+  return nseHistoryLoadPromise;
 }
 
 function normalizeSymbol(symbol: string) {
