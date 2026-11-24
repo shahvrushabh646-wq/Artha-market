@@ -68,7 +68,27 @@ function HoldingsPage() {
   const queryKey = ["suggested-holdings-all-v3", today];
   const query = useQuery({
     queryKey,
-    queryFn: async () => { processedRef.current = false; return fetchSuggestedHoldings({ data: { fallback: savedSuggestionFallback() } }); },
+    queryFn: async () => {
+      processedRef.current = false;
+      const fallback = savedSuggestionFallback();
+      try {
+        return await fetchSuggestedHoldings({ data: { fallback } });
+      } catch (error) {
+        // If the server function itself fails (e.g. deployment/server boundary),
+        // render the exact cached Suggestions symbols client-side so the page
+        // remains usable and can still request each symbol's verified filing.
+        if (!fallback.length) throw error;
+        const unique = new Map<string, { symbol: string; name: string }>();
+        for (const item of fallback) {
+          const symbol = item.symbol.trim().toUpperCase();
+          if (symbol && !unique.has(symbol)) unique.set(symbol, { symbol, name: item.name || symbol });
+        }
+        const holdings = [...unique.values()].map((item) => ({
+          ...item, quarter: null, note: "Holdings list recovered from your saved current Suggestions list; checking verified filing data.",
+        }));
+        return { holdings, checked:  0, unavailable: 0, totalSuggested: holdings.length };
+      }
+    },
     staleTime: 5 * 60_000,
     gcTime: 30 * 60_000,
     refetchOnWindowFocus: true,
