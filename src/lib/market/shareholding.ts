@@ -499,7 +499,8 @@ async function loadSupplementalShareholding(symbol:string):Promise<ShareholdingQ
   for(const result of results){
     if(result.status!=="fulfilled")continue;
     const value=result.value;
-    if("quarters" in value)quarters.push(...value.quarters);
+    if(Array.isArray(value)) quarters.push(...value);
+    else if(value && typeof value === "object" && "quarters" in value) quarters.push(...value.quarters);
   }
   return quarters;
 }
