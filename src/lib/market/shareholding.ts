@@ -654,8 +654,35 @@ async function loadBseFallback(symbol:string):Promise<{url:string;quarters:Share
       const sum=(a:number[])=>a.length?Math.round(a.reduce((x,y)=>x+y,0)*10000)/10000:null;
       const promoter=sum(values.promoter),fii=sum(values.fii),dii=sum(values.dii),publicValue=sum(values.public);
       if(fii===null||dii===null)continue;
+      // Extract promoter pledge from the same dated BSE XBRL filing.
+      // Pledge may be reported as pledged shares, % of company shares, or
+      // directly as % of promoter holding. Keep null when the denominator is absent.
+      let promoterShares:number|null=null,pledgedShares:number|null=null,pledgeCompanyPct:number|null=null,pledgePromoterPct:number|null=null;
+      for(const fact of html.matchAll(/<(?:ix:)?nonFraction\\b([^>]*?)>([\\s\\S]*?)<\\/(?:ix:)?nonFraction>/gi)){
+        const attrs=fact[1],concept=(attrs.match(/\\bname=["']([^"']+)["']/i)?.[1]??"").split(":").pop()?.toLowerCase()??"";
+        const context=attrs.match(/\\bcontextref=["']([^"']+)["']/i)?.[1],members=contexts.get(context??"")??[];
+        const joined=members.join(" ");
+        if(!/promoterandpromotergroup/.test(joined)||members.length>3)continue;
+        let value=Number(htmlText(fact[2]).replace(/,/g,"").trim());
+        const scale=Number(attrs.match(/\\bscale=["'](-?\\d+)["']/i)?.[1]??"0");
+        if(!Number.isFinite(value))continue;if(Number.isFinite(scale)&&scale!==0)value*=10**scale;
+        if(value<0)continue;
+        if(/pledged|encumbered/.test(concept)){
+          if(/percentage|percent|pct/.test(concept)){
+            if(/promoterholding|promoterandpromotergroup/.test(concept))pledgePromoterPct=value;
+            else if(value<=100)pledgeCompanyPct=value;
+          }else if(/numberofshares|shares/.test(concept)&&pledgedShares===null)pledgedShares=value;
+        }
+        if(/numberofshares/.test(concept)&&!/pledged|encumbered/.test(concept)&&promoterShares===null)promoterShares=value;
+      }
+      let promoterPledge:number|null=null;
+      if(pledgedShares!==null&&promoterShares!==null&&promoterShares>0)promoterPledge=pledgedShares/promoterShares*100;
+      else if(pledgePromoterPct!==null&&pledgePromoterPct<=100)promoterPledge=pledgePromoterPct;
+      else if(pledgeCompanyPct!==null&&promoter!==null&&promoter>0)promoterPledge=pledgeCompanyPct/promoter*100;
+      if(promoterPledge!==null)promoterPledge=Math.round(promoterPledge*100)/100;
+      if(promoterPledge!==null&&(promoterPledge<0||promoterPledge>100))promoterPledge=null;
       const asOnDate=String(filing.EndDate).slice(0,10),date=new Date(asOnDate+"T00:00:00Z");
-      quarters.push({quarter:date.toLocaleDateString("en-IN",{month:"short",year:"numeric",timeZone:"UTC"}),asOnDate,promoter,fii,dii,public:publicValue,promoterPledge:null,sourceUrl:url,sourceName:"BSE"});
+      quarters.push({quarter:date.toLocaleDateString("en-IN",{month:"short",year:"numeric",timeZone:"UTC"}),asOnDate,promoter,fii,dii,public:publicValue,promoterPledge,sourceUrl:url,sourceName:"BSE"});
     }catch{continue;}
   }
   quarters.sort((a,b)=>b.asOnDate.localeCompare(a.asOnDate));
