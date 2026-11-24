@@ -383,16 +383,23 @@ function parseScreener(html: string, symbol: string, url: string): ShareholdingQ
   const fii = findRow([/^fiis?$/, /^foreign institutional investors?$/, /^foreign institutions?$/]);
   const dii = findRow([/^diis?$/, /^domestic institutional investors?$/, /^domestic institutions?$/]);
   const publicRow = findRow([/^public$/, /^public shareholding$/]);
+  const pledgeRow = rows.find(row => /pledge|pledged|encumbered/i.test(normalizeLabel(row[0] || "")) && /promoter|shareholding|stake|%|percent/i.test(normalizeLabel(row[0] || "")));
   const quarters: ShareholdingQuarter[] = [];
   for (let i = 0; i < dates.length; i++) {
     const date = dates[i];
     if (!date) continue;
     const get = (row: string[] | undefined) => row ? screenerNumber(row[i + 1] || "") : null;
     const promoter = get(promoters), fiiValue = get(fii), diiValue = get(dii), publicValue = get(publicRow);
-    if (promoter === null && fiiValue === null && diiValue === null && publicValue === null) continue;
+    const rawPledge = get(pledgeRow);
+    const pledgeLabel = normalizeLabel(pledgeRow?.[0] || "");
+    const promoterPledge = rawPledge !== null && /(?:% of total|of total shares|company shares|share capital)/i.test(pledgeLabel)
+      ? (promoter !== null && promoter > 0 ? Math.round(rawPledge / promoter * 10000) / 100 : null)
+      : rawPledge;
+    if (promoter === null && fiiValue === null && diiValue === null && publicValue === null && promoterPledge === null) continue;
     quarters.push({
       ...date, promoter, fii: fiiValue, dii: diiValue, public: publicValue,
-      promoterPledge: null, sourceUrl: url, sourceName: "Screener.in",
+      promoterPledge: promoterPledge !== null && promoterPledge >= 0 && promoterPledge <= 100 ? promoterPledge : null,
+      sourceUrl: url, sourceName: "Screener.in",
     });
   }
   return quarters.sort((a, b) => b.asOnDate.localeCompare(a.asOnDate)).slice(0, 40);
@@ -437,14 +444,18 @@ function parseProviderTable(html:string,url:string,sourceName:string):Shareholdi
     const fii=find([/^fiis?$/, /^foreign institutional investors?$/, /^foreign institutions?$/, /^fpi(?:s)?$/]);
     const dii=find([/^diis?$/, /^domestic institutional investors?$/, /^domestic institutions?$/]);
     const pub=find([/^public$/, /^public shareholding$/]);
-    if(!fii||!dii)continue;
+    const pledge=rows.find(r=>/pledge|pledged|encumbered/i.test(label(r[0]??"")));
+    if(!fii&&!dii&&!pledge)continue;
     const out:ShareholdingQuarter[]=[];
     for(let i=0;i<dates.length;i++){
       const d=dates[i];if(!d)continue;
       const get=(r:string[]|undefined)=>r?screenerNumber(r[i+1]??""):null;
-      const p=get(promoter),fv=get(fii),dv=get(dii),pv=get(pub);
-      if(fv===null||dv===null)continue;
-      out.push({...d,promoter:p,fii:fv,dii:dv,public:pv,promoterPledge:null,sourceUrl:url,sourceName});
+      const p=get(promoter),fv=get(fii),dv=get(dii),pv=get(pub),rawPledge=get(pledge);
+      const pledgeLabel=label(pledge?.[0]??"");
+      const pp=rawPledge!==null&&/(?:% of total|of total shares|company shares|share capital)/i.test(pledgeLabel)
+        ?(p!==null&&p>0?Math.round(rawPledge/p*10000)/100:null):rawPledge;
+      if(fv===null&&dv===null&&pp===null)continue;
+      out.push({...d,promoter:p,fii:fv,dii:dv,public:pv,promoterPledge:pp!==null&&pp>=0&&pp<=100?pp:null,sourceUrl:url,sourceName});
     }
     if(out.length)return out.sort((a,b)=>b.asOnDate.localeCompare(a.asOnDate)).slice(0,40);
   }
@@ -510,7 +521,7 @@ async function loadMoneycontrolFallback(symbol:string):Promise<{url:string;quart
   const item=candidates.find(row=>{
     const values=Object.values(row).map(v=>String(v??"").toUpperCase());
     return values.some(v=>v===symbol||v.includes("("+symbol+")")||v.endsWith("/"+symbol));
-  })??candidates[0];
+  });
   if(!item)throw new Error("Moneycontrol company page not resolved");
   const rawUrl=Object.values(item).map(v=>String(v??"")).find(v=>/^https?:\/\/(?:www\.)?moneycontrol\.com\//i.test(v)&&/(?:stockpricequote|stocks|shareholding)/i.test(v));
   if(!rawUrl)throw new Error("Moneycontrol URL not found in search result");
@@ -651,7 +662,7 @@ async function loadBseFallback(symbol:string):Promise<{url:string;quarters:Share
 
 
 function mergeSameQuarterSources(symbol:string, sources:ShareholdingQuarter[]):ShareholdingQuarter[] {
-  const priority=(name:string)=>({NSE:0,BSE:1,"Screener.in":2,Trendlyne:3,Tickertape:4}[name]??9);
+  const priority=(name:string)=>({NSE:0,BSE:1,Moneycontrol:2,Trendlyne:3,"Screener.in":4,Tickertape:5}[name]??9);
   const grouped=new Map<string,ShareholdingQuarter[]>();
   for(const q of sources){
     if(!/^\d{4}-\d{2}-\d{2}$/.test(q.asOnDate))continue;
