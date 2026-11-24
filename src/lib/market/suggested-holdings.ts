@@ -28,7 +28,15 @@ export const fetchSuggestedHoldings = createServerFn({ method: "GET" })
     fallback: z.array(z.object({ symbol: z.string().min(1).max(40), name: z.string().max(200).optional() })).max(500).optional(),
   }).parse(data ?? {}))
   .handler(async ({ data }) => {
-    let suggestions = await fetchSuggestions({ data: { period: "current", sector: "All" } });
+    // The live NSE universe/provider can fail at the server boundary. Keep Holdings
+    // usable from the exact current Suggestions list cached by the client, rather
+    // than turning a temporary market-data outage into a page-level error.
+    let suggestions: Awaited<ReturnType<typeof fetchSuggestions>> = [];
+    try {
+      suggestions = await fetchSuggestions({ data: { period: "current", sector: "All" } });
+    } catch {
+      suggestions = [];
+    }
     // The Suggestions screen persists its last successful current list in browser storage.
     // Use that exact list if the server-side NSE universe request temporarily returns empty.
     if (!suggestions.length && data.fallback?.length) {
