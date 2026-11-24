@@ -400,7 +400,7 @@ async function loadBseFallback(symbol:string):Promise<{url:string;quarters:Share
   const indexRes=await fetch(indexUrl,{headers,cache:"no-store"});
   if(!indexRes.ok)throw new Error("BSE filing index HTTP "+indexRes.status);
   const index=await indexRes.json() as {Table?:Array<Record<string,unknown>>};
-  const filings=(index.Table??[]).filter(x=>Number(x.IsXBRL)===1&&typeof x.XBRLAttachment==="string"&&/^\d{4}-\d{2}-\d{2}/.test(String(x.EndDate??""))).sort((a,b)=>String(b.EndDate).localeCompare(String(a.EndDate))).slice(0,12);
+  const filings=(index.Table??[]).filter(x=>Number(x.IsXBRL)===1&&typeof x.XBRLAttachment==="string"&&/^\d{4}-\d{2}-\d{2}/.test(String(x.EndDate??""))).sort((a,b)=>String(b.EndDate).localeCompare(String(a.EndDate))).slice(0, 16);
   const quarters:ShareholdingQuarter[]=[];
   for(const filing of filings){
     const attachment=String(filing.XBRLAttachment),url=attachment.startsWith("http")?attachment:"https://www.bseindia.com"+(attachment.startsWith("/")?attachment:"/"+attachment);
@@ -435,7 +435,7 @@ async function loadBseFallback(symbol:string):Promise<{url:string;quarters:Share
     }catch{continue;}
   }
   quarters.sort((a,b)=>b.asOnDate.localeCompare(a.asOnDate));
-  return {url:"https://www.bseindia.com/corporates/Sharehold_Searchnew.aspx",quarters:quarters.slice(0,12)};
+  return {url:"https://www.bseindia.com/corporates/Sharehold_Searchnew.aspx",quarters:quarters.slice(0, 16)};
 }
 
 
@@ -464,7 +464,7 @@ function mergeSameQuarterSources(symbol:string, sources:ShareholdingQuarter[]):S
       sourceName:[...used].sort((a,b)=>priority(a)-priority(b)).join(" + ")||source.sourceName,
     });
   }
-  return merged.sort((a,b)=>b.asOnDate.localeCompare(a.asOnDate)).slice(0,12);
+  return merged.sort((a,b)=>b.asOnDate.localeCompare(a.asOnDate)).slice(0, 16);
 }
 async function loadSupplementalShareholding(symbol:string):Promise<ShareholdingQuarter[]> {
   const results=await Promise.allSettled([
@@ -505,7 +505,7 @@ async function loadShareholding(symbolInput: string, refresh = false): Promise<S
     const raw = await nseJson(`https://www.nseindia.com/api/corporate-share-holdings-master?index=equities&symbol=${encodeURIComponent(symbol)}`, page);
     if (!Array.isArray(raw)) throw new Error("Unexpected response from NSE.");
     const filings = raw as Array<Record<string, unknown>>;
-    const selected = filings.filter(row => typeof row.xbrl === "string" && /^https?:\/\//i.test(row.xbrl as string)).sort((a, b) => sourceDate(String(b.date ?? "")).localeCompare(sourceDate(String(a.date ?? "")))).slice(0, 12);
+    const selected = filings.filter(row => typeof row.xbrl === "string" && /^https?:\/\//i.test(row.xbrl as string)).sort((a, b) => sourceDate(String(b.date ?? "")).localeCompare(sourceDate(String(a.date ?? "")))).slice(0, 16);
     // Fetch the latest four filing documents concurrently; their order is restored by filing date below.
     const parsedFilings = await Promise.all(selected.map(async (filing) => {
       const url = String(filing.xbrl);
@@ -527,7 +527,7 @@ async function loadShareholding(symbolInput: string, refresh = false): Promise<S
     }));
     base.quarters = parsedFilings.filter((quarter): quarter is ShareholdingQuarter => quarter !== null);
     base.quarters.sort((a, b) => b.asOnDate.localeCompare(a.asOnDate));
-    base.quarters = base.quarters.slice(0, 12);
+    base.quarters = base.quarters.slice(0, 16);
     if (!base.quarters.length) base.note = "NSE filings were reachable, but no supported shareholding values could be parsed. Figures are not estimated.";
     else if (base.quarters.some(q => q.fii === null || q.dii === null)) base.note = "Some filings do not expose separate FII/DII values in a format this screen can verify. Missing figures remain unavailable.";
   } catch {
