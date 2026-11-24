@@ -30,7 +30,7 @@ function loadNseHistorySnapshot(): Map<string, ShareholdingQuarter> {
   const parsed = new Map<string, ShareholdingQuarter>();
   for (const [rawSymbol, row] of Object.entries(NSE_SHAREHOLDING_DATA)) {
     const symbol = normalizeSymbol(rawSymbol), period = row[0] ?? "";
-    if (!symbol || !/^\\d{4}-\\d{2}$/.test(period)) continue;
+    if (!symbol || !/^\d{4}-\d{2}$/.test(period)) continue;
     const [year, month] = period.split("-").map(Number);
     const date = new Date(Date.UTC(year, month, 0));
     const asOnDate = date.toISOString().slice(0, 10);
