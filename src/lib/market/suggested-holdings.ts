@@ -23,9 +23,20 @@ function istDateKey(): string {
 }
 
 export const fetchSuggestedHoldings = createServerFn({ method: "GET" })
-  .validator((data: unknown) => z.object({ refresh: z.boolean().optional() }).parse(data ?? {}))
-  .handler(async () => {
-    const suggestions = await fetchSuggestions({ data: { period: "current", sector: "All" } });
+  .validator((data: unknown) => z.object({
+    refresh: z.boolean().optional(),
+    fallback: z.array(z.object({ symbol: z.string().min(1).max(40), name: z.string().max(200).optional() })).max(500).optional(),
+  }).parse(data ?? {}))
+  .handler(async ({ data }) => {
+    let suggestions = await fetchSuggestions({ data: { period: "current", sector: "All" } });
+    // The Suggestions screen persists its last successful current list in browser storage.
+    // Use that exact list if the server-side NSE universe request temporarily returns empty.
+    if (!suggestions.length && data.fallback?.length) {
+      suggestions = data.fallback.map((item) => ({
+        symbol: item.symbol.trim().toUpperCase(),
+        name: item.name?.trim() || item.symbol.trim().toUpperCase(),
+      })) as typeof suggestions;
+    }
     const unique = new Map<string, (typeof suggestions)[number]>();
     for (const share of suggestions) {
       const symbol = String(share.symbol || "").trim().toUpperCase();
