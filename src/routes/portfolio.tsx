@@ -64,9 +64,9 @@ function HoldingsPage() {
     const hydrate = async () => {
       const symbols = query.data!.holdings.map((item) => item.symbol);
       let checked = 0, unavailable = 0;
-      for (let start = 0; start < symbols.length; start += 2) {
+      for (let start = 0; start < symbols.length; start += 200) {
         if (cancelled) return;
-        const batch = symbols.slice(start, start + 2);
+        const batch = symbols.slice(start, start + 200);
         try {
           const results = await fetchSuggestedHoldingsBatch({ data: { symbols: batch } });
           if (cancelled) return;
