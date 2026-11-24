@@ -51,7 +51,7 @@ function ShareholdingPage() {
   const [promoterQuarter, setPromoterQuarter] = useState<number | null>(null);
   const activeYear = selectedYear ?? latestDate.getUTCFullYear();
   const activeQuarter = selectedQuarter ?? Math.floor(latestDate.getUTCMonth() / 3) + 1;
-  const yearTabs = Array.from({ length: 4 }, (_, i) => latestDate.getUTCFullYear() - 3 + i);
+  const yearTabs = [...new Set(quarters.map(q => new Date(q.asOnDate + "T00:00:00Z").getUTCFullYear()))].sort((a, b) => a - b);
   const selectedQuarterData = quarters.find(q => { const date = new Date(q.asOnDate + "T00:00:00Z"); return date.getUTCFullYear() === activeYear && Math.floor(date.getUTCMonth() / 3) + 1 === activeQuarter; }) ?? null;
   const fourYearQuarterData = yearTabs.map(year => quarters.find(q => { const date = new Date(q.asOnDate + "T00:00:00Z"); return date.getUTCFullYear() === year && Math.floor(date.getUTCMonth() / 3) + 1 === activeQuarter; })).filter((q): q is ShareholdingQuarter => !!q);
   const pieData = useMemo(() => {
@@ -155,7 +155,7 @@ function ShareholdingPage() {
               <Stat label="Promoter holding" value={moneyPercent(holding)} />
               <Stat label="Pledge (% of promoter holding)" value={pledgeRate != null ? moneyPercent(pledgeRate) : "Not verified"} />
             </div> : null}
-            {holdingVerified ? <>
+            {pledgeVerified ? <>
               <div className="mx-auto h-[320px] w-full max-w-2xl"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={slices} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={66} outerRadius={132} paddingAngle={2} labelLine={false} label={InsidePieLabel} isAnimationActive={false}>{slices.map(item => <Cell key={item.name} fill={item.color} stroke="var(--surface)" strokeWidth={2}/>)}</Pie><Tooltip formatter={value => moneyPercent(Number(value))}/></PieChart></ResponsiveContainer></div>
               <div className="mt-3 grid grid-cols-2 gap-3">{slices.map(item => <div key={item.name} className="flex items-center gap-2 rounded-xl border border-[var(--border)] bg-surface-2 px-3 py-3 text-xs text-muted"><span className="size-3 shrink-0 rounded-full" style={{backgroundColor:item.color}}/><span className="min-w-0"><span className="block">{item.name}</span><strong className="mt-1 block tabular text-base font-semibold text-fg">{moneyPercent(item.value)}</strong></span></div>)}</div>
               <p className="mt-4 border-t border-[var(--border)] pt-3 text-xs leading-5 text-subtle">Filing as on {promoterQuarterData?.asOnDate}. Pie is normalized to promoter holding only: Promoter Pledged + Promoter Not Pledged = 100% of promoter shares. Public shareholders are excluded.</p>
