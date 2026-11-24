@@ -379,7 +379,7 @@ function mergeSameQuarterSources(symbol:string, sources:ShareholdingQuarter[]):S
   const priority=(name:string)=>({NSE:0,BSE:1,"Screener.in":2,Trendlyne:3,Tickertape:4}[name]??9);
   const grouped=new Map<string,ShareholdingQuarter[]>();
   for(const q of sources){
-    if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(q.asOnDate))continue;
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(q.asOnDate))continue;
     const rows=grouped.get(q.asOnDate)??[];rows.push(q);grouped.set(q.asOnDate,rows);
   }
   const merged:ShareholdingQuarter[]=[];
