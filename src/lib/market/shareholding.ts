@@ -23,25 +23,68 @@ export type ShareholdingResult = {
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/138 Safari/537.36";
 const cache = new Map<string, { expires: number; data: ShareholdingResult }>();
-const NSE_HISTORY_CSV = "https://github.com/yurukatsu/nse-historical-membership/blob/main/shareholding_history/data/parsed/_signals.csv";
+const NSE_HISTORY_CSV = "https://raw.githubusercontent.com/yurukatsu/nse-historical-membership/main/shareholding_history/data/parsed/_signals.csv";
 let nseHistoryCache: { expires: number; data: Map<string, ShareholdingQuarter> } | null = null;
-function loadNseHistorySnapshot(): Map<string, ShareholdingQuarter> {
-  if (nseHistoryCache && nseHistoryCache.expires > Date.now()) return nseHistoryCache.data;
+let nseHistoryLoadPromise: Promise<Map<string, ShareholdingQuarter>> | null = null;
+
+function parseNseHistoryCsv(csv: string): Map<string, ShareholdingQuarter> {
+  const lines = csv.replace(/\r/g, "").split("\n").filter(Boolean);
+  const headers = (lines.shift() ?? "").split(",").map(value => value.trim().toLowerCase());
+  const index = (name: string) => headers.indexOf(name);
+  const tickerIndex = index("ticker"), periodIndex = index("latest_period");
+  const promoterIndex = index("latest_promoter"), fiiIndex = index("latest_fii");
+  const diiIndex = index("latest_dii"), publicIndex = index("latest_public");
+  const pledgeIndex = index("latest_pledge");
+  if ([tickerIndex, periodIndex, promoterIndex, fiiIndex, diiIndex, publicIndex].some(i => i < 0)) throw new Error("Historical CSV columns changed");
   const parsed = new Map<string, ShareholdingQuarter>();
-  for (const [rawSymbol, row] of Object.entries(NSE_SHAREHOLDING_DATA)) {
-    const symbol = normalizeSymbol(rawSymbol), period = row[0] ?? "";
-    if (!symbol || !/^\d{4}-\d{2}$/.test(period)) continue;
+  for (const line of lines) {
+    const cells = line.split(",");
+    const symbol = normalizeSymbol(cells[tickerIndex] ?? ""), period = cells[periodIndex] ?? "";
+    if (!symbol || !/^[0-9]{4}-[0-9]{2}$/.test(period)) continue;
     const [year, month] = period.split("-").map(Number);
-    const date = new Date(Date.UTC(year, month, 0));
-    const asOnDate = date.toISOString().slice(0, 10);
+    if (month < 1 || month > 12) continue;
+    const date = new Date(Date.UTC(year, month, 0)), asOnDate = date.toISOString().slice(0, 10);
     const quarter = date.toLocaleDateString("en-IN", { month: "short", year: "numeric", timeZone: "UTC" });
-    const value = (raw: string | null) => safeNumber(raw);
-    const fii = value(row[2]), dii = value(row[3]);
+    const value = (column: number) => safeNumber(cells[column] ?? null);
+    const fii = value(fiiIndex), dii = value(diiIndex);
     if (fii === null && dii === null) continue;
-    parsed.set(symbol, { quarter, asOnDate, promoter: value(row[1]), fii, dii, public: value(row[4]), promoterPledge: value(row[5]), sourceUrl: NSE_HISTORY_CSV, sourceName: "NSE XBRL historical dataset" });
+    parsed.set(symbol, { quarter, asOnDate, promoter: value(promoterIndex), fii, dii, public: value(publicIndex),
+      promoterPledge: pledgeIndex >= 0 ? value(pledgeIndex) : null, sourceUrl: NSE_HISTORY_CSV, sourceName: "NSE XBRL historical dataset" });
   }
-  nseHistoryCache = { expires: Date.now() + 6 * 60 * 60_000, data: parsed };
   return parsed;
+}
+
+async function loadNseHistorySnapshot(refresh = false): Promise<Map<string, ShareholdingQuarter>> {
+  if (!refresh && nseHistoryCache && nseHistoryCache.expires > Date.now()) return nseHistoryCache.data;
+  if (!refresh && nseHistoryLoadPromise) return nseHistoryLoadPromise;
+  const load = (async () => {
+    try {
+      const response = await fetch(NSE_HISTORY_CSV, { headers: { "User-Agent": UA, Accept: "text/csv,text/plain,*/*" }, cache: "no-store" });
+      if (!response.ok) throw new Error("Historical CSV unavailable");
+      const parsed = parseNseHistoryCsv(await response.text());
+      if (!parsed.size) throw new Error("Historical CSV had no valid rows");
+      nseHistoryCache = { expires: Date.now() + 6 * 60 * 60_000, data: parsed };
+      return parsed;
+    } catch {
+      // Bundled snapshot is only a resilience fallback; normal operation refreshes from upstream.
+      const parsed = new Map<string, ShareholdingQuarter>();
+      for (const [rawSymbol, row] of Object.entries(NSE_SHAREHOLDING_DATA)) {
+        const symbol = normalizeSymbol(rawSymbol), period = row[0] ?? "";
+        if (!symbol || !/^[0-9]{4}-[0-9]{2}$/.test(period)) continue;
+        const [year, month] = period.split("-").map(Number);
+        const date = new Date(Date.UTC(year, month, 0)), asOnDate = date.toISOString().slice(0, 10);
+        const quarter = date.toLocaleDateString("en-IN", { month: "short", year: "numeric", timeZone: "UTC" });
+        const value = (raw: string | null) => safeNumber(raw), fii = value(row[2]), dii = value(row[3]);
+        if (fii === null && dii === null) continue;
+        parsed.set(symbol, { quarter, asOnDate, promoter: value(row[1]), fii, dii, public: value(row[4]), promoterPledge: value(row[5]),
+          sourceUrl: NSE_HISTORY_CSV, sourceName: "NSE XBRL historical dataset (bundled fallback)" });
+      }
+      nseHistoryCache = { expires: Date.now() + 30 * 60_000, data: parsed };
+      return parsed;
+    }
+  })();
+  nseHistoryLoadPromise = load;
+  try { return await load; } finally { if (nseHistoryLoadPromise === load) nseHistoryLoadPromise = null; }
 }
 
 function normalizeSymbol(symbol: string) {
@@ -442,7 +485,7 @@ async function loadShareholding(symbolInput: string, refresh = false): Promise<S
   const symbol = normalizeSymbol(symbolInput);
   if (!symbol) throw new Error("A valid NSE symbol is required.");
   try {
-    const quarter = loadNseHistorySnapshot().get(symbol);
+    const quarter = (await loadNseHistorySnapshot(refresh)).get(symbol);
     if (quarter) {
       const data: ShareholdingResult = { symbol, source: quarter.sourceUrl, sourceName: quarter.sourceName, quarters: [quarter], note: "Latest available quarterly values parsed from NSE XBRL filings in a public historical dataset. Quarter date is shown per company; a newer filing may not yet be indexed." };
       cache.set(symbol, { expires: Date.now() + 6 * 60 * 60_000, data });
