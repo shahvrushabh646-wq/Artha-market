@@ -15,7 +15,7 @@ export const Route = createFileRoute("/shareholding")({
   component: ShareholdingPage,
 });
 
-const COLORS = { FII: "#e879f9", DII: "#38bdf8", Promoter: "#34d399", Public: "#f59e0b", Pledge: "#fb7185", Additional: "#818cf8" };
+const COLORS = { FII: "#2563eb", DII: "#06b6d4", Promoter: "#10b981", Public: "#f59e0b", Pledge: "#e11d48", Other: "#64748b", Additional: "#8b5cf6" };
 const moneyPercent = (value: number | null | undefined) => value == null || !Number.isFinite(value) ? "—" : `${value.toFixed(2)}%`;
 function quarterLabel(q: ShareholdingQuarter) { return q.quarter || q.asOnDate; }
 function InsidePieLabel(props: { cx?: number; cy?: number; midAngle?: number; innerRadius?: number; outerRadius?: number; percent?: number; name?: string; payload?: { value?: number; displayName?: string } }) {
@@ -60,7 +60,7 @@ function ShareholdingPage() {
       { name: "FII", displayName: "FII", value: quarter.fii, color: COLORS.FII },
       { name: "DII", displayName: "DII", value: quarter.dii, color: COLORS.DII },
       { name: "Promoter", displayName: "Promoter", value: quarter.promoter, color: COLORS.Promoter },
-      { name: "Public", displayName: "Public*", value: otherPublic, color: COLORS.Public },
+      { name: "Other public", displayName: "Other public", value: otherPublic, color: COLORS.Public },
     ].filter(item => item.value > 0);
   }, [selectedQuarterData]);
   const screening = useMemo(() => {
@@ -107,37 +107,24 @@ function ShareholdingPage() {
           <div className="mx-auto h-[320px] w-full max-w-2xl">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
-                <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={128} labelLine={false} label={InsidePieLabel} isAnimationActive={false}>
-                  {pieData.map(entry => <Cell key={entry.name} fill={entry.color}/>)}
+                <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={66} outerRadius={132} paddingAngle={2} labelLine={false} label={InsidePieLabel} isAnimationActive={false}>
+                  {pieData.map(entry => <Cell key={entry.name} fill={entry.color} stroke="var(--surface)" strokeWidth={2}/>)}
                 </Pie>
                 <Tooltip formatter={(value) => moneyPercent(Number(value))}/>
               </PieChart>
             </ResponsiveContainer>
           </div>
-          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">{pieData.map(entry => <span key={entry.name} className="flex items-center gap-2 rounded-lg bg-surface-2 px-3 py-2.5 text-xs text-muted"><span className="size-3 shrink-0 rounded-sm" style={{ backgroundColor: entry.color }}/><span className="min-w-0"><span className="block">{entry.displayName}</span><strong className="mt-0.5 block tabular text-sm text-fg">{moneyPercent(entry.value)}</strong></span></span>)}</div>
-          <p className="mt-4 border-t border-[var(--border)] pt-3 text-xs leading-5 text-subtle">Filing as on {selectedQuarterData?.asOnDate}. * Public slice excludes FII and DII to avoid double-counting; total public holding is shown in the comparison table.</p>
+          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-5">{pieData.map(entry => <span key={entry.name} className="flex items-center gap-2 rounded-xl border border-[var(--border)] bg-surface-2 px-3 py-3 text-xs text-muted"><span className="size-3 shrink-0 rounded-full" style={{ backgroundColor: entry.color }}/><span className="min-w-0"><span className="block">{entry.displayName}</span><strong className="mt-1 block tabular text-base font-semibold text-fg">{moneyPercent(entry.value)}</strong></span></span>)}<span className="flex items-center gap-2 rounded-xl border border-[var(--border)] bg-surface-2 px-3 py-3 text-xs text-muted"><span className="size-3 shrink-0 rounded-full" style={{backgroundColor:COLORS.Other}}/><span><span className="block">Public total</span><strong className="mt-1 block tabular text-base font-semibold text-fg">{moneyPercent(selectedQuarterData?.public)}</strong></span></span></div>
+          <p className="mt-4 border-t border-[var(--border)] pt-3 text-xs leading-5 text-subtle">Filing as on {selectedQuarterData?.asOnDate}. FII and DII are included within total Public holding; the pie shows remaining public float separately to avoid double-counting.</p>
         </> : <Panel><p className="text-sm text-muted">No verified filing found for {selectedQuarter} {selectedYear}. Try another quarter. Historical figures are not estimated.</p></Panel>}
         </Panel>
       </Section>
 
-      <Section title="Promoter holding & pledge" hint={"Q"+activeQuarter+" across four years · only reported filings are shown"}>
-        {barData.length ? <Panel className="p-4 sm:p-5"><div className="h-[300px] w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={barData} margin={{ top: 22, right: 8, left: -16, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" opacity={0.45}/>
-              <XAxis dataKey="quarter" tick={{ fill: "var(--muted)", fontSize: 10 }} />
-              <YAxis tick={{ fill: "var(--muted)", fontSize: 10 }} unit="%" />
-              <Tooltip formatter={(value) => moneyPercent(typeof value === "number" ? value : null)}/>
-              <Bar dataKey="promoter" name="Promoter holding" fill={COLORS.Promoter} radius={[4,4,0,0]} maxBarSize={28}>
-                <LabelList dataKey="promoter" position="insideTop" fill="#fff" fontSize={10} formatter={(value) => typeof value === "number" ? `${value.toFixed(1)}%` : "—"}/>
-              </Bar>
-              <Bar dataKey="pledge" name="Promoter pledge (% of promoter holding)" fill={COLORS.Pledge} radius={[4,4,0,0]} maxBarSize={28}>
-                <LabelList dataKey="pledge" position="insideTop" fill="#fff" fontSize={10} formatter={(value) => typeof value === "number" ? `${value.toFixed(1)}%` : ""}/>
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </div></Panel> : <Panel><p className="text-sm text-muted">Insufficient Data: no quarterly promoter figures were verified.</p></Panel>}
-        <p className="mt-2 text-xs text-subtle">Pledge is expressed as pledged shares divided by promoter-group shares. If the filing does not provide enough information to calculate it, the value is left blank.</p>
+      <Section title="Promoter holding & pledge" hint={"Same selected period · Q"+activeQuarter+" "+activeYear+" · verified values only"}>
+        {selectedQuarterData?.promoter != null && selectedQuarterData.promoterPledge != null ? <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <Panel className="p-4 sm:p-5"><h3 className="text-base font-semibold text-fg">Promoter ownership</h3><p className="mt-1 text-xs text-muted">Promoter group vs other shareholders</p><div className="h-[270px]"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={[{name:"Promoter",value:selectedQuarterData.promoter,color:COLORS.Promoter},{name:"Other shareholders",value:Math.max(0,100-selectedQuarterData.promoter),color:COLORS.Other}]} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={68} outerRadius={108} paddingAngle={2} label={InsidePieLabel} labelLine={false} isAnimationActive={false}>{[COLORS.Promoter,COLORS.Other].map((color,i)=><Cell key={i} fill={color} stroke="var(--surface)" strokeWidth={2}/>)}</Pie><Tooltip formatter={value=>moneyPercent(Number(value))}/></PieChart></ResponsiveContainer></div><div className="rounded-xl border border-[var(--border)] bg-surface-2 p-3"><span className="text-xs text-muted">Promoter holding</span><strong className="mt-1 block text-xl tabular text-fg">{moneyPercent(selectedQuarterData.promoter)}</strong></div></Panel>
+          <Panel className="p-4 sm:p-5"><h3 className="text-base font-semibold text-fg">Promoter pledge</h3><p className="mt-1 text-xs text-muted">Pledged vs unpledged promoter shares</p><div className="h-[270px]"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={[{name:"Pledged",value:selectedQuarterData.promoterPledge,color:COLORS.Pledge},{name:"Unpledged",value:Math.max(0,100-selectedQuarterData.promoterPledge),color:COLORS.Promoter}]} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={68} outerRadius={108} paddingAngle={2} label={InsidePieLabel} labelLine={false} isAnimationActive={false}>{[COLORS.Pledge,COLORS.Promoter].map((color,i)=><Cell key={i} fill={color} stroke="var(--surface)" strokeWidth={2}/>)}</Pie><Tooltip formatter={value=>moneyPercent(Number(value))}/></PieChart></ResponsiveContainer></div><div className="rounded-xl border border-[var(--border)] bg-surface-2 p-3"><span className="text-xs text-muted">Pledged of promoter holding</span><strong className="mt-1 block text-xl tabular text-fg">{moneyPercent(selectedQuarterData.promoterPledge)}</strong></div><p className="mt-3 text-xs text-subtle">The pledge pie shows pledged vs unpledged promoter shares, based on the filing's pledge percentage.</p></Panel>
+        </div> : <Panel><p className="text-sm text-muted">Promoter holding or pledge data is not verified for {activeQuarter} {activeYear}. No estimated pie is shown.</p></Panel>}
       </Section>
 
       <Section title="Quarterly comparison" hint="Reported filings · change is latest minus oldest, in percentage points (pp)">
