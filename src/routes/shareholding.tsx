@@ -51,7 +51,13 @@ function ShareholdingPage() {
   const [promoterQuarter, setPromoterQuarter] = useState<number | null>(null);
   const activeYear = selectedYear ?? latestDate.getUTCFullYear();
   const activeQuarter = selectedQuarter ?? Math.floor(latestDate.getUTCMonth() / 3) + 1;
-  const yearTabs = [...new Set(quarters.map(q => new Date(q.asOnDate + "T00:00:00Z").getUTCFullYear()))].sort((a, b) => a - b);
+  // Keep recent year tabs visible even if a provider has no filing for a year.
+  // Values remain sourced only from actual dated quarters.
+  const currentYear = new Date().getUTCFullYear();
+  const yearTabs = [...new Set([
+    ...Array.from({ length: Math.max(0, currentYear - 2021 + 1) }, (_, i) => 2021 + i),
+    ...quarters.map(q => new Date(q.asOnDate + "T00:00:00Z").getUTCFullYear()),
+  ])].sort((a, b) => a - b);
   const selectedQuarterData = quarters.find(q => { const date = new Date(q.asOnDate + "T00:00:00Z"); return date.getUTCFullYear() === activeYear && Math.floor(date.getUTCMonth() / 3) + 1 === activeQuarter; }) ?? null;
   const fourYearQuarterData = yearTabs.map(year => quarters.find(q => { const date = new Date(q.asOnDate + "T00:00:00Z"); return date.getUTCFullYear() === year && Math.floor(date.getUTCMonth() / 3) + 1 === activeQuarter; })).filter((q): q is ShareholdingQuarter => !!q);
   const pieData = useMemo(() => {
