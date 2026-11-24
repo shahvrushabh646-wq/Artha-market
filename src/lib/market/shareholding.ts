@@ -375,6 +375,48 @@ async function loadBseFallback(symbol:string):Promise<{url:string;quarters:Share
 }
 
 
+function mergeSameQuarterSources(symbol:string, sources:ShareholdingQuarter[]):ShareholdingQuarter[] {
+  const priority=(name:string)=>({NSE:0,BSE:1,"Screener.in":2,Trendlyne:3,Tickertape:4}[name]??9);
+  const grouped=new Map<string,ShareholdingQuarter[]>();
+  for(const q of sources){
+    if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(q.asOnDate))continue;
+    const rows=grouped.get(q.asOnDate)??[];rows.push(q);grouped.set(q.asOnDate,rows);
+  }
+  const merged:ShareholdingQuarter[]=[];
+  for(const [asOnDate,rows] of grouped){
+    rows.sort((a,b)=>priority(a.sourceName)-priority(b.sourceName));
+    const take=(key:"promoter"|"fii"|"dii"|"public"|"promoterPledge")=>rows.find(q=>q[key]!==null&&q[key]!==undefined)?.[key]??null;
+    const used=new Set<string>();
+    for(const key of ["promoter","fii","dii","public","promoterPledge"] as const){
+      const chosen=rows.find(q=>q[key]!==null&&q[key]!==undefined);
+      if(chosen)used.add(chosen.sourceName);
+    }
+    const source=rows.find(q=>q.fii!==null||q.dii!==null)||rows[0];
+    const date=new Date(asOnDate+"T00:00:00Z");
+    merged.push({
+      quarter:source.quarter||date.toLocaleDateString("en-IN",{month:"short",year:"numeric",timeZone:"UTC"}),
+      asOnDate,promoter:take("promoter"),fii:take("fii"),dii:take("dii"),public:take("public"),
+      promoterPledge:take("promoterPledge"),sourceUrl:source.sourceUrl,
+      sourceName:[...used].sort((a,b)=>priority(a)-priority(b)).join(" + ")||source.sourceName,
+    });
+  }
+  return merged.sort((a,b)=>b.asOnDate.localeCompare(a.asOnDate)).slice(0,4);
+}
+async function loadSupplementalShareholding(symbol:string):Promise<ShareholdingQuarter[]> {
+  const results=await Promise.allSettled([
+    loadScreenerFallback(symbol),
+    loadBseFallback(symbol),
+    loadPublicSiteFallback(symbol),
+  ]);
+  const quarters:ShareholdingQuarter[]=[];
+  for(const result of results){
+    if(result.status!=="fulfilled")continue;
+    const value=result.value;
+    if("quarters" in value)quarters.push(...value.quarters);
+  }
+  return quarters;
+}
+
 async function loadShareholding(symbolInput: string, refresh = false): Promise<ShareholdingResult> {
   const symbol = normalizeSymbol(symbolInput);
   if (!symbol) throw new Error("A valid NSE symbol is required.");
@@ -466,6 +508,23 @@ async function loadShareholding(symbolInput: string, refresh = false): Promise<S
       base.sourceName=extra.name;
       base.quarters=extra.quarters;
       base.note=`Using ${extra.name} public shareholding table because it had a complete quarter no older than the exchange/Screener result. Verify at the linked source; missing pledge remains unavailable.`;
+    }
+  }
+
+  // Cross-check all independent providers when the selected filing has missing fields.
+  // Merge only records with the exact same as-on date; never mix quarter values.
+  const currentLatest=base.quarters[0];
+  const needsFieldMerge=!currentLatest || currentLatest.promoter===null || currentLatest.fii===null ||
+    currentLatest.dii===null || currentLatest.public===null || currentLatest.promoterPledge===null;
+  if(needsFieldMerge){
+    const supplemental=await loadSupplementalShareholding(symbol);
+    const combined=mergeSameQuarterSources(symbol,[...base.quarters,...supplemental]);
+    const mergedLatest=combined[0],oldLatest=base.quarters[0];
+    if(mergedLatest && (!oldLatest || mergedLatest.asOnDate>=oldLatest.asOnDate)){
+      base.quarters=combined;
+      base.source=mergedLatest.sourceUrl;
+      base.sourceName=mergedLatest.sourceName;
+      base.note="Shareholding categories were cross-checked across NSE, BSE, Screener.in and available public finance sources. Only same-as-on-date values are merged; provider/quarter differences are not blended. Missing fields remain unverified.";
     }
   }
 
