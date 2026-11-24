@@ -208,7 +208,7 @@ function parseXbrl(xml: string): Omit<ShareholdingQuarter, "quarter" | "asOnDate
   let pledgePctOfCompany: number | null = null;
   const pledgeFacts = /<(?:[\\w.-]+:)?([\\w.-]+)\\b([^>]*)>([\\d.,-]+)<\\/(?:[\\w.-]+:)?\\1\\s*>/gi;
   for (const fact of xml.matchAll(pledgeFacts)) {
-    const concept = fact[1].split(":").pop() ?? fact[1];
+    const concept = (fact[2].match(/\bname=["']([^"']+)["']/i)?.[1] ?? fact[1]).split(":").pop() ?? fact[1];
     if (!/(?:pledged|encumbered)/i.test(concept) || !/(?:percentage|percent|totalnumberofshares)/i.test(concept)) continue;
     const attrs = fact[2];
     const contextRef = attrs.match(/\\bcontextRef=["']([^"']+)["']/i)?.[1];
@@ -227,7 +227,7 @@ function parseXbrl(xml: string): Omit<ShareholdingQuarter, "quarter" | "asOnDate
   let pledgedShares: number | null = null;
   const shareFacts = /<(?:[\\w.-]+:)?([\\w.-]+)\\b([^>]*)>([\\d.,-]+)<\\/(?:[\\w.-]+:)?\\1\\s*>/gi;
   for (const fact of xml.matchAll(shareFacts)) {
-    const concept = fact[1].split(":").pop() ?? fact[1];
+    const concept = (fact[2].match(/\bname=["']([^"']+)["']/i)?.[1] ?? fact[1]).split(":").pop() ?? fact[1];
     const attrs = fact[2];
     const contextRef = attrs.match(/\\bcontextRef=["']([^"']+)["']/i)?.[1];
     const members = contexts.get(contextRef ?? "") ?? [];
