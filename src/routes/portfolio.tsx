@@ -11,7 +11,7 @@ type SortMode = "institutional" | "alphabetical";
 function percent(value: number | null | undefined) {
   return value === null || value === undefined || !Number.isFinite(value) ? "—" : `${value.toFixed(2)}%`;
 }
-function publicResidual(quarter: { public: number | null; fii: number | null; dii: number | null; sourceName: "NSE" | "Screener.in" } | null) {
+function publicResidual(quarter: { public: number | null; fii: number | null; dii: number | null; sourceName: string } | null) {
   if (!quarter || quarter.public === null) return null;
   // Screener reports FIIs/DIIs separately from its non-institutional Public row.
   if (quarter.sourceName === "Screener.in") return quarter.public;
