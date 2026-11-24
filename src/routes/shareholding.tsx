@@ -116,7 +116,7 @@ function ShareholdingPage() {
           </div>
           <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-5">{pieData.map(entry => <span key={entry.name} className="flex items-center gap-2 rounded-xl border border-[var(--border)] bg-surface-2 px-3 py-3 text-xs text-muted"><span className="size-3 shrink-0 rounded-full" style={{ backgroundColor: entry.color }}/><span className="min-w-0"><span className="block">{entry.displayName}</span><strong className="mt-1 block tabular text-base font-semibold text-fg">{moneyPercent(entry.value)}</strong></span></span>)}<span className="flex items-center gap-2 rounded-xl border border-[var(--border)] bg-surface-2 px-3 py-3 text-xs text-muted"><span className="size-3 shrink-0 rounded-full" style={{backgroundColor:COLORS.Other}}/><span><span className="block">Public total</span><strong className="mt-1 block tabular text-base font-semibold text-fg">{moneyPercent(selectedQuarterData?.public)}</strong></span></span></div>
           <p className="mt-4 border-t border-[var(--border)] pt-3 text-xs leading-5 text-subtle">Filing as on {selectedQuarterData?.asOnDate}. FII and DII are included within total Public holding; the pie shows remaining public float separately to avoid double-counting.</p>
-        </> : <Panel><p className="text-sm text-muted">No verified filing found for {selectedQuarter} {selectedYear}. Try another quarter. Historical figures are not estimated.</p></Panel>}
+        </> : <Panel><p className="text-sm text-muted">No verified filing found for {activeQuarter} {activeYear}. Try another quarter. Historical figures are not estimated.</p></Panel>}
         </Panel>
       </Section>
 
