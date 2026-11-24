@@ -562,15 +562,15 @@ async function loadSupplementalShareholding(symbol:string):Promise<ShareholdingQ
 async function loadShareholding(symbolInput: string, refresh = false): Promise<ShareholdingResult> {
   const symbol = normalizeSymbol(symbolInput);
   if (!symbol) throw new Error("A valid NSE symbol is required.");
+  // Load the full parsed historical dataset for every company, including symbols
+  // absent from the latest-snapshot signals file.
+  const flatHistory = await loadNseFlatHistory(symbol).catch(() => []);
   try {
     const quarter = (await loadNseHistorySnapshot(refresh)).get(symbol);
     if (quarter) {
       // The signals CSV is a latest-period snapshot. On company drill-down,
       // enrich it with dated historical quarters from independent public filing sources.
-      const [flatHistory, supplemental] = await Promise.all([
-        loadNseFlatHistory(symbol).catch(() => []),
-        loadSupplementalShareholding(symbol),
-      ]);
+      const supplemental = await loadSupplementalShareholding(symbol);
       // The full parsed NSE XBRL table contains dated historical promoter values;
       // the signals CSV is only a latest-quarter snapshot. Preserve the full history
       // and merge exact period dates only. Pledge stays null unless separately reported.
@@ -584,7 +584,13 @@ async function loadShareholding(symbolInput: string, refresh = false): Promise<S
   if (!refresh && cached && cached.expires > Date.now()) return cached.data;
   if (refresh) cache.delete(symbol);
   const page = `https://www.nseindia.com/companies-listing/corporate-filings-shareholding-pattern?symbol=${encodeURIComponent(symbol)}&tabIndex=equity`;
-  const base: ShareholdingResult = { symbol, source: page, sourceName: "NSE", quarters: [], note: null };
+  const base: ShareholdingResult = {
+    symbol,
+    source: flatHistory[0]?.sourceUrl ?? page,
+    sourceName: flatHistory[0]?.sourceName ?? "NSE",
+    quarters: flatHistory,
+    note: flatHistory.length ? "Historical shareholding loaded from parsed NSE XBRL records; pledge remains unverified unless a filing reports it." : null,
+  };
   try {
     const raw = await nseJson(`https://www.nseindia.com/api/corporate-share-holdings-master?index=equities&symbol=${encodeURIComponent(symbol)}`, page);
     if (!Array.isArray(raw)) throw new Error("Unexpected response from NSE.");
@@ -609,9 +615,10 @@ async function loadShareholding(symbolInput: string, refresh = false): Promise<S
         };
       } catch { return null; }
     }));
-    base.quarters = parsedFilings.filter((quarter): quarter is ShareholdingQuarter => quarter !== null);
-    base.quarters.sort((a, b) => b.asOnDate.localeCompare(a.asOnDate));
-    base.quarters = base.quarters.slice(0, 16);
+    base.quarters = mergeSameQuarterSources(symbol, [
+      ...parsedFilings.filter((quarter): quarter is ShareholdingQuarter => quarter !== null),
+      ...flatHistory,
+    ]);
     if (!base.quarters.length) base.note = "NSE filings were reachable, but no supported shareholding values could be parsed. Figures are not estimated.";
     else if (base.quarters.some(q => q.fii === null || q.dii === null)) base.note = "Some filings do not expose separate FII/DII values in a format this screen can verify. Missing figures remain unavailable.";
   } catch {
