@@ -169,8 +169,8 @@ function parseXbrl(xml: string): Omit<ShareholdingQuarter, "quarter" | "asOnDate
   const sum = (values.promoter ?? 0) + (values.public ?? 0);
   const scale = sum > 1000 ? 0.01 : sum > 0 && sum < 2 ? 100 : 1;
   for (const key of ["promoter", "public", "fii", "dii"] as const) if (values[key] !== null) values[key] = Math.round((values[key] as number) * scale * 10000) / 10000;
-  const promoterPledge = pledgePctRaw !== null
-    ? Math.round(pledgePctRaw * scale * 100) / 100
+  const promoterPledge = pledgePctRaw !== null && values.promoter !== null && values.promoter > 0
+    ? Math.round((pledgePctRaw * scale / values.promoter) * 10000) / 100
     : shareCounts.promoter && shareCounts.pledged !== null
       ? Math.round((shareCounts.pledged / shareCounts.promoter) * 10000) / 100
       : null;
