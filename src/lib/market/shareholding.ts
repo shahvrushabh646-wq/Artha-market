@@ -22,6 +22,35 @@ export type ShareholdingResult = {
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/138 Safari/537.36";
 const cache = new Map<string, { expires: number; data: ShareholdingResult }>();
+const NSE_HISTORY_CSV = "https://raw.githubusercontent.com/yurukatsu/nse-historical-membership/main/shareholding_history/data/parsed/_signals.csv";
+let nseHistoryCache: { expires: number; data: Map<string, ShareholdingQuarter> } | null = null;
+
+async function loadNseHistorySnapshot(): Promise<Map<string, ShareholdingQuarter>> {
+  if (nseHistoryCache && nseHistoryCache.expires > Date.now()) return nseHistoryCache.data;
+  const response = await fetch(NSE_HISTORY_CSV, { headers: { "User-Agent": UA, Accept: "text/csv,text/plain,*/*" }, cache: "no-store" });
+  if (!response.ok) throw new Error(`NSE XBRL history dataset HTTP ${response.status}`);
+  const lines = (await response.text()).split(/\\r?\\n/).filter(Boolean);
+  const header = (lines.shift() ?? "").split(",");
+  const index = (name: string) => header.indexOf(name);
+  const ix = { symbol: index("ticker"), period: index("latest_period"), promoter: index("latest_promoter"), fii: index("latest_fii"), dii: index("latest_dii"), public: index("latest_public"), pledge: index("latest_pledge") };
+  if (Object.values(ix).some(value => value < 0)) throw new Error("NSE XBRL history dataset schema changed");
+  const parsed = new Map<string, ShareholdingQuarter>();
+  for (const line of lines) {
+    const row = line.split(",");
+    const symbol = normalizeSymbol(row[ix.symbol] ?? ""), period = row[ix.period] ?? "";
+    if (!symbol || !/^\\d{4}-\\d{2}$/.test(period)) continue;
+    const [year, month] = period.split("-").map(Number);
+    const date = new Date(Date.UTC(year, month, 0)), asOnDate = date.toISOString().slice(0, 10);
+    const quarter = date.toLocaleDateString("en-IN", { month: "short", year: "numeric", timeZone: "UTC" });
+    const value = (column: number) => safeNumber(row[column] ?? "");
+    const fii = value(ix.fii), dii = value(ix.dii);
+    if (fii === null && dii === null) continue;
+    parsed.set(symbol, { quarter, asOnDate, promoter: value(ix.promoter), fii, dii, public: value(ix.public), promoterPledge: value(ix.pledge), sourceUrl: NSE_HISTORY_CSV, sourceName: "NSE XBRL historical dataset" });
+  }
+  if (!parsed.size) throw new Error("NSE XBRL history dataset contained no parsed shareholding rows");
+  nseHistoryCache = { expires: Date.now() + 6 * 60 * 60_000, data: parsed };
+  return parsed;
+}
 
 function normalizeSymbol(symbol: string) {
   return symbol.trim().toUpperCase().replace(/\.NS$|\.BO$/i, "").replace(/[^A-Z0-9&_-]/g, "");
@@ -420,6 +449,14 @@ async function loadSupplementalShareholding(symbol:string):Promise<ShareholdingQ
 async function loadShareholding(symbolInput: string, refresh = false): Promise<ShareholdingResult> {
   const symbol = normalizeSymbol(symbolInput);
   if (!symbol) throw new Error("A valid NSE symbol is required.");
+  try {
+    const quarter = (await loadNseHistorySnapshot()).get(symbol);
+    if (quarter) {
+      const data: ShareholdingResult = { symbol, source: quarter.sourceUrl, sourceName: quarter.sourceName, quarters: [quarter], note: "Latest available quarterly values parsed from NSE XBRL filings in a public historical dataset. Quarter date is shown per company; a newer filing may not yet be indexed." };
+      cache.set(symbol, { expires: Date.now() + 6 * 60 * 60_000, data });
+      return data;
+    }
+  } catch { /* use live exchange/provider fallback below */ }
   const cached = cache.get(symbol);
   if (!refresh && cached && cached.expires > Date.now()) return cached.data;
   if (refresh) cache.delete(symbol);
