@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { AlertTriangle, ArrowLeft, ExternalLink, UsersRound } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Cell, LabelList, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { fetchShareholding, type ShareholdingQuarter } from "@/lib/market/shareholding";
@@ -41,19 +41,28 @@ function ShareholdingPage() {
     retry: 1,
   });
   const data = query.data;
+  const now = new Date();
+  const [selectedYear, setSelectedYear] = useState(String(now.getFullYear()));
+  const [selectedQuarter, setSelectedQuarter] = useState(`Q${Math.floor(now.getMonth() / 3) + 1}`);
   const quarters = useMemo(() => [...(data?.quarters ?? [])].sort((a, b) => a.asOnDate.localeCompare(b.asOnDate)), [data?.quarters]);
   const latest = quarters.at(-1) ?? null;
+  const selectedQuarterData = quarters.find(q => {
+    const date = new Date(q.asOnDate + "T00:00:00Z");
+    const quarter = `Q${Math.floor(date.getUTCMonth() / 3) + 1}`;
+    return date.getUTCFullYear() === Number(selectedYear) && quarter === selectedQuarter;
+  }) ?? null;
   const pieData = useMemo(() => {
-    if (!latest || latest.promoter == null || latest.fii == null || latest.dii == null || latest.public == null) return [];
+    const quarter = selectedQuarterData;
+    if (!quarter || quarter.promoter == null || quarter.fii == null || quarter.dii == null || quarter.public == null) return [];
     // FII and DII are subcategories of Public. Use the remaining public float as the fourth, non-overlapping slice.
-    const otherPublic = Math.max(0, latest.public - latest.fii - latest.dii);
+    const otherPublic = Math.max(0, quarter.public - quarter.fii - quarter.dii);
     return [
-      { name: "FII", displayName: "FII", value: latest.fii, color: COLORS.FII },
-      { name: "DII", displayName: "DII", value: latest.dii, color: COLORS.DII },
-      { name: "Promoter", displayName: "Promoter", value: latest.promoter, color: COLORS.Promoter },
+      { name: "FII", displayName: "FII", value: quarter.fii, color: COLORS.FII },
+      { name: "DII", displayName: "DII", value: quarter.dii, color: COLORS.DII },
+      { name: "Promoter", displayName: "Promoter", value: quarter.promoter, color: COLORS.Promoter },
       { name: "Public", displayName: "Public*", value: otherPublic, color: COLORS.Public },
     ].filter(item => item.value > 0);
-  }, [latest]);
+  }, [selectedQuarterData]);
   const screening = useMemo(() => {
     if (!latest || latest.fii == null || latest.dii == null) return { label: "Insufficient Data", detail: "Latest-quarter FII and/or DII figures could not be verified." };
     const combined = latest.fii + latest.dii;
@@ -92,7 +101,8 @@ function ShareholdingPage() {
         {latest ? <p className="mt-2 text-xs text-subtle">Latest reported quarter: {latest.quarter} · as on {latest.asOnDate}</p> : null}
       </Panel>
 
-      <Section title="Latest-quarter shareholding" hint={latest ? `Reported as on ${latest.asOnDate}` : "Latest verified filing"}>
+      <Section title="Quarterly shareholding pattern" hint="Choose a year and quarter to view that dated filing">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div className="flex gap-2"><select aria-label="Shareholding quarter" value={selectedQuarter} onChange={event=>setSelectedQuarter(event.target.value)} className="rounded-lg bg-surface-2 px-3 py-2 text-sm text-fg">{["Q1","Q2","Q3","Q4"].map(q=><option key={q} value={q}>{q}</option>)}</select><select aria-label="Shareholding year" value={selectedYear} onChange={event=>setSelectedYear(event.target.value)} className="rounded-lg bg-surface-2 px-3 py-2 text-sm text-fg">{Array.from({length:4},(_,i)=>now.getFullYear()-3+i).map(y=><option key={y} value={String(y)}>{y}</option>)}</select></div><span className="text-xs text-muted">{selectedQuarter} {selectedYear}</span></div>
         {pieData.length ? <>
           <div className="h-[290px] w-full">
             <ResponsiveContainer width="100%" height="100%">
@@ -105,8 +115,8 @@ function ShareholdingPage() {
             </ResponsiveContainer>
           </div>
           <div className="flex flex-wrap justify-center gap-x-4 gap-y-2 text-xs text-muted">{pieData.map(entry => <span key={entry.name} className="inline-flex items-center gap-1.5"><span className="size-2.5 rounded-sm" style={{ backgroundColor: entry.color }}/>{entry.displayName}: {moneyPercent(entry.value)}</span>)}</div>
-          <p className="mt-3 text-xs text-subtle">* Public slice excludes FII and DII so the pie does not double-count them. Public (total) remains available in the comparison table. White labels appear inside segments where there is enough room.</p>
-        </> : <Panel><p className="text-sm text-muted">Insufficient Data: verified latest-quarter FII, DII, promoter and public percentages are not all available.</p></Panel>}
+          <p className="mt-3 text-xs text-subtle">As on {selectedQuarterData?.asOnDate}. * Public slice excludes FII and DII so the pie does not double-count them. Public (total) remains available in the comparison table. White labels appear inside segments where there is enough room.</p>
+        </> : <Panel><p className="text-sm text-muted">No verified filing found for {selectedQuarter} {selectedYear}. Try another quarter. Historical figures are not estimated.</p></Panel>}
       </Section>
 
       <Section title="Promoter holding & pledge" hint="Four reported quarters · Q1 oldest to Q4 latest">
