@@ -42,15 +42,17 @@ async function loadSuggestedHoldings(refresh = false): Promise<SuggestedHoldings
   const holdings: SuggestedHolding[] = [];
   let unavailable = 0;
   // Include every current Suggestions stock; unavailable filings remain visible without fabricated percentages.
-  // Fetch several symbols concurrently so the page does not wait through dozens of tiny batches.
-  // Each symbol already runs its fallback providers concurrently when needed.
-  const batchSize = 8;
+  // Keep concurrency low to avoid NSE/BSE/Screener rate-limits across provider fallbacks.
+  const batchSize = 2;
   for (let i = 0; i < shares.length; i += batchSize) {
     const batch = await Promise.all(shares.slice(i, i + batchSize).map(async (share) => {
       try {
-        // Do not immediately repeat a full multi-provider request for an empty result:
-        // that doubles the slowest upstream calls for this symbol. Manual Refresh retries it.
-        const result = await fetchShareholding({ data: { symbol: share.symbol, refresh: false } });
+        let result = await fetchShareholding({ data: { symbol: share.symbol, refresh: false } });
+        // Retry an empty response once with a clean cache; providers can intermittently
+        // rate-limit or return transient empty responses. Low batch concurrency protects them.
+        if (!result.quarters.length) {
+          result = await fetchShareholding({ data: { symbol: share.symbol, refresh: true } });
+        }
         const latest = result.quarters[0] ?? null;
         if (!latest || (latest.fii === null && latest.dii === null && latest.public === null && latest.promoter === null)) {
           return { symbol: share.symbol, name: share.name || share.symbol, quarter: null, note: result.note || "No supported latest-quarter shareholding values were returned by NSE or the fallback source." };
