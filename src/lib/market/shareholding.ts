@@ -238,8 +238,8 @@ function parseXbrl(xml: string): (Omit<ShareholdingQuarter, "quarter" | "asOnDat
   let promoterShares: number | null = null;
   let pledgedShares: number | null = null;
   let declaredNoPledge = false;
-  const factPattern = /<(?:[\w.-]+:)?([\w.-]+)\b([^>]*)>([\s\S]*?)<\/(?:[\w.-]+:)?\1\s*>/gi;
-  for (const fact of xml.matchAll(factPattern)) {
+  const pledgeFactPattern = /<(?:[\w.-]+:)?([\w.-]+)\b([^>]*)>([\s\S]*?)<\/(?:[\w.-]+:)?\1\s*>/gi;
+  for (const fact of xml.matchAll(pledgeFactPattern)) {
     const tag = fact[1];
     const attrs = fact[2];
     const namedConcept = attrs.match(/\bname=["']([^"']+)["']/i)?.[1];
