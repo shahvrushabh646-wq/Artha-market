@@ -101,6 +101,7 @@ function HoldingsPage() {
     if (!query.data || processedRef.current) return;
     processedRef.current = true;
     let cancelled = false;
+    let completed = false;
     setHydrating(true);
     const hydrate = async () => {
       const symbols = query.data!.holdings.map((item) => item.symbol);
@@ -165,10 +166,17 @@ function HoldingsPage() {
       queryClient.setQueryData(queryKey, (previous: typeof query.data) => previous ? {
         ...previous, checked: holdings.length, unavailable, holdings,
       } : previous);
+      completed = true;
       setHydrating(false);
     };
     void hydrate();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      // React StrictMode runs an effect setup/cleanup/setup cycle in development.
+      // Reset the guard only when this hydration was cancelled before finishing,
+      // otherwise the second setup skips hydration and leaves both counters at 0.
+      if (!completed) processedRef.current = false;
+    };
   }, [query.data?.totalSuggested, query.data?.holdings.length, query.dataUpdatedAt, hydrateKey]);
   const rows = useMemo(() => {
     const needle = search.trim().toLowerCase();
