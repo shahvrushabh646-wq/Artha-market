@@ -102,52 +102,67 @@ function HoldingsPage() {
     let cancelled = false;
     const hydrate = async () => {
       const symbols = query.data!.holdings.map((item) => item.symbol);
-      let checked = 0, unavailable = 0;
-      // Small batches let the UI show progress while provider lookups are still running.
-      // A single 163-symbol request can exceed the server request timeout and leave
-      // the dashboard counters stuck at their initial zero values.
-      for (let start = 0; start < symbols.length; start += 3) {
+      const resultsBySymbol = new Map<string, { quarter: typeof query.data.holdings[number]["quarter"]; note: string | null }>();
+      // Request the complete Suggestions universe in one hydration run. Each API
+      // call is bounded, while several calls run together to avoid showing only
+      // the first few companies as the final result.
+      const requestBatches: string[][] = [];
+      for (let start = 0; start < symbols.length; start += 8) {
+        requestBatches.push(symbols.slice(start, start + 8));
+      }
+      const concurrency = 4;
+      for (let start = 0; start < requestBatches.length; start += concurrency) {
         if (cancelled) return;
-        const batch = symbols.slice(start, start + 3);
-        try {
-          const results = await fetchSuggestedHoldingsBatch({ data: { symbols: batch, refresh: true } });
+        const group = requestBatches.slice(start, start + concurrency);
+        const settled = await Promise.allSettled(group.map((batch) =>
+          fetchSuggestedHoldingsBatch({ data: { symbols: batch, refresh: true } })
+        ));
+        for (let i = 0; i < settled.length; i++) {
           if (cancelled) return;
-          checked += results.length; unavailable += results.filter((item) => !item.quarter).length;
-          queryClient.setQueryData(queryKey, (previous: typeof query.data) => previous ? {
-            ...previous, checked, unavailable,
-            holdings: previous.holdings.map((holding) => {
-              const result = results.find((item) => item.symbol.toUpperCase() === holding.symbol.toUpperCase());
-              return result ? { ...holding, quarter: result.quarter, note: result.note } : holding;
-            }),
-          } : previous);
-        } catch {
-          // A timed-out batch must not mark every company unavailable. Retry each
-          // symbol in its own short request so one slow provider cannot hide the
-          // remaining companies or permanently fail an entire group.
-          for (const symbol of batch) {
-            if (cancelled) return;
-            try {
-              const single = await fetchSuggestedHoldingsBatch({ data: { symbols: [symbol], refresh: false } });
-              const result = single[0];
-              checked += 1;
-              if (!result?.quarter) unavailable += 1;
-              queryClient.setQueryData(queryKey, (previous: typeof query.data) => previous ? {
-                ...previous, checked, unavailable,
-                holdings: previous.holdings.map((holding) => holding.symbol.toUpperCase() === symbol.toUpperCase()
-                  ? { ...holding, quarter: result?.quarter ?? null, note: result?.note ?? "No verified latest-quarter filing returned." } : holding),
-              } : previous);
-            } catch (error) {
-              checked += 1; unavailable += 1;
-              const note = error instanceof Error ? `Single-symbol retry failed: ${error.message}` : "Single-symbol retry failed or timed out.";
-              queryClient.setQueryData(queryKey, (previous: typeof query.data) => previous ? {
-                ...previous, checked, unavailable,
-                holdings: previous.holdings.map((holding) => holding.symbol.toUpperCase() === symbol.toUpperCase()
-                  ? { ...holding, note } : holding),
-              } : previous);
+          const batch = group[i];
+          const outcome = settled[i];
+          if (outcome.status === "fulfilled") {
+            for (const item of outcome.value) {
+              resultsBySymbol.set(item.symbol.toUpperCase(), { quarter: item.quarter, note: item.note });
+            }
+            // If a response unexpectedly omits a symbol, retry that symbol alone.
+            const returned = new Set(outcome.value.map((item) => item.symbol.toUpperCase()));
+            for (const symbol of batch.filter((s) => !returned.has(s.toUpperCase()))) {
+              try {
+                const single = await fetchSuggestedHoldingsBatch({ data: { symbols: [symbol], refresh: false } });
+                const item = single[0];
+                resultsBySymbol.set(symbol.toUpperCase(), { quarter: item?.quarter ?? null, note: item?.note ?? "No verified latest-quarter filing returned." });
+              } catch {
+                resultsBySymbol.set(symbol.toUpperCase(), { quarter: null, note: "Individual filing retry failed." });
+              }
+            }
+          } else {
+            // Recover a failed batch per company instead of discarding all rows.
+            for (const symbol of batch) {
+              try {
+                const single = await fetchSuggestedHoldingsBatch({ data: { symbols: [symbol], refresh: false } });
+                const item = single[0];
+                resultsBySymbol.set(symbol.toUpperCase(), { quarter: item?.quarter ?? null, note: item?.note ?? "No verified latest-quarter filing returned." });
+              } catch (error) {
+                resultsBySymbol.set(symbol.toUpperCase(), { quarter: null, note: error instanceof Error ? error.message : "Individual filing retry failed." });
+              }
             }
           }
         }
       }
+      if (cancelled) return;
+      const holdings = query.data!.holdings.map((holding) => {
+        const result = resultsBySymbol.get(holding.symbol.toUpperCase());
+        return result ? { ...holding, quarter: result.quarter, note: result.note } : {
+          ...holding, quarter: null, note: "No verified latest-quarter filing returned."
+        };
+      });
+      const unavailable = holdings.filter((item) => !item.quarter).length;
+      // Publish the full set together so the page doesn't appear to contain only
+      // the first 3 companies while the rest are still being fetched.
+      queryClient.setQueryData(queryKey, (previous: typeof query.data) => previous ? {
+        ...previous, checked: holdings.length, unavailable, holdings,
+      } : previous);
     };
     void hydrate();
     return () => { cancelled = true; };
