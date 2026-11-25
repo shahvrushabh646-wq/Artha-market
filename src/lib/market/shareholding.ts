@@ -220,7 +220,7 @@ function parseXbrl(xml: string): (Omit<ShareholdingQuarter, "quarter" | "asOnDat
     const attrs = fact[2];
     const contextRef = attrs.match(/\bcontextRef=["']([^"']+)["']/i)?.[1];
     const members = contexts.get(contextRef ?? "") ?? [];
-    if (!members.includes("ShareholdingOfPromoterAndPromoterGroupMember") || members.length > 2) continue;
+    if (!members.includes("ShareholdingOfPromoterAndPromoterGroupMember") || members.length > 6) continue;
     let value = Number(fact[3].replace(/,/g, ""));
     const scale = Number(attrs.match(/\bscale=["'](-?\d+)["']/i)?.[1] ?? "0");
     if (!Number.isFinite(value)) continue;
@@ -238,7 +238,7 @@ function parseXbrl(xml: string): (Omit<ShareholdingQuarter, "quarter" | "asOnDat
     const attrs = fact[2];
     const contextRef = attrs.match(/\bcontextRef=["']([^"']+)["']/i)?.[1];
     const members = contexts.get(contextRef ?? "") ?? [];
-    if (!members.includes("ShareholdingOfPromoterAndPromoterGroupMember") || members.length > 2) continue;
+    if (!members.includes("ShareholdingOfPromoterAndPromoterGroupMember") || members.length > 6) continue;
     const raw = Number(fact[3].replace(/,/g, ""));
     if (!Number.isFinite(raw) || raw < 0) continue;
     if (/^NumberOfShares$/i.test(concept) && promoterShares === null) promoterShares = raw;
@@ -324,8 +324,7 @@ async function loadNseFilingHistory(symbol: string): Promise<ShareholdingQuarter
   if (!Array.isArray(raw)) return [];
   const filings = (raw as Array<Record<string, unknown>>)
     .filter(row => typeof row.xbrl === "string" && /^https?:\/\//i.test(row.xbrl as string))
-    .sort((a,b) => sourceDate(String(b.date ?? "")).localeCompare(sourceDate(String(a.date ?? ""))))
-    .slice(0, 100);
+    .sort((a,b) => sourceDate(String(b.date ?? "")).localeCompare(sourceDate(String(a.date ?? ""))));
   const parsed = await Promise.all(filings.map(async filing => {
     const url = String(filing.xbrl);
     try {
@@ -415,7 +414,7 @@ function parseScreener(html: string, symbol: string, url: string): ShareholdingQ
       sourceUrl: url, sourceName: "Screener.in",
     });
   }
-  return quarters.sort((a, b) => b.asOnDate.localeCompare(a.asOnDate)).slice(0, 40);
+  return quarters.sort((a, b) => b.asOnDate.localeCompare(a.asOnDate));
 }
 
 async function loadScreenerFallback(symbol: string): Promise<{ url: string; quarters: ShareholdingQuarter[] }> {
@@ -470,7 +469,7 @@ function parseProviderTable(html:string,url:string,sourceName:string):Shareholdi
       if(fv===null&&dv===null&&pp===null)continue;
       out.push({...d,promoter:p,fii:fv,dii:dv,public:pv,promoterPledge:pp!==null&&pp>=0&&pp<=100?pp:null,sourceUrl:url,sourceName});
     }
-    if(out.length)return out.sort((a,b)=>b.asOnDate.localeCompare(a.asOnDate)).slice(0,40);
+    if(out.length)return out.sort((a,b)=>b.asOnDate.localeCompare(a.asOnDate));
   }
   return [];
 }
@@ -569,7 +568,7 @@ async function loadMoneycontrolFallback(symbol:string):Promise<{url:string;quart
       quarters.push({...date,promoter:null,fii:null,dii:null,public:null,promoterPledge,sourceUrl:stockUrl,sourceName:"Moneycontrol"});
     }
   }
-  return {url:stockUrl,quarters:quarters.sort((a,b)=>b.asOnDate.localeCompare(a.asOnDate)).slice(0,40)};
+  return {url:stockUrl,quarters:quarters.sort((a,b)=>b.asOnDate.localeCompare(a.asOnDate))};
 }
 
 async function loadTrendlyneFallback(symbol:string):Promise<{url:string;quarters:ShareholdingQuarter[]}>{
@@ -637,7 +636,7 @@ async function loadBseFallback(symbol:string):Promise<{url:string;quarters:Share
   const indexRes=await fetch(indexUrl,{headers,cache:"no-store"});
   if(!indexRes.ok)throw new Error("BSE filing index HTTP "+indexRes.status);
   const index=await indexRes.json() as {Table?:Array<Record<string,unknown>>};
-  const filings=(index.Table??[]).filter(x=>Number(x.IsXBRL)===1&&typeof x.XBRLAttachment==="string"&&/^\d{4}-\d{2}-\d{2}/.test(String(x.EndDate??""))).sort((a,b)=>String(b.EndDate).localeCompare(String(a.EndDate))).slice(0, 40);
+  const filings=(index.Table??[]).filter(x=>Number(x.IsXBRL)===1&&typeof x.XBRLAttachment==="string"&&/^\d{4}-\d{2}-\d{2}/.test(String(x.EndDate??""))).sort((a,b)=>String(b.EndDate).localeCompare(String(a.EndDate)));
   const quarters:ShareholdingQuarter[]=[];
   for(const filing of filings){
     const attachment=String(filing.XBRLAttachment),url=attachment.startsWith("http")?attachment:"https://www.bseindia.com"+(attachment.startsWith("/")?attachment:"/"+attachment);
@@ -675,7 +674,7 @@ async function loadBseFallback(symbol:string):Promise<{url:string;quarters:Share
         const attrs=fact[1],concept=(attrs.match(/\bname=["']([^"']+)["']/i)?.[1]??"").split(":").pop()?.toLowerCase()??"";
         const context=attrs.match(/\bcontextref=["']([^"']+)["']/i)?.[1],members=contexts.get(context??"")??[];
         const joined=members.join(" ");
-        if(!/promoterandpromotergroup/.test(joined)||members.length>3)continue;
+        if(!/promoterandpromotergroup/.test(joined)||members.length>6)continue;
         let value=Number(htmlText(fact[2]).replace(/,/g,"").trim());
         const scale=Number(attrs.match(/\bscale=["'](-?\d+)["']/i)?.[1]??"0");
         if(!Number.isFinite(value))continue;if(Number.isFinite(scale)&&scale!==0)value*=10**scale;
@@ -699,7 +698,7 @@ async function loadBseFallback(symbol:string):Promise<{url:string;quarters:Share
     }catch{continue;}
   }
   quarters.sort((a,b)=>b.asOnDate.localeCompare(a.asOnDate));
-  return {url:"https://www.bseindia.com/corporates/Sharehold_Searchnew.aspx",quarters:quarters.slice(0, 40)};
+  return {url:"https://www.bseindia.com/corporates/Sharehold_Searchnew.aspx",quarters};
 }
 
 
@@ -728,7 +727,7 @@ function mergeSameQuarterSources(symbol:string, sources:ShareholdingQuarter[]):S
       sourceName:[...used].sort((a,b)=>priority(a)-priority(b)).join(" + ")||source.sourceName,
     });
   }
-  return merged.sort((a,b)=>b.asOnDate.localeCompare(a.asOnDate)).slice(0, 100);
+  return merged.sort((a,b)=>b.asOnDate.localeCompare(a.asOnDate));
 }
 async function loadSupplementalShareholding(symbol:string):Promise<ShareholdingQuarter[]> {
   const results=await Promise.allSettled([
@@ -786,7 +785,7 @@ async function loadShareholding(symbolInput: string, refresh = false): Promise<S
     const raw = await nseJson(`https://www.nseindia.com/api/corporate-share-holdings-master?index=equities&symbol=${encodeURIComponent(symbol)}`, page);
     if (!Array.isArray(raw)) throw new Error("Unexpected response from NSE.");
     const filings = raw as Array<Record<string, unknown>>;
-    const selected = filings.filter(row => typeof row.xbrl === "string" && /^https?:\/\//i.test(row.xbrl as string)).sort((a, b) => sourceDate(String(b.date ?? "")).localeCompare(sourceDate(String(a.date ?? "")))).slice(0, 40);
+    const selected = filings.filter(row => typeof row.xbrl === "string" && /^https?:\/\//i.test(row.xbrl as string)).sort((a, b) => sourceDate(String(b.date ?? "")).localeCompare(sourceDate(String(a.date ?? ""))));
     // Fetch the latest four filing documents concurrently; their order is restored by filing date below.
     const parsedFilings = await Promise.all(selected.map(async (filing) => {
       const url = String(filing.xbrl);
