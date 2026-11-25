@@ -58,6 +58,7 @@ function HoldingsPage() {
   const [sortMode, setSortMode] = useState<SortMode>("institutional");
   const [search, setSearch] = useState("");
   const [hydrateKey, setHydrateKey] = useState(0);
+  const [hydrating, setHydrating] = useState(false);
   const processedRef = useRef(false);
   const today = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Kolkata",
@@ -100,6 +101,7 @@ function HoldingsPage() {
     if (!query.data || processedRef.current) return;
     processedRef.current = true;
     let cancelled = false;
+    setHydrating(true);
     const hydrate = async () => {
       const symbols = query.data!.holdings.map((item) => item.symbol);
       const resultsBySymbol = new Map<string, { quarter: typeof query.data.holdings[number]["quarter"]; note: string | null }>();
@@ -163,6 +165,7 @@ function HoldingsPage() {
       queryClient.setQueryData(queryKey, (previous: typeof query.data) => previous ? {
         ...previous, checked: holdings.length, unavailable, holdings,
       } : previous);
+      setHydrating(false);
     };
     void hydrate();
     return () => { cancelled = true; };
@@ -212,8 +215,8 @@ function HoldingsPage() {
         <>
           <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
             <Panel className="p-3"><p className="text-xs text-muted">Suggestions shares</p><p className="mt-1 text-xl font-semibold tabular text-fg">{data.totalSuggested}</p></Panel>
-            <Panel className="p-3"><p className="text-xs text-muted">Verified latest filing</p><p className="mt-1 text-xl font-semibold tabular text-fg">{data.checked - data.unavailable}</p></Panel>
-            <Panel className="col-span-2 p-3 sm:col-span-1"><p className="text-xs text-muted">Data unavailable</p><p className="mt-1 text-xl font-semibold tabular text-fg">{data.unavailable}</p></Panel>
+            <Panel className="p-3"><p className="text-xs text-muted">Verified latest filing</p><p className="mt-1 text-xl font-semibold tabular text-fg">{hydrating ? "Checking…" : data.checked - data.unavailable}</p></Panel>
+            <Panel className="col-span-2 p-3 sm:col-span-1"><p className="text-xs text-muted">Data unavailable</p><p className="mt-1 text-xl font-semibold tabular text-fg">{hydrating ? "Checking…" : data.unavailable}</p></Panel>
           </div>
 
           <div className="mt-4 space-y-3">
