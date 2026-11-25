@@ -134,7 +134,7 @@ function ShareholdingPage() {
 
       <Section title="Promoter holding & pledge" hint="Independent year and quarter tabs · pledge split within promoter holding only">
         {(() => {
-          const latestPromoterPledgeQuarter = quarters.find(q => q.promoter != null && q.promoterPledge != null) ?? latest;
+          const latestPromoterPledgeQuarter = quarters.find(q => q.promoterPledge != null) ?? latest;
           const promoterDefaultDate = latestPromoterPledgeQuarter ? new Date(latestPromoterPledgeQuarter.asOnDate + "T00:00:00Z") : latestDate;
           const promoterActiveYear = promoterYear ?? promoterDefaultDate.getUTCFullYear();
           const promoterActiveQuarter = promoterQuarter ?? Math.floor(promoterDefaultDate.getUTCMonth() / 3) + 1;
@@ -145,7 +145,7 @@ function ShareholdingPage() {
           const holding = promoterQuarterData?.promoter;
           const pledgeRate = promoterQuarterData?.promoterPledge;
           const holdingVerified = holding != null && Number.isFinite(holding) && holding >= 0 && holding <= 100;
-          const pledgeVerified = holdingVerified && pledgeRate != null && Number.isFinite(pledgeRate) && pledgeRate >= 0 && pledgeRate <= 100;
+          const pledgeVerified = pledgeRate != null && Number.isFinite(pledgeRate) && pledgeRate >= 0 && pledgeRate <= 100;
           const pledged = pledgeVerified ? pledgeRate! : null;
           const unpledged = pledgeVerified ? 100 - pledgeRate! : null;
           const slices = pledgeVerified ? [
