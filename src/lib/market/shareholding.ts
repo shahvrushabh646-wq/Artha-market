@@ -238,20 +238,20 @@ function parseXbrl(xml: string): (Omit<ShareholdingQuarter, "quarter" | "asOnDat
   let promoterShares: number | null = null;
   let pledgedShares: number | null = null;
   let declaredNoPledge = false;
-  const factPattern = /<(?:[\\w.-]+:)?([\\w.-]+)\\b([^>]*)>([\\s\\S]*?)<\\/(?:[\\w.-]+:)?\\1\\s*>/gi;
+  const factPattern = /<(?:[\w.-]+:)?([\w.-]+)\b([^>]*)>([\s\S]*?)<\/(?:[\w.-]+:)?\1\s*>/gi;
   for (const fact of xml.matchAll(factPattern)) {
     const tag = fact[1];
     const attrs = fact[2];
-    const namedConcept = attrs.match(/\\bname=["']([^"']+)["']/i)?.[1];
+    const namedConcept = attrs.match(/\bname=["']([^"']+)["']/i)?.[1];
     const concept = normalizeConcept(namedConcept ?? tag);
-    const contextRef = attrs.match(/\\bcontextref=["']([^"']+)["']/i)?.[1];
+    const contextRef = attrs.match(/\bcontextref=["']([^"']+)["']/i)?.[1];
     const members = contexts.get(contextRef ?? "") ?? [];
     const isPromoter = hasPromoterContext(members);
     if (members.length > 8) continue;
     const rawText = htmlText(fact[3]).replace(/,/g, "").trim();
     if (!rawText) continue;
     const numeric = Number(rawText);
-    const scaleAttr = Number(attrs.match(/\\bscale=["'](-?\\d+)["']/i)?.[1] ?? "0");
+    const scaleAttr = Number(attrs.match(/\bscale=["'](-?\d+)["']/i)?.[1] ?? "0");
     const value = Number.isFinite(numeric) ? numeric * (Number.isFinite(scaleAttr) ? 10 ** scaleAttr : 1) : null;
 
     // The declaration explicitly states "No" when the company has no promoter
