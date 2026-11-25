@@ -144,7 +144,6 @@ function ShareholdingPage() {
           }) ?? null;
           const holding = promoterQuarterData?.promoter;
           const pledgeRate = promoterQuarterData?.promoterPledge;
-          const holdingVerified = holding != null && Number.isFinite(holding) && holding >= 0 && holding <= 100;
           const pledgeVerified = pledgeRate != null && Number.isFinite(pledgeRate) && pledgeRate >= 0 && pledgeRate <= 100;
           const pledged = pledgeVerified ? pledgeRate! : null;
           const unpledged = pledgeVerified ? 100 - pledgeRate! : null;
