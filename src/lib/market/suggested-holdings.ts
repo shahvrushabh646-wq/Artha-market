@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { fetchShareholding, type ShareholdingQuarter } from "@/lib/market/shareholding";
+import { fetchLatestShareholdingForHoldings, fetchShareholding, type ShareholdingQuarter } from "@/lib/market/shareholding";
 import { fetchSuggestions } from "@/lib/market/suggestions";
 
 export type SuggestedHolding = {
@@ -70,6 +70,11 @@ export const fetchSuggestedHoldingsBatch = createServerFn({ method: "GET" })
       const batch = data.symbols.slice(start, start + 3);
       const results = await Promise.all(batch.map(async (symbol) => {
         const check = async (refresh: boolean) => {
+          // Overview uses the fast, dated exchange snapshot/history first.
+          // Fall back to the full provider drill-down only when no verified quarter
+          // exists in those datasets.
+          const fastLatest = await fetchLatestShareholdingForHoldings(symbol);
+          if (fastLatest) return { symbol, quarter: fastLatest, note: "Latest dated exchange snapshot / parsed quarterly filing." };
           const result = await fetchShareholding({ data: { symbol, refresh } });
           const latest = result.quarters[0] ?? null;
           if (!latest || (latest.fii === null && latest.dii === null && latest.public === null && latest.promoter === null)) {
