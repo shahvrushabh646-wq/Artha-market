@@ -815,11 +815,16 @@ async function loadShareholding(symbolInput: string, refresh = false): Promise<S
         const parsed = parseXbrl(await response.text());
         if (!parsed) return null;
         const rawDate = String(filing.date ?? "");
-        const date = sourceDate(rawDate);
+        const filingDate = sourceDate(rawDate) || rawDate;
+        // XBRL period-end is the shareholding quarter's actual as-on date.
+        // Filing submission date may be weeks later and can shift a report
+        // into the wrong quarter/year in the selector.
+        const asOnDate = parsed.periodEnd || filingDate;
+        const { periodEnd: _periodEnd, ...values } = parsed;
         return {
-          ...parsed,
-          quarter: parseDate(date || rawDate),
-          asOnDate: date || rawDate,
+          ...values,
+          quarter: parseDate(asOnDate),
+          asOnDate,
           sourceUrl: url,
           sourceName: "NSE" as const,
         };
