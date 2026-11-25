@@ -138,12 +138,20 @@ function ShareholdingPage() {
           const promoterDefaultDate = latestPromoterPledgeQuarter ? new Date(latestPromoterPledgeQuarter.asOnDate + "T00:00:00Z") : latestDate;
           const promoterActiveYear = promoterYear ?? promoterDefaultDate.getUTCFullYear();
           const promoterActiveQuarter = promoterQuarter ?? Math.floor(promoterDefaultDate.getUTCMonth() / 3) + 1;
-          const promoterQuarterData = quarters.find(q => {
+          const inSelectedPromoterQuarter = (q: ShareholdingQuarter) => {
             const date = new Date(q.asOnDate + "T00:00:00Z");
-            return date.getUTCFullYear() === promoterActiveYear && Math.floor(date.getUTCMonth() / 3) + 1 === promoterActiveQuarter;
-          }) ?? null;
+            return date.getUTCFullYear() === promoterActiveYear &&
+              Math.floor(date.getUTCMonth() / 3) + 1 === promoterActiveQuarter;
+          };
+          // Some providers report the holding and pledge on separate dated
+          // filings within the same quarter. Use the latest verified value
+          // for each field, without borrowing data from another quarter.
+          const promoterQuarterRows = quarters.filter(inSelectedPromoterQuarter);
+          const promoterQuarterData = [...promoterQuarterRows].reverse().find(q => q.promoter != null)
+            ?? promoterQuarterRows.at(-1) ?? null;
+          const promoterPledgeQuarterData = [...promoterQuarterRows].reverse().find(q => q.promoterPledge != null) ?? null;
           const holding = promoterQuarterData?.promoter;
-          const pledgeRate = promoterQuarterData?.promoterPledge;
+          const pledgeRate = promoterPledgeQuarterData?.promoterPledge;
           const pledgeVerified = pledgeRate != null && Number.isFinite(pledgeRate) && pledgeRate >= 0 && pledgeRate <= 100;
           const pledged = pledgeVerified ? pledgeRate! : null;
           const unpledged = pledgeVerified ? 100 - pledgeRate! : null;
@@ -163,7 +171,7 @@ function ShareholdingPage() {
             {pledgeVerified ? <>
               <div className="mx-auto h-[320px] w-full max-w-2xl"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={slices} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={66} outerRadius={132} paddingAngle={2} labelLine={false} label={InsidePieLabel} isAnimationActive={false}>{slices.map(item => <Cell key={item.name} fill={item.color} stroke="var(--surface)" strokeWidth={2}/>)}</Pie><Tooltip formatter={value => moneyPercent(Number(value))}/></PieChart></ResponsiveContainer></div>
               <div className="mt-3 grid grid-cols-2 gap-3">{slices.map(item => <div key={item.name} className="flex items-center gap-2 rounded-xl border border-[var(--border)] bg-surface-2 px-3 py-3 text-xs text-muted"><span className="size-3 shrink-0 rounded-full" style={{backgroundColor:item.color}}/><span className="min-w-0"><span className="block">{item.name}</span><strong className="mt-1 block tabular text-base font-semibold text-fg">{moneyPercent(item.value)}</strong></span></div>)}</div>
-              <p className="mt-4 border-t border-[var(--border)] pt-3 text-xs leading-5 text-subtle">Filing as on {promoterQuarterData?.asOnDate}. Pie is normalized to promoter holding only: Promoter Pledged + Promoter Not Pledged = 100% of promoter shares. Public shareholders are excluded.</p>
+              <p className="mt-4 border-t border-[var(--border)] pt-3 text-xs leading-5 text-subtle">Pledge filing as on {promoterPledgeQuarterData?.asOnDate}. Pie is normalized to promoter holding only: Promoter Pledged + Promoter Not Pledged = 100% of promoter shares. Public shareholders are excluded.</p>
             </> : <Panel><p className="text-sm text-muted">{holding != null ? `Promoter holding ${moneyPercent(holding)} is verified for Q${promoterActiveQuarter} ${promoterActiveYear}, but the filing does not provide a separately verified promoter pledge rate for this period. The pledge pie is withheld rather than treating missing pledge as zero.` : `Promoter holding data is not verified for Q${promoterActiveQuarter} ${promoterActiveYear}. No estimated pie is shown.`}</p></Panel>}
           </Panel>;
         })()}
