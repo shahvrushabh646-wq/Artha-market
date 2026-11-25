@@ -66,8 +66,8 @@ export const fetchSuggestedHoldingsBatch = createServerFn({ method: "GET" })
   }).parse(data))
   .handler(async ({ data }) => {
     const items: Array<{ symbol: string; quarter: ShareholdingQuarter | null; note: string | null }> = [];
-    for (let start = 0; start < data.symbols.length; start += 8) {
-      const batch = data.symbols.slice(start, start + 8);
+    for (let start = 0; start < data.symbols.length; start += 3) {
+      const batch = data.symbols.slice(start, start + 3);
       const results = await Promise.all(batch.map(async (symbol) => {
         const check = async (refresh: boolean) => {
           const result = await fetchShareholding({ data: { symbol, refresh } });
