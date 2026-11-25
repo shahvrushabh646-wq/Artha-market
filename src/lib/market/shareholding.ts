@@ -360,36 +360,60 @@ async function loadNsePledgeSnapshot(symbol: string): Promise<ShareholdingQuarte
 
 async function loadNseFilingHistory(symbol: string): Promise<ShareholdingQuarter[]> {
   const page = `https://www.nseindia.com/companies-listing/corporate-filings-shareholding-pattern?symbol=${encodeURIComponent(symbol)}&tabIndex=equity`;
-  const raw = await nseJson(`https://www.nseindia.com/api/corporate-share-holdings-master?index=equities&symbol=${encodeURIComponent(symbol)}`, page);
-  if (!Array.isArray(raw)) return [];
-  const filings = (raw as Array<Record<string, unknown>>)
-    .filter(row => {
-      if (typeof row.xbrl !== "string" || !/^https?:\/\//i.test(row.xbrl as string)) return false;
-      const date = sourceDate(String(row.date ?? ""));
-      return date >= "2021-01-01" && date <= "2026-12-31";
-    })
-    .sort((a,b) => sourceDate(String(b.date ?? "")).localeCompare(sourceDate(String(a.date ?? ""))));
-  const parsed: (ShareholdingQuarter | null)[] = [];
-  // Fetch historical XBRL documents in small batches to avoid exchange/provider
-  // throttling while still loading the complete 2021–2026 filing history.
-  for (let start = 0; start < filings.length; start += 6) {
-    const batch = filings.slice(start, start + 6);
-    parsed.push(...await Promise.all(batch.map(async filing => {
-    const url = String(filing.xbrl);
+  type Filing = { date?: unknown; submission_date?: unknown; xbrl?: unknown };
+  let filings: Filing[] = [];
+  // NSE's live master endpoint is capped to recent records. Prefer the public
+  // per-ticker filing index, which retains older 2021–2023 NSE XBRL URLs.
+  try {
+    const indexUrl = `https://raw.githubusercontent.com/aditya-jha/nse-historical-membership/main/shareholding_history/data/filings_index/${encodeURIComponent(symbol)}.json`;
+    const indexResponse = await fetch(indexUrl, { headers: { "User-Agent": UA, Accept: "application/json,text/plain,*/*" }, cache: "no-store" });
+    if (indexResponse.ok) {
+      const index = await indexResponse.json() as { ticker?: string; filings?: Filing[] };
+      if (normalizeSymbol(String(index.ticker ?? symbol)) === symbol && Array.isArray(index.filings)) filings = index.filings;
+    }
+  } catch { /* fall back to NSE's live index */ }
+  if (!filings.length) {
     try {
-      const response = await fetch(url, { headers: { "User-Agent": UA, Accept: "application/xml,text/xml,*/*", Referer: page }, cache: "no-store" });
-      if (!response.ok) return null;
-      const values = parseXbrl(await response.text());
-      if (!values) return null;
-      const rawDate = String(filing.date ?? ""), asOnDate = values.periodEnd ?? (sourceDate(rawDate) || rawDate);
-      const { periodEnd: _periodEnd, ...quarterValues } = values;
-      return { ...quarterValues, quarter: parseDate(asOnDate), asOnDate, sourceUrl: url, sourceName: "NSE" } satisfies ShareholdingQuarter;
-    } catch { return null; }
+      const raw = await nseJson(`https://www.nseindia.com/api/corporate-share-holdings-master?index=equities&symbol=${encodeURIComponent(symbol)}`, page);
+      if (Array.isArray(raw)) filings = raw as Filing[];
+    } catch { return []; }
+  }
+  const inRange = filings.filter(row => {
+    if (typeof row.xbrl !== "string" || !/^https?:\/\//i.test(row.xbrl as string)) return false;
+    const date = sourceDate(String(row.date ?? ""));
+    return date >= "2021-01-01" && date <= "2026-12-31";
+  });
+  // Keep only the latest revision for each reported period.
+  const latestByPeriod = new Map<string, Filing>();
+  for (const filing of inRange) {
+    const period = sourceDate(String(filing.date ?? ""));
+    const existing = latestByPeriod.get(period);
+    const submitted = sourceDate(String(filing.submission_date ?? ""));
+    const existingSubmitted = sourceDate(String(existing?.submission_date ?? ""));
+    if (!existing || submitted >= existingSubmitted) latestByPeriod.set(period, filing);
+  }
+  const selected = [...latestByPeriod.values()].sort((a, b) => sourceDate(String(b.date ?? "")).localeCompare(sourceDate(String(a.date ?? ""))));
+  const parsed: (ShareholdingQuarter | null)[] = [];
+  // Fetch all available 2021–2026 filings in small bounded batches.
+  for (let start = 0; start < selected.length; start += 5) {
+    const batch = selected.slice(start, start + 5);
+    parsed.push(...await Promise.all(batch.map(async filing => {
+      const url = String(filing.xbrl);
+      try {
+        const response = await fetch(url, { headers: { "User-Agent": UA, Accept: "application/xml,text/xml,*/*", Referer: page }, cache: "no-store" });
+        if (!response.ok) return null;
+        const values = parseXbrl(await response.text());
+        if (!values) return null;
+        const rawDate = String(filing.date ?? "");
+        const filingDate = sourceDate(rawDate) || rawDate;
+        const asOnDate = values.periodEnd || filingDate;
+        const { periodEnd: _periodEnd, ...quarterValues } = values;
+        return { ...quarterValues, quarter: parseDate(asOnDate), asOnDate, sourceUrl: url, sourceName: "NSE" } satisfies ShareholdingQuarter;
+      } catch { return null; }
     })));
   }
   return parsed.filter((q): q is ShareholdingQuarter => q !== null);
 }
-
 function htmlText(value: string): string {
   return value
     .replace(/<script\b[\s\S]*?<\/script>/gi, " ")
