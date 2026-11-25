@@ -106,9 +106,9 @@ function HoldingsPage() {
       // Small batches let the UI show progress while provider lookups are still running.
       // A single 163-symbol request can exceed the server request timeout and leave
       // the dashboard counters stuck at their initial zero values.
-      for (let start = 0; start < symbols.length; start += 8) {
+      for (let start = 0; start < symbols.length; start += 3) {
         if (cancelled) return;
-        const batch = symbols.slice(start, start + 8);
+        const batch = symbols.slice(start, start + 3);
         try {
           const results = await fetchSuggestedHoldingsBatch({ data: { symbols: batch, refresh: true } });
           if (cancelled) return;
@@ -120,14 +120,32 @@ function HoldingsPage() {
               return result ? { ...holding, quarter: result.quarter, note: result.note } : holding;
             }),
           } : previous);
-        } catch (error) {
-          checked += batch.length; unavailable += batch.length;
-          const note = error instanceof Error ? `Provider batch failed: ${error.message}` : "Provider batch failed or timed out.";
-          queryClient.setQueryData(queryKey, (previous: typeof query.data) => previous ? {
-            ...previous, checked, unavailable,
-            holdings: previous.holdings.map((holding) => batch.some((symbol) => symbol.toUpperCase() === holding.symbol.toUpperCase())
-              ? { ...holding, note } : holding),
-          } : previous);
+        } catch {
+          // A timed-out batch must not mark every company unavailable. Retry each
+          // symbol in its own short request so one slow provider cannot hide the
+          // remaining companies or permanently fail an entire group.
+          for (const symbol of batch) {
+            if (cancelled) return;
+            try {
+              const single = await fetchSuggestedHoldingsBatch({ data: { symbols: [symbol], refresh: false } });
+              const result = single[0];
+              checked += 1;
+              if (!result?.quarter) unavailable += 1;
+              queryClient.setQueryData(queryKey, (previous: typeof query.data) => previous ? {
+                ...previous, checked, unavailable,
+                holdings: previous.holdings.map((holding) => holding.symbol.toUpperCase() === symbol.toUpperCase()
+                  ? { ...holding, quarter: result?.quarter ?? null, note: result?.note ?? "No verified latest-quarter filing returned." } : holding),
+              } : previous);
+            } catch (error) {
+              checked += 1; unavailable += 1;
+              const note = error instanceof Error ? `Single-symbol retry failed: ${error.message}` : "Single-symbol retry failed or timed out.";
+              queryClient.setQueryData(queryKey, (previous: typeof query.data) => previous ? {
+                ...previous, checked, unavailable,
+                holdings: previous.holdings.map((holding) => holding.symbol.toUpperCase() === symbol.toUpperCase()
+                  ? { ...holding, note } : holding),
+              } : previous);
+            }
+          }
         }
       }
     };
