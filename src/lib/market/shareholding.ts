@@ -199,7 +199,10 @@ function parseXbrl(xml: string): (Omit<ShareholdingQuarter, "quarter" | "asOnDat
   const factPattern = /<(?:[\w.-]+:)?ShareholdingAsAPercentageOfTotalNumberOfShares\b[^>]*\bcontextRef="([^"]+)"[^>]*>([-\d.]+)<\/(?:[\w.-]+:)?ShareholdingAsAPercentageOfTotalNumberOfShares>/g;
   for (const fact of xml.matchAll(factPattern)) {
     const members = contexts.get(fact[1]) ?? [];
-    if (members.length > 2) continue;
+    // NSE XBRL can add dimensions for share class / security type in addition
+    // to the promoter-group member. Accept those valid contexts, but still
+    // require the exact promoter/public/FII/DII category member below.
+    if (members.length > 6) continue;
     const raw = Number(fact[2]);
     if (!Number.isFinite(raw)) continue;
     for (const [category, names] of Object.entries(categories)) {
