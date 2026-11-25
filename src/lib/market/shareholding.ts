@@ -224,39 +224,53 @@ function parseXbrl(xml: string): (Omit<ShareholdingQuarter, "quarter" | "asOnDat
     }
   }
 
-  // Read pledge facts across standard XBRL and inline-XBRL filings. NSE uses
-  // multiple concept names and may encode facts as ix:nonFraction elements.
+  // 2025-26 NSE/SEBI SHP filings use the newer XBRL V1.1 taxonomy and
+  // split pledge, NDU and other encumbrances into separate fields. Older
+  // exact-concept matching missed those newer facts. Normalize concept/member
+  // names and support both standard XML facts and ix:nonFraction facts.
+  const normalizeConcept = (value: string) => value.split(":").pop()!.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const hasPromoterContext = (members: string[]) => members.some(member => {
+    const n = normalizeConcept(member);
+    return n.includes("promoter") && n.includes("group") && !n.includes("nonpromoter");
+  });
   let pledgePctOfCompany: number | null = null;
-  const pledgeFacts = /<(?:[\w.-]+:)?([\w.-]+)\b([^>]*)>([\d.,-]+)<\/(?:[\w.-]+:)?\1\s*>/gi;
-  for (const fact of xml.matchAll(pledgeFacts)) {
-    const concept = (fact[2].match(/\bname=["']([^"']+)["']/i)?.[1] ?? fact[1]).split(":").pop() ?? fact[1];
-    if (!/(?:pledged|encumbered)/i.test(concept) || !/(?:percentage|percent|totalnumberofshares)/i.test(concept)) continue;
-    const attrs = fact[2];
-    const contextRef = attrs.match(/\bcontextRef=["']([^"']+)["']/i)?.[1];
-    const members = contexts.get(contextRef ?? "") ?? [];
-    if (!members.includes("ShareholdingOfPromoterAndPromoterGroupMember") || members.length > 6) continue;
-    let value = Number(fact[3].replace(/,/g, ""));
-    const scale = Number(attrs.match(/\bscale=["'](-?\d+)["']/i)?.[1] ?? "0");
-    if (!Number.isFinite(value)) continue;
-    if (Number.isFinite(scale) && scale !== 0) value *= 10 ** scale;
-    if (value >= 0 && value <= 100) { pledgePctOfCompany = value; break; }
-  }
-
-  // If the filing reports pledged and total promoter share counts, calculate
-  // pledge % of promoter holding directly. This is the requested denominator.
+  let pledgePctOfPromoter: number | null = null;
   let promoterShares: number | null = null;
   let pledgedShares: number | null = null;
-  const shareFacts = /<(?:[\w.-]+:)?([\w.-]+)\b([^>]*)>([\d.,-]+)<\/(?:[\w.-]+:)?\1\s*>/gi;
-  for (const fact of xml.matchAll(shareFacts)) {
-    const concept = (fact[2].match(/\bname=["']([^"']+)["']/i)?.[1] ?? fact[1]).split(":").pop() ?? fact[1];
+  let declaredNoPledge = false;
+  const factPattern = /<(?:[\w.-]+:)?([\w.-]+)\b([^>]*)>([\s\S]*?)<\/(?:[\w.-]+:)?\1\s*>/gi;
+  for (const fact of xml.matchAll(factPattern)) {
+    const tag = fact[1];
     const attrs = fact[2];
-    const contextRef = attrs.match(/\bcontextRef=["']([^"']+)["']/i)?.[1];
+    const namedConcept = attrs.match(/\bname=["']([^"']+)["']/i)?.[1];
+    const concept = normalizeConcept(namedConcept ?? tag);
+    const contextRef = attrs.match(/\bcontextref=["']([^"']+)["']/i)?.[1];
     const members = contexts.get(contextRef ?? "") ?? [];
-    if (!members.includes("ShareholdingOfPromoterAndPromoterGroupMember") || members.length > 6) continue;
-    const raw = Number(fact[3].replace(/,/g, ""));
-    if (!Number.isFinite(raw) || raw < 0) continue;
-    if (/^NumberOfShares$/i.test(concept) && promoterShares === null) promoterShares = raw;
-    if (/NumberOfSharesPledgedOrOtherwiseEncumbered|PledgedShares/i.test(concept) && pledgedShares === null) pledgedShares = raw;
+    const isPromoter = hasPromoterContext(members);
+    if (members.length > 8) continue;
+    const rawText = htmlText(fact[3]).replace(/,/g, "").trim();
+    if (!rawText) continue;
+    const numeric = Number(rawText);
+    const scaleAttr = Number(attrs.match(/\bscale=["'](-?\d+)["']/i)?.[1] ?? "0");
+    const value = Number.isFinite(numeric) ? numeric * (Number.isFinite(scaleAttr) ? 10 ** scaleAttr : 1) : null;
+
+    // The declaration explicitly states "No" when the company has no promoter
+    // pledge. Per SEBI's format this is a verified zero, not missing data.
+    if (/pledge/.test(concept) && /(whether|declaration|anysharesheldbypromoters)/.test(concept) &&
+        /^(no|false|0)$/i.test(rawText)) declaredNoPledge = true;
+
+    if (value === null || value < 0) continue;
+    const isPledgeFact = /pledge|encumber/.test(concept);
+    if (isPromoter && isPledgeFact) {
+      if (/(percentage|percent|pct)/.test(concept) && value <= 100) {
+        if (/(promoter|promotershares|promoterholding)/.test(concept)) pledgePctOfPromoter ??= value;
+        else pledgePctOfCompany ??= value;
+      }
+      if (/(pledge|encumber)/.test(concept) && /(shares|numberofshares)/.test(concept) && pledgedShares === null) pledgedShares = value;
+    }
+    if (isPromoter && !isPledgeFact && /(numberofshares|totalnumberofshares|sharesheld)/.test(concept) && promoterShares === null) {
+      promoterShares = value;
+    }
   }
 
   // NSE frequently publishes filings as Inline XBRL (ix:nonFraction), not
@@ -290,9 +304,11 @@ function parseXbrl(xml: string): (Omit<ShareholdingQuarter, "quarter" | "asOnDat
   for (const key of ["promoter", "public", "fii", "dii"] as const) if (values[key] !== null) values[key] = Math.round((values[key] as number) * scale * 10000) / 10000;
   const promoterPledge = promoterShares !== null && promoterShares > 0 && pledgedShares !== null
     ? Math.round((pledgedShares / promoterShares) * 10000) / 100
-    : pledgePctOfCompany !== null && values.promoter !== null && values.promoter > 0
-      ? Math.round((pledgePctOfCompany * scale / values.promoter) * 10000) / 100
-      : null;
+    : pledgePctOfPromoter !== null
+      ? Math.round(pledgePctOfPromoter * scale * 100) / 100
+      : pledgePctOfCompany !== null && values.promoter !== null && values.promoter > 0
+        ? Math.round((pledgePctOfCompany * scale / values.promoter) * 10000) / 100
+        : declaredNoPledge ? 0 : null;
   if (Object.values(values).every(v => v === null)) return null;
   return { promoter: values.promoter, fii: values.fii, dii: values.dii, public: values.public, promoterPledge, periodEnd };
 }
@@ -840,7 +856,7 @@ async function loadShareholding(symbolInput: string, refresh = false): Promise<S
       // and merge exact period dates only. Pledge stays null unless separately reported.
       const quarters = mergeSameQuarterSources(symbol, [quarter, ...flatHistory, ...supplemental]);
       const data: ShareholdingResult = { symbol, source: quarter.sourceUrl, sourceName: quarter.sourceName, quarters, note: "Latest NSE historical snapshot enriched with dated quarterly filings from public exchange/provider sources. Each quarter is kept by its exact as-on date; missing history is not interpolated." };
-      cache.set(symbol, { expires: Date.now() + 30 * 60_000, data });
+      cache.set(symbol, { expires: Date.now() + 5 * 60_000, data });
       return data;
     }
   } catch { /* use live exchange/provider fallback below */ }
@@ -973,7 +989,7 @@ async function loadShareholding(symbolInput: string, refresh = false): Promise<S
   }
 
   // Cache only verified quarters. Empty/rate-limited responses must be retried on the next request.
-  if (base.quarters.length) cache.set(symbol, { expires: Date.now() + 30 * 60_000, data: base });
+  if (base.quarters.length) cache.set(symbol, { expires: Date.now() + 5 * 60_000, data: base });
   else cache.delete(symbol);
   return base;
 }
