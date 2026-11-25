@@ -892,6 +892,24 @@ async function loadShareholding(symbolInput: string, refresh = false): Promise<S
   return base;
 }
 
+// Lightweight latest-quarter reader for the Holdings overview. It uses the dated
+// exchange snapshot and parsed quarterly history without loading every supplemental
+// provider/history page for each card. Full drill-down still uses fetchShareholding.
+export async function fetchLatestShareholdingForHoldings(symbolInput: string): Promise<ShareholdingQuarter | null> {
+  const symbol = normalizeSymbol(symbolInput);
+  if (!symbol) return null;
+  const [snapshot, history] = await Promise.all([
+    loadNseHistorySnapshot(false).catch(() => new Map<string, ShareholdingQuarter>()),
+    loadNseFlatHistory(symbol).catch(() => [] as ShareholdingQuarter[]),
+  ]);
+  const latestSnapshot = snapshot.get(symbol);
+  const quarters = mergeSameQuarterSources(symbol, [
+    ...(latestSnapshot ? [latestSnapshot] : []),
+    ...history,
+  ]);
+  return quarters[0] ?? null;
+}
+
 export const fetchShareholding = createServerFn({ method: "GET" })
   .validator((data: unknown) => z.object({ symbol: z.string().min(1).max(40), refresh: z.boolean().optional() }).parse(data))
   .handler(async ({ data }) => loadShareholding(data.symbol, data.refresh));
