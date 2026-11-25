@@ -251,18 +251,18 @@ function parseXbrl(xml: string): (Omit<ShareholdingQuarter, "quarter" | "asOnDat
   // NSE frequently publishes filings as Inline XBRL (ix:nonFraction), not
   // plain XML concept elements. Parse those facts too; otherwise recent 2025/2026
   // filings can be fetched successfully but all category percentages are dropped.
-  const inlineFactPattern = /<(?:ix:)?nonFraction\\b([^>]*?)>([\\s\\S]*?)<\\/(?:ix:)?nonFraction>/gi;
+  const inlineFactPattern = /<(?:ix:)?nonFraction\b([^>]*?)>([\s\S]*?)<\/(?:ix:)?nonFraction>/gi;
   for (const fact of xml.matchAll(inlineFactPattern)) {
     const attrs = fact[1];
-    const concept = (attrs.match(/\\bname=["']([^"']+)["']/i)?.[1] ?? "").split(":").pop() ?? "";
+    const concept = (attrs.match(/\bname=["']([^"']+)["']/i)?.[1] ?? "").split(":").pop() ?? "";
     if (!/ShareholdingAsAPercentageOfTotalNumberOfShares$/i.test(concept)) continue;
-    const contextRef = attrs.match(/\\bcontextRef=["']([^"']+)["']/i)?.[1];
+    const contextRef = attrs.match(/\bcontextRef=["']([^"']+)["']/i)?.[1];
     if (!contextRef) continue;
     const members = contexts.get(contextRef) ?? [];
     if (members.length > 6) continue;
     const rawText = htmlText(fact[2]).replace(/,/g, "").trim();
     let raw = Number(rawText);
-    const scale = Number(attrs.match(/\\bscale=["'](-?\\d+)["']/i)?.[1] ?? "0");
+    const scale = Number(attrs.match(/\bscale=["'](-?\d+)["']/i)?.[1] ?? "0");
     if (!Number.isFinite(raw)) continue;
     if (Number.isFinite(scale) && scale !== 0) raw *= 10 ** scale;
     if (!Number.isFinite(raw) || raw < 0 || raw > 100) continue;
