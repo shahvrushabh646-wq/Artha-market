@@ -856,7 +856,7 @@ async function loadShareholding(symbolInput: string, refresh = false): Promise<S
       // and merge exact period dates only. Pledge stays null unless separately reported.
       const quarters = mergeSameQuarterSources(symbol, [quarter, ...flatHistory, ...supplemental]);
       const data: ShareholdingResult = { symbol, source: quarter.sourceUrl, sourceName: quarter.sourceName, quarters, note: "Latest NSE historical snapshot enriched with dated quarterly filings from public exchange/provider sources. Each quarter is kept by its exact as-on date; missing history is not interpolated." };
-      cache.set(symbol, { expires: Date.now() + 30 * 60_000, data });
+      cache.set(symbol, { expires: Date.now() + 5 * 60_000, data });
       return data;
     }
   } catch { /* use live exchange/provider fallback below */ }
@@ -989,7 +989,7 @@ async function loadShareholding(symbolInput: string, refresh = false): Promise<S
   }
 
   // Cache only verified quarters. Empty/rate-limited responses must be retried on the next request.
-  if (base.quarters.length) cache.set(symbol, { expires: Date.now() + 30 * 60_000, data: base });
+  if (base.quarters.length) cache.set(symbol, { expires: Date.now() + 5 * 60_000, data: base });
   else cache.delete(symbol);
   return base;
 }
