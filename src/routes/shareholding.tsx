@@ -35,9 +35,9 @@ function InsidePieLabel(props: { cx?: number; cy?: number; midAngle?: number; in
 function ShareholdingPage() {
   const { symbol } = Route.useSearch();
   const query = useQuery({
-    queryKey: ["shareholding-analysis", symbol],
+    queryKey: ["shareholding-analysis-v4", symbol],
     queryFn: () => fetchShareholding({ data: { symbol } }),
-    staleTime: 30 * 60_000,
+    staleTime: 5 * 60_000,
     retry: 1,
   });
   const data = query.data;
