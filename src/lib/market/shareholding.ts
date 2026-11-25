@@ -795,9 +795,16 @@ async function loadShareholding(symbolInput: string, refresh = false): Promise<S
     const raw = await nseJson(`https://www.nseindia.com/api/corporate-share-holdings-master?index=equities&symbol=${encodeURIComponent(symbol)}`, page);
     if (!Array.isArray(raw)) throw new Error("Unexpected response from NSE.");
     const filings = raw as Array<Record<string, unknown>>;
-    const selected = filings.filter(row => typeof row.xbrl === "string" && /^https?:\/\//i.test(row.xbrl as string)).sort((a, b) => sourceDate(String(b.date ?? "")).localeCompare(sourceDate(String(a.date ?? ""))));
-    // Fetch all filings in the selected 2021–2026 history; restore filing-date order below.
-    const parsedFilings = await Promise.all(selected.map(async (filing) => {
+    const selected = filings.filter(row => {
+      if (typeof row.xbrl !== "string" || !/^https?:\/\//i.test(row.xbrl as string)) return false;
+      const date = sourceDate(String(row.date ?? ""));
+      return date >= "2021-01-01" && date <= "2026-12-31";
+    }).sort((a, b) => sourceDate(String(b.date ?? "")).localeCompare(sourceDate(String(a.date ?? ""))));
+    // Fetch all 2021–2026 filings in bounded batches to avoid rate limits.
+    const parsedFilings: (ShareholdingQuarter | null)[] = [];
+    for (let start = 0; start < selected.length; start += 6) {
+      const batch = selected.slice(start, start + 6);
+      parsedFilings.push(...await Promise.all(batch.map(async filing => {
       const url = String(filing.xbrl);
       try {
         const response = await fetch(url, { headers: { "User-Agent": UA, Accept: "application/xml,text/xml,*/*", Referer: page }, cache: "no-store" });
@@ -814,7 +821,8 @@ async function loadShareholding(symbolInput: string, refresh = false): Promise<S
           sourceName: "NSE" as const,
         };
       } catch { return null; }
-    }));
+      })));
+    }
     base.quarters = mergeSameQuarterSources(symbol, [
       ...parsedFilings.filter((quarter): quarter is ShareholdingQuarter => quarter !== null),
       ...flatHistory,
