@@ -250,6 +250,8 @@ function HoldingsPage() {
             <div className="mt-4 max-h-[68vh] space-y-3 overflow-y-auto overscroll-contain pr-1">
               {rows.map((share, index) => {
                 const q = share.quarter;
+                const drawdown = share.price != null && share.high5y != null && share.high5y > 0 && share.price <= share.high5y
+                  ? ((share.high5y - share.price) / share.high5y) * 100 : null;
                 const publicValue = publicResidual(q);
                 const others = othersOutsidePublic(q);
                 const score = q?.fii !== null && q?.fii !== undefined && q?.dii !== null && q?.dii !== undefined
