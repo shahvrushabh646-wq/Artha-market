@@ -211,20 +211,8 @@ function ShareholdingPage() {
           };
           const promoterQuarterRows = quarters.filter(inSelectedPromoterQuarter);
           const promoterQuarterData = [...promoterQuarterRows].reverse().find(q => q.promoter != null) ?? promoterQuarterRows.at(-1) ?? null;
-          let promoterPledgeQuarterData = [...promoterQuarterRows].reverse().find(q => q.promoterPledge != null) ?? null;
+          const promoterPledgeQuarterData = [...promoterQuarterRows].reverse().find(q => q.promoterPledge != null) ?? null;
           let pledgeFallbackNote: string | null = null;
-          if (!promoterPledgeQuarterData) {
-            const target = promoterQuarterData?.asOnDate ?? `${promoterActiveYear}-${String(promoterActiveQuarter * 3).padStart(2, "0")}-28`;
-            const withPledge = quarters.filter(q => q.promoterPledge != null && Number.isFinite(q.promoterPledge));
-            if (withPledge.length) {
-              const past = withPledge.filter(q => q.asOnDate <= target).sort((a, b) => b.asOnDate.localeCompare(a.asOnDate));
-              const future = withPledge.filter(q => q.asOnDate > target).sort((a, b) => a.asOnDate.localeCompare(b.asOnDate));
-              promoterPledgeQuarterData = past[0] ?? future[0] ?? null;
-              if (promoterPledgeQuarterData) {
-                pledgeFallbackNote = `Exact-quarter pledge filing not found. Showing nearest verified pledge from ${promoterPledgeQuarterData.asOnDate}.`;
-              }
-            }
-          }
           const holding = promoterQuarterData?.promoter;
           const pledgeRate = promoterPledgeQuarterData?.promoterPledge ?? null;
           if (pledgeRate == null && holding != null) {
