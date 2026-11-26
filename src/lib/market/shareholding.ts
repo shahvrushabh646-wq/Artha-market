@@ -859,6 +859,12 @@ async function loadShareholding(symbolInput: string, refresh = false): Promise<S
       return data;
     }
   } catch { /* use live exchange/provider fallback below */ }
+  // Some NSE symbols have no row in the latest-signals snapshot. Still load
+  // their dated filing-index history and pledge disclosures rather than falling
+  // back to only the recent live NSE endpoint.
+  const indexedHistory = await loadNseFilingHistory(symbol).catch(() => []);
+  const pledgeHistory = await loadNsePledgeSnapshot(symbol).catch(() => []);
+  const initialHistory = mergeSameQuarterSources(symbol, [...flatHistory, ...indexedHistory, ...pledgeHistory]);
   const cached = cache.get(symbol);
   if (!refresh && cached && cached.expires > Date.now()) return cached.data;
   if (refresh) cache.delete(symbol);
@@ -867,7 +873,7 @@ async function loadShareholding(symbolInput: string, refresh = false): Promise<S
     symbol,
     source: flatHistory[0]?.sourceUrl ?? page,
     sourceName: flatHistory[0]?.sourceName ?? "NSE",
-    quarters: flatHistory,
+    quarters: initialHistory,
     note: flatHistory.length ? "Historical shareholding loaded from parsed NSE XBRL records; pledge remains unverified unless a filing reports it." : null,
   };
   try {
@@ -908,6 +914,7 @@ async function loadShareholding(symbolInput: string, refresh = false): Promise<S
       })));
     }
     base.quarters = mergeSameQuarterSources(symbol, [
+      ...base.quarters,
       ...parsedFilings.filter((quarter): quarter is ShareholdingQuarter => quarter !== null),
       ...flatHistory,
     ]);
