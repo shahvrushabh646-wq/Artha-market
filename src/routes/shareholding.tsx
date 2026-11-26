@@ -15,7 +15,7 @@ export const Route = createFileRoute("/shareholding")({
   component: ShareholdingPage,
 });
 
-const COLORS = { FII: "#2563eb", DII: "#06b6d4", Promoter: "#10b981", Public: "#f59e0b", Pledge: "#e11d48", Other: "#64748b", Additional: "#8b5cf6" };
+const COLORS = { FII: "#ef4444", DII: "#eab308", Promoter: "#10b981", Public: "#f8fafc", Pledge: "#e11d48", Other: "#3b82f6", Additional: "#8b5cf6" };
 const moneyPercent = (value: number | null | undefined) => value == null || !Number.isFinite(value) ? "—" : `${value.toFixed(2)}%`;
 function quarterLabel(q: ShareholdingQuarter) { return q.quarter || q.asOnDate; }
 function InsidePieLabel(props: { cx?: number; cy?: number; midAngle?: number; innerRadius?: number; outerRadius?: number; percent?: number; name?: string; payload?: { value?: number; displayName?: string } }) {
@@ -46,34 +46,42 @@ function ShareholdingPage() {
   const latestDate = latest ? new Date(latest.asOnDate + "T00:00:00Z") : new Date();
   const [selectedYear, setSelectedYear] = useState<number | null>(null);
   const [selectedQuarter, setSelectedQuarter] = useState<number | null>(null);
-  // Independent period controls for Promoter & Pledge; existing Shareholding UI/state stays unchanged.
   const [promoterYear, setPromoterYear] = useState<number | null>(null);
   const [promoterQuarter, setPromoterQuarter] = useState<number | null>(null);
   const activeYear = selectedYear ?? latestDate.getUTCFullYear();
   const activeQuarter = selectedQuarter ?? Math.floor(latestDate.getUTCMonth() / 3) + 1;
-  // Keep recent year tabs visible even if a provider has no filing for a year.
-  // Values remain sourced only from actual dated quarters.
   const currentYear = new Date().getUTCFullYear();
   const yearTabs = [...new Set([
-    ...Array.from({ length: Math.max(0, currentYear - 2021 + 1) }, (_, i) => 2021 + i),
+    ...Array.from({ length: Math.max(0, currentYear - 2018 + 1) }, (_, i) => 2018 + i),
     ...quarters.map(q => new Date(q.asOnDate + "T00:00:00Z").getUTCFullYear()),
   ])].sort((a, b) => a - b);
   const selectedQuarterData = quarters.find(q => { const date = new Date(q.asOnDate + "T00:00:00Z"); return date.getUTCFullYear() === activeYear && Math.floor(date.getUTCMonth() / 3) + 1 === activeQuarter; }) ?? null;
   const fourYearQuarterData = yearTabs.map(year => quarters.find(q => { const date = new Date(q.asOnDate + "T00:00:00Z"); return date.getUTCFullYear() === year && Math.floor(date.getUTCMonth() / 3) + 1 === activeQuarter; })).filter((q): q is ShareholdingQuarter => !!q);
   const pieData = useMemo(() => {
     const quarter = selectedQuarterData;
-    if (!quarter || quarter.promoter == null || quarter.public == null) return [];
-    // FII and DII are included within total Public. Split them out and show the residual
-    // as Other Public so the pie has all reported categories without double-counting.
-    const fii = quarter.fii ?? 0;
-    const dii = quarter.dii ?? 0;
-    const otherPublic = Math.max(0, quarter.public - fii - dii);
-    return [
-      { name: "Promoter", displayName: "Promoter", value: quarter.promoter, color: COLORS.Promoter },
-      { name: "FII", displayName: "FII", value: fii, color: COLORS.FII },
-      { name: "DII", displayName: "DII", value: dii, color: COLORS.DII },
-      { name: "Other Public", displayName: "Other Public", value: otherPublic, color: COLORS.Public },
-    ].filter(item => item.value > 0);
+    if (!quarter || quarter.promoter == null) return [];
+    const promoter = quarter.promoter;
+    const fii = quarter.fii;
+    const dii = quarter.dii;
+    const slices: Array<{ name: string; displayName: string; value: number; color: string }> = [
+      { name: "Promoter", displayName: "Promoter", value: promoter, color: COLORS.Promoter },
+    ];
+    if (fii != null && Number.isFinite(fii) && fii >= 0) slices.push({ name: "FII", displayName: "FII", value: fii, color: COLORS.FII });
+    if (dii != null && Number.isFinite(dii) && dii >= 0) slices.push({ name: "DII", displayName: "DII", value: dii, color: COLORS.DII });
+    let residual: number | null = null;
+    if (quarter.public != null && Number.isFinite(quarter.public)) {
+      residual = quarter.public - ((fii ?? 0) + (dii ?? 0));
+    } else if (fii != null && dii != null) {
+      residual = 100 - promoter - fii - dii;
+    } else if (fii == null && dii == null && quarter.public != null) {
+      residual = quarter.public;
+    }
+    if (residual != null && Number.isFinite(residual) && residual > 0.05) {
+      slices.push({ name: "Others", displayName: fii != null || dii != null ? "Other Public" : "Public / Others", value: residual, color: COLORS.Other });
+    }
+    const total = slices.reduce((s, x) => s + x.value, 0);
+    if (total <= 0 || total > 100.5 || slices.some(x => x.value < 0)) return [];
+    return slices.filter(item => item.value > 0);
   }, [selectedQuarterData]);
   const screening = useMemo(() => {
     if (!latest || latest.fii == null || latest.dii == null) return { label: "Insufficient Data", detail: "Latest-quarter FII and/or DII figures could not be verified." };
@@ -128,7 +136,7 @@ function ShareholdingPage() {
           </div>
           <div className="mt-3 grid grid-cols-2 gap-3">{pieData.map(entry => <span key={entry.name} className="flex items-center gap-2 rounded-xl border border-[var(--border)] bg-surface-2 px-3 py-3 text-xs text-muted"><span className="size-3 shrink-0 rounded-full" style={{ backgroundColor: entry.color }}/><span className="min-w-0"><span className="block">{entry.displayName}</span><strong className="mt-1 block tabular text-base font-semibold text-fg">{moneyPercent(entry.value)}</strong></span></span>)}</div>
           <p className="mt-4 border-t border-[var(--border)] pt-3 text-xs leading-5 text-subtle">Filing as on {selectedQuarterData?.asOnDate}. Pie shows Promoter, FII, DII and Other Public. FII and DII are part of total Public, so Other Public is calculated as total Public minus FII and DII to avoid double-counting.</p>
-        </> : <Panel><p className="text-sm text-muted">No verified filing found for {activeQuarter} {activeYear}. Try another quarter. Historical figures are not estimated.</p></Panel>}
+        </> : <Panel><p className="text-sm text-muted">No verified filing found for Q{activeQuarter} {activeYear}. Try another quarter. Historical figures are not estimated.</p></Panel>}
         </Panel>
       </Section>
 
@@ -140,15 +148,10 @@ function ShareholdingPage() {
           const promoterActiveQuarter = promoterQuarter ?? Math.floor(promoterDefaultDate.getUTCMonth() / 3) + 1;
           const inSelectedPromoterQuarter = (q: ShareholdingQuarter) => {
             const date = new Date(q.asOnDate + "T00:00:00Z");
-            return date.getUTCFullYear() === promoterActiveYear &&
-              Math.floor(date.getUTCMonth() / 3) + 1 === promoterActiveQuarter;
+            return date.getUTCFullYear() === promoterActiveYear && Math.floor(date.getUTCMonth() / 3) + 1 === promoterActiveQuarter;
           };
-          // Some providers report the holding and pledge on separate dated
-          // filings within the same quarter. Use the latest verified value
-          // for each field, without borrowing data from another quarter.
           const promoterQuarterRows = quarters.filter(inSelectedPromoterQuarter);
-          const promoterQuarterData = [...promoterQuarterRows].reverse().find(q => q.promoter != null)
-            ?? promoterQuarterRows.at(-1) ?? null;
+          const promoterQuarterData = [...promoterQuarterRows].reverse().find(q => q.promoter != null) ?? promoterQuarterRows.at(-1) ?? null;
           const promoterPledgeQuarterData = [...promoterQuarterRows].reverse().find(q => q.promoterPledge != null) ?? null;
           const holding = promoterQuarterData?.promoter;
           const pledgeRate = promoterPledgeQuarterData?.promoterPledge;
@@ -181,13 +184,13 @@ function ShareholdingPage() {
         {quarters.length ? <div className="overflow-x-auto rounded-xl shadow-[var(--shadow-border)]">
           <table className="w-full min-w-[860px] border-collapse text-left text-xs">
             <thead className="bg-surface-2 text-muted"><tr><th className="sticky left-0 z-10 bg-surface-2 p-3 font-medium">Category</th>{quarters.map(q => <th key={q.asOnDate} className="whitespace-nowrap p-3 font-medium"><span className="block">{quarterLabel(q)}</span><span className="mt-1 block text-[10px] text-subtle">{q.asOnDate}</span></th>)}<th className="p-3 font-medium">Change</th></tr></thead>
-            <tbody>{tableRows.map(row => <tr key={row.key} className="border-t border-[var(--border)] hover:bg-surface-2/50"><th className="sticky left-0 z-10 bg-surface p-3 font-medium text-fg">{row.label}</th>{quarters.map(q => <td key={q.asOnDate} className="whitespace-nowrap p-3 tabular text-fg">{moneyPercent(q[row.key])}</td>)}<td className="p-3 tabular text-fg">{delta(row.key)}</td></tr>)}</tbody>
+            <tbody>{tableRows.map(row => <tr key={row.key} className="border-t border-[var(--border)] hover:bg-surface-2/50"><th className="sticky left-0 z-10 bg-surface p-3 font-medium text-fg">{row.label}</th>{quarters.map(q => <td key={q.asOnDate} className="whitespace-nowrap p-3 tabular text-fg">{moneyPercent(q[row.key])}</td>)}<td className="p-3 tabular text-muted">{delta(row.key)}</td></tr>)}</tbody>
           </table>
-        </div> : <Panel><p className="text-sm text-muted">No verified quarterly comparison is available.</p></Panel>}
+        </div> : <Panel><p className="text-sm text-muted">No quarterly comparison available yet.</p></Panel>}
       </Section>
 
-      {data.note ? <Panel className="flex items-start gap-2 p-3"><AlertTriangle className="mt-0.5 size-4 shrink-0 text-muted"/><p className="text-xs text-muted">{data.note}</p></Panel> : null}
-      <Panel className="mt-6 p-5"><div className="flex items-center justify-between gap-3"><div><p className="text-xs uppercase tracking-wider text-subtle">Data source</p><p className="mt-1 text-sm text-fg">{data.sourceName || "Exchange filing"} · Shareholding Pattern</p></div><a href={data.source} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-muted underline">Open source <ExternalLink className="size-3"/></a></div><p className="mt-2 text-xs text-subtle">Only verified values are shown. FII/DII screening uses the same latest reported quarter; exactly 15.00% does not pass the strict above-15% threshold.</p></Panel>
+      {data.note ? <Panel><p className="text-xs leading-5 text-subtle">{data.note}</p></Panel> : null}
+      {data.source ? <p className="text-xs text-subtle">Source: <a className="underline" href={data.source} target="_blank" rel="noreferrer">{data.sourceName || "Exchange filing"}<ExternalLink className="ml-1 inline size-3"/></a></p> : null}
     </>}
   </div>;
 }

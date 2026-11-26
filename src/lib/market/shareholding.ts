@@ -34,6 +34,8 @@ function parseNseFlatHistory(csv: string): Map<string, ShareholdingQuarter[]> {
   const idx = (name: string) => headers.indexOf(name);
   const tickerIdx = idx("ticker"), periodIdx = idx("period"), promoterIdx = idx("promoter_pct");
   const fiiIdx = idx("fii_pct"), diiIdx = idx("dii_pct"), publicIdx = idx("public_pct");
+  // Optional in upstream revisions; pledge is also parsed from filing XBRL.
+  const pledgeIdx = idx("pledge_pct");
   if ([tickerIdx, periodIdx, promoterIdx, fiiIdx, diiIdx, publicIdx].some(i => i < 0)) {
     throw new Error("Historical shareholding CSV columns changed");
   }
@@ -42,26 +44,19 @@ function parseNseFlatHistory(csv: string): Map<string, ShareholdingQuarter[]> {
     const cells = parseCsvLine(line), symbol = normalizeSymbol(cells[tickerIdx] ?? "");
     const period = cells[periodIdx] ?? "";
     if (!symbol || !/^\d{4}-\d{2}$/.test(period)) continue;
-    const [filingYear, filingMonth] = period.split("-").map(Number);
-    if (filingMonth < 1 || filingMonth > 12) continue;
-    // This upstream CSV's period is the filing/submission month, not the
-    // reported SHP quarter-end. NSE quarterly filings are normally submitted
-    // in the month after quarter close (Apr/May for Mar, Jul/Aug for Jun,
-    // Oct/Nov for Sep, Jan/Feb for Dec). Map those submission months back
-    // to the reported quarter-end so year/quarter tabs don't misclassify them.
-    let year = filingYear, month: number;
-    if (filingMonth === 1 || filingMonth === 2) { year -= 1; month = 12; }
-    else if (filingMonth === 4 || filingMonth === 5) month = 3;
-    else if (filingMonth === 7 || filingMonth === 8) month = 6;
-    else if (filingMonth === 10 || filingMonth === 11) month = 9;
-    else month = filingMonth;
+    const [year, month] = period.split("-").map(Number);
+    if (month < 1 || month > 12) continue;
+    // Upstream period is the reported SHP quarter (e.g. 2021-03 means
+    // 31-Mar-2021), not its submission month. Preserve the reported quarter.
     const date = new Date(Date.UTC(year, month, 0)), asOnDate = date.toISOString().slice(0, 10);
     const val = (column: number) => safeNumber(cells[column] ?? null);
-    const promoter = val(promoterIdx), fii = val(fiiIdx), dii = val(dii), publicValue = val(publicIdx);
-    if (promoter === null && fii === null && dii === null && publicValue === null) continue;
+    const promoter = val(promoterIdx), fii = val(fiiIdx), dii = val(diiIdx), publicValue = val(publicIdx);
+    const pledgeValue = pledgeIdx >= 0 ? val(pledgeIdx) : null;
+    if (promoter === null && fii === null && dii === null && publicValue === null && pledgeValue === null) continue;
     const quarter: ShareholdingQuarter = {
       quarter: date.toLocaleDateString("en-IN", { month: "short", year: "numeric", timeZone: "UTC" }),
-      asOnDate, promoter, fii, dii, public: publicValue, promoterPledge: null,
+      asOnDate, promoter, fii, dii, public: publicValue,
+      promoterPledge: pledgeValue !== null && pledgeValue >= 0 && pledgeValue <= 100 ? pledgeValue : null,
       sourceUrl: NSE_FLAT_HISTORY_CSV, sourceName: "NSE historical XBRL dataset",
     };
     const rows = bySymbol.get(symbol) ?? [];
@@ -186,7 +181,11 @@ async function nseJson(url: string, referer: string): Promise<unknown> {
 }
 
 function parseXbrl(xml: string): (Omit<ShareholdingQuarter, "quarter" | "asOnDate" | "sourceUrl"> & { periodEnd?: string }) | null {
-  if (!xml.trim().startsWith("<") || !/ShareholdingAsAPercentageOfTotalNumberOfShares/.test(xml)) return null;
+  // Accept both standard XBRL element facts and Inline XBRL facts. Inline facts
+  // carry the taxonomy concept in the `name` attribute, so a tag-only precheck
+  // would reject the entire newer filing before the inline fact parser runs.
+  const hasShareholdingFact = /ShareholdingAsAPercentageOfTotalNumberOfShares/.test(xml);
+  if (!xml.trim().startsWith("<") || !hasShareholdingFact) return null;
   const contexts = new Map<string, string[]>();
   const contextDates = new Map<string, string>();
   const contextPattern = /<(?:[\w.-]+:)?context\b[^>]*\bid="([^"]+)"[^>]*>([\s\S]*?)<\/(?:[\w.-]+:)?context>/g;
@@ -296,6 +295,43 @@ function parseXbrl(xml: string): (Omit<ShareholdingQuarter, "quarter" | "asOnDat
         values[category] = raw;
         if (category === "promoter") periodEnd = contextDates.get(contextRef) ?? periodEnd;
       }
+    }
+  }
+
+  // Inline XBRL pledge facts (ix:nonFraction) are separate from the SHP
+  // percentage facts. The upstream flat CSV currently does not emit pledge_pct,
+  // so extract pledge directly from the dated filing instead of relying on that
+  // empty optional column.
+  const inlinePledgeFacts: Array<{ concept: string; value: number; members: string[] }> = [];
+  for (const fact of xml.matchAll(inlineFactPattern)) {
+    const attrs = fact[1];
+    const namedConcept = attrs.match(/\bname=["']([^"']+)["']/i)?.[1];
+    if (!namedConcept) continue;
+    const concept = normalizeConcept(namedConcept);
+    const contextRef = attrs.match(/\bcontextRef=["']([^"']+)["']/i)?.[1];
+    if (!contextRef) continue;
+    const members = contexts.get(contextRef) ?? [];
+    if (!hasPromoterContext(members) || members.length > 8) continue;
+    const rawText = htmlText(fact[2]).replace(/,/g, "").trim();
+    const numeric = Number(rawText);
+    const scaleAttr = Number(attrs.match(/\bscale=["'](-?\d+)["']/i)?.[1] ?? "0");
+    if (!rawText || !Number.isFinite(numeric)) continue;
+    const value = numeric * (Number.isFinite(scaleAttr) ? 10 ** scaleAttr : 1);
+    if (!Number.isFinite(value) || value < 0) continue;
+    inlinePledgeFacts.push({ concept, value, members });
+  }
+  for (const fact of inlinePledgeFacts) {
+    const { concept, value } = fact;
+    const isPledge = /pledge|encumber/.test(concept);
+    if (isPledge) {
+      if (/(percentage|percent|pct)/.test(concept) && value <= 100) {
+        if (/(promoterholding|promotershares|promoterandpromotergroup)/.test(concept)) pledgePctOfPromoter ??= value;
+        else pledgePctOfCompany ??= value;
+      }
+      if (pledgedShares === null && /(numberofshares|shares)/.test(concept)) pledgedShares = value;
+    } else if (promoterShares === null &&
+      /(numberofshares|totalnumberofshares|sharesheld)/.test(concept)) {
+      promoterShares = value;
     }
   }
 
@@ -863,12 +899,18 @@ async function loadShareholding(symbolInput: string, refresh = false): Promise<S
   const cached = cache.get(symbol);
   if (!refresh && cached && cached.expires > Date.now()) return cached.data;
   if (refresh) cache.delete(symbol);
+  // Some NSE symbols have no row in the latest-signals snapshot. Still load
+  // their dated filing-index history and pledge disclosures rather than falling
+  // back to only the recent live NSE endpoint.
+  const indexedHistory = await loadNseFilingHistory(symbol).catch(() => []);
+  const pledgeHistory = await loadNsePledgeSnapshot(symbol).catch(() => []);
+  const initialHistory = mergeSameQuarterSources(symbol, [...flatHistory, ...indexedHistory, ...pledgeHistory]);
   const page = `https://www.nseindia.com/companies-listing/corporate-filings-shareholding-pattern?symbol=${encodeURIComponent(symbol)}&tabIndex=equity`;
   const base: ShareholdingResult = {
     symbol,
     source: flatHistory[0]?.sourceUrl ?? page,
     sourceName: flatHistory[0]?.sourceName ?? "NSE",
-    quarters: flatHistory,
+    quarters: initialHistory,
     note: flatHistory.length ? "Historical shareholding loaded from parsed NSE XBRL records; pledge remains unverified unless a filing reports it." : null,
   };
   try {
@@ -909,6 +951,7 @@ async function loadShareholding(symbolInput: string, refresh = false): Promise<S
       })));
     }
     base.quarters = mergeSameQuarterSources(symbol, [
+      ...base.quarters,
       ...parsedFilings.filter((quarter): quarter is ShareholdingQuarter => quarter !== null),
       ...flatHistory,
     ]);
