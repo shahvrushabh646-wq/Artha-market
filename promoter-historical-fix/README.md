@@ -1,19 +1,11 @@
 # Artha-market — Promoter Holding & Pledge Historical Fix Package
 
-This package contains modular implementation files to fix historical Promoter Holding and Promoter Pledge data across **2018–2026** (`Q1`–`Q4`):
+This folder documents the supplied historical promoter holding/pledge fix package for 2018–2026 (`Q1`–`Q4`).
 
-1. `promoterHistoricalEngine.ts`
-   - Resolves year + quarter to canonical reporting period-end dates (`YYYY-MM-DD`) without conflating filing/submission date with period-end date.
-   - Parses NSE/BSE XBRL XML and structured filing fields across varying tag names.
-   - Computes Promoter Pledge % strictly as: `Promoter Pledge % = (Shares Pledged by Promoters / Total Promoter Shares) * 100`
-   - Marks missing/unverified holdings or pledge disclosures as `NOT_VERIFIED` with a diagnostic reason instead of falling back to another quarter or carrying forward prior values.
-   - Emits safe diagnostic logs (`symbol`, `year`, `quarter`, `periodEndDate`, `filingDate`, `source`, `promoterShares`, `pledgedPromoterShares`, `calculatedPledgePct`, `verificationReason`) without exposing credentials or secrets.
+The intended package contains:
 
-2. `useHistoricalPromoterData.tsx`
-   - Binds historical year (`2018–2026`) and quarter (`Q1–Q4`) selection to `selectedRecord`, `trendChartData`, and `pieChartData`.
-   - Prevents the pie chart or historical chart from falling back to the latest quarter when a historical period is selected or unverified.
+- `promoterHistoricalEngine.ts`: exact period mapping, filing parsing, verified promoter holding and pledge calculation (`pledged promoter shares / total promoter shares * 100`), and safe diagnostics.
+- `useHistoricalPromoterData.tsx`: selected-period record, trend-series and pie-chart binding without latest-quarter fallback.
+- `test_promoter_historical.py`: tests for period mapping, denominator math, zero pledge, missing disclosure, and quarter isolation.
 
-3. `test_promoter_historical.py`
-   - Unit tests covering 2018–2026 (`Q1`–`Q4`), active promoter pledge denominator math, zero pledge (`0%`), missing pledge disclosure (`NOT_VERIFIED`), and quarter isolation.
-
-Note: These files are staged as a separate package on a feature branch; they are not yet wired into the live application. Integrate them with the existing promoter data source and UI after validating the current repository's actual file structure and data contracts.
+**Upload status:** Only this README has been committed so far. The original ZIP and its three source/test files have not been added to this branch yet. The package is not integrated into the app, merged into `main`, or deployed.
