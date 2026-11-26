@@ -68,7 +68,6 @@ export function StockHoldingsTab({ symbol, company }: { symbol: string; company:
     return [...byDate.values()];
   }, [query.data?.quarters]);
 
-  // Prefer a quarter that can actually build a pie (has promoter or FII/DII)
   const bestShareQuarter = useMemo(() => {
     const usable = [...quarters].reverse().find(q => buildSharePie(q).length > 0);
     return usable ?? quarters.at(-1) ?? null;
@@ -104,14 +103,12 @@ export function StockHoldingsTab({ symbol, company }: { symbol: string; company:
     }) ?? null;
   }, [quarters, activeYear, activeQuarter]);
 
-  // If user picked an empty period, still show the best available pie so the chart is never blank when data exists
   const shareSource = selectedQuarterData && buildSharePie(selectedQuarterData).length
     ? selectedQuarterData
     : bestShareQuarter;
   const sharePie = useMemo(() => buildSharePie(shareSource), [shareSource]);
   const usingFallbackShare = shareSource !== selectedQuarterData && shareSource != null;
 
-  // Promoter section
   const latestWithPromoter = [...quarters].reverse().find(q => q.promoter != null) ?? latest;
   const promoterDefaultDate = latestWithPromoter
     ? new Date(latestWithPromoter.asOnDate + "T00:00:00Z")
@@ -155,7 +152,7 @@ export function StockHoldingsTab({ symbol, company }: { symbol: string; company:
     : [];
 
   const chart = (items: Slice[]) => (
-    <div className="mx-auto h-56 w-full min-h-[14rem]">
+    <div className="mx-auto h-60 w-full min-h-[15rem]">
       <ResponsiveContainer width="100%" height="100%" minWidth={0}>
         <PieChart>
           <Pie
@@ -164,8 +161,8 @@ export function StockHoldingsTab({ symbol, company }: { symbol: string; company:
             nameKey="name"
             cx="50%"
             cy="50%"
-            innerRadius={48}
-            outerRadius={88}
+            innerRadius={52}
+            outerRadius={96}
             paddingAngle={2}
             isAnimationActive={false}
           >
@@ -180,25 +177,52 @@ export function StockHoldingsTab({ symbol, company }: { symbol: string; company:
   );
 
   const legend = (items: Slice[]) => (
-    <div className="grid grid-cols-2 gap-2">
+    <div className="grid grid-cols-2 gap-3">
       {items.map(item => (
-        <div key={item.name} className="flex items-center gap-2 text-xs text-muted">
-          <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: item.color }} />
+        <div key={item.name} className="flex items-center gap-2.5 text-sm text-muted sm:text-base">
+          <span className="size-3.5 shrink-0 rounded-full" style={{ backgroundColor: item.color }} />
           <span>
-            {item.displayName}: <strong className="tabular text-fg">{moneyPercent(item.value)}</strong>
+            {item.displayName}:{" "}
+            <strong className="tabular text-base font-bold text-fg sm:text-lg">{moneyPercent(item.value)}</strong>
           </span>
         </div>
       ))}
     </div>
   );
 
+  const yearBtn = (year: number, active: boolean, onClick: () => void) => (
+    <button
+      key={year}
+      type="button"
+      onClick={onClick}
+      className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
+        active ? "bg-accent text-white shadow-sm" : "bg-surface text-muted hover:text-fg"
+      }`}
+    >
+      {year}
+    </button>
+  );
+
+  const quarterBtn = (q: number, active: boolean, onClick: () => void) => (
+    <button
+      key={q}
+      type="button"
+      onClick={onClick}
+      className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
+        active ? "bg-surface-3 text-fg ring-1 ring-[var(--border)]" : "bg-surface text-muted hover:text-fg"
+      }`}
+    >
+      Q{q}
+    </button>
+  );
+
   return (
     <Panel className="mt-3 space-y-5 p-4 sm:p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-xs uppercase tracking-wider text-subtle">Shareholding · {displaySymbol(symbol)}</p>
-          <h2 className="mt-1 text-lg font-semibold text-fg">{company}</h2>
-          <p className="mt-1 text-xs text-muted">
+          <p className="text-xs uppercase tracking-wider text-subtle sm:text-sm">Shareholding · {displaySymbol(symbol)}</p>
+          <h2 className="mt-1 text-xl font-semibold text-fg sm:text-2xl">{company}</h2>
+          <p className="mt-1 text-sm text-muted">
             {quarters.length
               ? `${quarters.length} verified filings loaded · pick year & quarter below`
               : "No verified quarterly filing available"}
@@ -207,56 +231,34 @@ export function StockHoldingsTab({ symbol, company }: { symbol: string; company:
         <Link
           to="/shareholding"
           search={{ symbol }}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-surface-2 px-3 py-2 text-xs font-medium text-muted hover:text-fg"
+          className="inline-flex items-center gap-1.5 rounded-lg bg-surface-2 px-3 py-2 text-sm font-medium text-muted hover:text-fg"
         >
-          Full analysis <ExternalLink className="size-3.5" />
+          Full analysis <ExternalLink className="size-4" />
         </Link>
       </div>
 
       {query.isLoading ? (
         <SkeletonBlock className="h-48" />
       ) : query.isError ? (
-        <p className="text-sm text-muted">Shareholding data could not be loaded. Please retry.</p>
+        <p className="text-base text-muted">Shareholding data could not be loaded. Please retry.</p>
       ) : quarters.length === 0 ? (
-        <p className="text-sm text-muted">No verified shareholding filings found for this symbol.</p>
+        <p className="text-base text-muted">No verified shareholding filings found for this symbol.</p>
       ) : (
         <>
           {/* Shareholding pattern */}
-          <div className="rounded-xl bg-surface-2 p-3 sm:p-4">
-            <h3 className="text-sm font-semibold text-fg">Shareholding pattern</h3>
-            <p className="mt-1 text-xs text-muted">Promoter · FII · DII · Other Public</p>
+          <div className="rounded-xl bg-surface-2 p-4 sm:p-5">
+            <h3 className="text-base font-bold text-fg sm:text-lg">Shareholding pattern</h3>
+            <p className="mt-1 text-sm text-muted">Promoter · FII · DII · Other Public</p>
 
-            <div className="mt-3 space-y-2">
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="mr-1 text-[10px] font-medium uppercase tracking-wider text-subtle">Year</span>
-                {yearTabs.map(year => (
-                  <button
-                    key={year}
-                    type="button"
-                    onClick={() => setSelectedYear(year)}
-                    className={`rounded-md px-2.5 py-1 text-xs font-semibold transition ${
-                      activeYear === year ? "bg-accent text-white" : "bg-surface text-muted hover:text-fg"
-                    }`}
-                  >
-                    {year}
-                  </button>
-                ))}
+            <div className="mt-4 space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="mr-1 text-xs font-semibold uppercase tracking-wider text-subtle">Year</span>
+                {yearTabs.map(year => yearBtn(year, activeYear === year, () => setSelectedYear(year)))}
               </div>
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="mr-1 text-[10px] font-medium uppercase tracking-wider text-subtle">Quarter</span>
-                {[1, 2, 3, 4].map(q => (
-                  <button
-                    key={q}
-                    type="button"
-                    onClick={() => setSelectedQuarter(q)}
-                    className={`rounded-md px-2.5 py-1 text-xs font-semibold transition ${
-                      activeQuarter === q ? "bg-surface-3 text-fg ring-1 ring-[var(--border)]" : "bg-surface text-muted hover:text-fg"
-                    }`}
-                  >
-                    Q{q}
-                  </button>
-                ))}
-                <span className="ml-auto text-[10px] text-muted">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="mr-1 text-xs font-semibold uppercase tracking-wider text-subtle">Quarter</span>
+                {[1, 2, 3, 4].map(q => quarterBtn(q, activeQuarter === q, () => setSelectedQuarter(q)))}
+                <span className="ml-auto text-xs text-muted sm:text-sm">
                   {selectedQuarterData
                     ? `Filing · ${selectedQuarterData.asOnDate}`
                     : usingFallbackShare && shareSource
@@ -271,54 +273,32 @@ export function StockHoldingsTab({ symbol, company }: { symbol: string; company:
                 {chart(sharePie)}
                 {legend(sharePie)}
                 {usingFallbackShare && shareSource ? (
-                  <p className="mt-2 text-[11px] leading-4 text-subtle">
+                  <p className="mt-3 text-xs leading-5 text-subtle sm:text-sm">
                     Q{activeQuarter} {activeYear} has no complete pie. Showing latest usable filing ({shareSource.asOnDate}).
                   </p>
                 ) : null}
               </>
             ) : (
-              <p className="mt-4 text-sm text-muted">
+              <p className="mt-4 text-base text-muted">
                 No complete verified shareholding breakdown available for this symbol yet.
               </p>
             )}
           </div>
 
           {/* Promoter holding & pledge */}
-          <div className="rounded-xl bg-surface-2 p-3 sm:p-4">
-            <h3 className="text-sm font-semibold text-fg">Promoter holding & pledge</h3>
-            <p className="mt-1 text-xs text-muted">Pledge as % of promoter shares only</p>
+          <div className="rounded-xl bg-surface-2 p-4 sm:p-5">
+            <h3 className="text-base font-bold text-fg sm:text-lg">Promoter holding & pledge</h3>
+            <p className="mt-1 text-sm text-muted">Pledge as % of promoter shares only</p>
 
-            <div className="mt-3 space-y-2">
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="mr-1 text-[10px] font-medium uppercase tracking-wider text-subtle">Year</span>
-                {yearTabs.map(year => (
-                  <button
-                    key={year}
-                    type="button"
-                    onClick={() => setPromoterYear(year)}
-                    className={`rounded-md px-2.5 py-1 text-xs font-semibold transition ${
-                      promoterActiveYear === year ? "bg-accent text-white" : "bg-surface text-muted hover:text-fg"
-                    }`}
-                  >
-                    {year}
-                  </button>
-                ))}
+            <div className="mt-4 space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="mr-1 text-xs font-semibold uppercase tracking-wider text-subtle">Year</span>
+                {yearTabs.map(year => yearBtn(year, promoterActiveYear === year, () => setPromoterYear(year)))}
               </div>
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="mr-1 text-[10px] font-medium uppercase tracking-wider text-subtle">Quarter</span>
-                {[1, 2, 3, 4].map(q => (
-                  <button
-                    key={q}
-                    type="button"
-                    onClick={() => setPromoterQuarter(q)}
-                    className={`rounded-md px-2.5 py-1 text-xs font-semibold transition ${
-                      promoterActiveQuarter === q ? "bg-surface-3 text-fg ring-1 ring-[var(--border)]" : "bg-surface text-muted hover:text-fg"
-                    }`}
-                  >
-                    Q{q}
-                  </button>
-                ))}
-                <span className="ml-auto text-[10px] text-muted">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="mr-1 text-xs font-semibold uppercase tracking-wider text-subtle">Quarter</span>
+                {[1, 2, 3, 4].map(q => quarterBtn(q, promoterActiveQuarter === q, () => setPromoterQuarter(q)))}
+                <span className="ml-auto text-xs text-muted sm:text-sm">
                   {promoterQuarterData || promoterPledgeQuarterData
                     ? `Filing · ${promoterPledgeQuarterData?.asOnDate ?? promoterQuarterData?.asOnDate}`
                     : "No filing this period"}
@@ -327,7 +307,7 @@ export function StockHoldingsTab({ symbol, company }: { symbol: string; company:
             </div>
 
             {holding != null ? (
-              <div className="mt-3 grid grid-cols-2 gap-2">
+              <div className="mt-4 grid grid-cols-2 gap-3">
                 <Stat label="Promoter holding" value={moneyPercent(holding)} />
                 <Stat label="Pledge % of promoter" value={pledgeRate != null ? moneyPercent(pledgeRate) : "Not verified"} />
               </div>
@@ -338,11 +318,11 @@ export function StockHoldingsTab({ symbol, company }: { symbol: string; company:
                 {chart(pledgePie)}
                 {legend(pledgePie)}
                 {pledgeFallbackNote ? (
-                  <p className="mt-2 text-[11px] leading-4 text-subtle">{pledgeFallbackNote}</p>
+                  <p className="mt-3 text-xs leading-5 text-subtle sm:text-sm">{pledgeFallbackNote}</p>
                 ) : null}
               </>
             ) : (
-              <p className="mt-4 text-sm text-muted">
+              <p className="mt-4 text-base text-muted">
                 {holding != null
                   ? `Promoter holding ${moneyPercent(holding)} verified for Q${promoterActiveQuarter} ${promoterActiveYear}, but no verified pledge rate found.`
                   : `No verified promoter data for Q${promoterActiveQuarter} ${promoterActiveYear}.`}
@@ -350,7 +330,7 @@ export function StockHoldingsTab({ symbol, company }: { symbol: string; company:
             )}
           </div>
 
-          {query.data?.note ? <p className="text-xs text-subtle">{query.data.note}</p> : null}
+          {query.data?.note ? <p className="text-sm text-subtle">{query.data.note}</p> : null}
         </>
       )}
     </Panel>
