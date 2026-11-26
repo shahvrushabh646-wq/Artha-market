@@ -250,9 +250,6 @@ function HoldingsPage() {
             <div className="mt-4 max-h-[68vh] space-y-3 overflow-y-auto overscroll-contain pr-1">
               {rows.map((share, index) => {
                 const q = share.quarter;
-                const ruleThreshold = share.price != null && share.high5y != null && share.high5y > 0 ? share.high5y * (share.price < 20 ? 0.10 : 0.25) : null;
-                const ruleName = share.price != null && share.price < 20 ? "90% Rule Signal" : "75% Rule Signal";
-                const ruleBuy = ruleThreshold != null && share.price != null && share.price <= ruleThreshold;
                 const publicValue = publicResidual(q);
                 const others = othersOutsidePublic(q);
                 const score = q?.fii !== null && q?.fii !== undefined && q?.dii !== null && q?.dii !== undefined
@@ -265,7 +262,7 @@ function HoldingsPage() {
                         <div className="min-w-0">
                           <Link to="/shareholding" search={{ symbol: share.symbol }} className="text-left font-semibold text-fg hover:underline">{share.name}</Link>
                           <div className="mt-1 text-xs text-muted">{share.symbol}{q ? ` · ${q.quarter} · As on ${q.asOnDate}` : " · Filing unavailable"}</div>
-                          {score !== null && <div className="mt-2 inline-flex items-center rounded-lg border border-up/30 bg-up/10 px-3 py-1.5 text-sm font-bold tabular text-up sm:text-base">FII + DII: {score.toFixed(2)}%</div>}{ruleThreshold !== null && <div className={`mt-2 rounded-lg border px-3 py-2 text-xs font-semibold tabular ${ruleBuy ? "border-up/30 bg-up/10 text-up" : "border-[var(--border)] bg-surface-2 text-muted"}`}><span className="block">{ruleName} · {ruleBuy ? "BUY RULE MET" : "WAIT"}</span></div>}
+                          {score !== null && <div className="mt-2 inline-flex items-center rounded-lg border border-up/30 bg-up/10 px-3 py-1.5 text-sm font-bold tabular text-up sm:text-base">FII + DII: {score.toFixed(2)}%</div>}
                         </div>
                       </div>
                       {q?.sourceUrl && <a href={q.sourceUrl} target="_blank" rel="noreferrer" aria-label={`Open source filing for ${share.name}`}
