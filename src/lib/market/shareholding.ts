@@ -34,6 +34,8 @@ function parseNseFlatHistory(csv: string): Map<string, ShareholdingQuarter[]> {
   const idx = (name: string) => headers.indexOf(name);
   const tickerIdx = idx("ticker"), periodIdx = idx("period"), promoterIdx = idx("promoter_pct");
   const fiiIdx = idx("fii_pct"), diiIdx = idx("dii_pct"), publicIdx = idx("public_pct");
+  // Optional in upstream revisions; pledge is also parsed from filing XBRL.
+  const pledgeIdx = idx("pledge_pct");
   if ([tickerIdx, periodIdx, promoterIdx, fiiIdx, diiIdx, publicIdx].some(i => i < 0)) {
     throw new Error("Historical shareholding CSV columns changed");
   }
@@ -42,19 +44,10 @@ function parseNseFlatHistory(csv: string): Map<string, ShareholdingQuarter[]> {
     const cells = parseCsvLine(line), symbol = normalizeSymbol(cells[tickerIdx] ?? "");
     const period = cells[periodIdx] ?? "";
     if (!symbol || !/^\d{4}-\d{2}$/.test(period)) continue;
-    const [filingYear, filingMonth] = period.split("-").map(Number);
-    if (filingMonth < 1 || filingMonth > 12) continue;
-    // This upstream CSV's period is the filing/submission month, not the
-    // reported SHP quarter-end. NSE quarterly filings are normally submitted
-    // in the month after quarter close (Apr/May for Mar, Jul/Aug for Jun,
-    // Oct/Nov for Sep, Jan/Feb for Dec). Map those submission months back
-    // to the reported quarter-end so year/quarter tabs don't misclassify them.
-    let year = filingYear, month: number;
-    if (filingMonth === 1 || filingMonth === 2) { year -= 1; month = 12; }
-    else if (filingMonth === 4 || filingMonth === 5) month = 3;
-    else if (filingMonth === 7 || filingMonth === 8) month = 6;
-    else if (filingMonth === 10 || filingMonth === 11) month = 9;
-    else month = filingMonth;
+    const [year, month] = period.split("-").map(Number);
+    if (month < 1 || month > 12) continue;
+    // Upstream period is the reported SHP quarter (e.g. 2021-03 means
+    // 31-Mar-2021), not its submission month. Preserve the reported quarter.
     const date = new Date(Date.UTC(year, month, 0)), asOnDate = date.toISOString().slice(0, 10);
     const val = (column: number) => safeNumber(cells[column] ?? null);
     const promoter = val(promoterIdx), fii = val(fiiIdx), dii = val(diiIdx), publicValue = val(publicIdx);
