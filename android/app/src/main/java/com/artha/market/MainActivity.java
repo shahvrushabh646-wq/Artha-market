@@ -3,14 +3,15 @@ package com.artha.market;
 import android.app.Activity;
 import android.graphics.Color;
 import android.os.Bundle;
-import android.view.View;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
 public class MainActivity extends Activity {
-    private static final String ARTHA_URL = "https://artha-market-qxhqov9uz-vs-38ee.vercel.app/";
+    // Use the stable Vercel production alias so the app follows the latest
+    // production deployment instead of being pinned to an immutable preview URL.
+    private static final String ARTHA_URL = "https://artha-market.vercel.app/";
     private WebView webView;
 
     @Override
@@ -30,6 +31,8 @@ public class MainActivity extends Activity {
         settings.setBuiltInZoomControls(false);
         settings.setDisplayZoomControls(false);
         settings.setMediaPlaybackRequiresUserGesture(false);
+        // Avoid showing an older cached bundle after a new production deploy.
+        settings.setCacheMode(WebSettings.LOAD_NO_CACHE);
 
         setContentView(webView);
         webView.loadUrl(ARTHA_URL);
