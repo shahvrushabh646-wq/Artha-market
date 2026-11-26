@@ -9,7 +9,7 @@ export const Route = createFileRoute("/portfolio")({ component: HoldingsPage });
 
 type SortMode = "institutional" | "alphabetical";
 const SUGGESTIONS_STORAGE_KEYS = ["artha:suggestions:v13", "artha:suggestions:v12", "artha:suggestions:v11", "artha:suggestions:v10"];
-function savedSuggestionFallback(): Array<{ symbol: string; name: string }> {
+function savedSuggestionFallback(): Array<{ symbol: string; name: string; price: number | null; high5y: number | null }> {
   if (typeof window === "undefined") return [];
   for (const key of SUGGESTIONS_STORAGE_KEYS) {
     try {
@@ -17,11 +17,11 @@ function savedSuggestionFallback(): Array<{ symbol: string; name: string }> {
       if (!Array.isArray(parsed)) continue;
       const rows = parsed.map((item: unknown) => {
         if (!item || typeof item !== "object") return null;
-        const row = item as { symbol?: unknown; name?: unknown };
+        const row = item as { symbol?: unknown; name?: unknown; price?: unknown; high5y?: unknown };
         const symbol = typeof row.symbol === "string" ? row.symbol.trim().toUpperCase() : "";
         if (!symbol) return null;
-        return { symbol, name: typeof row.name === "string" ? row.name : symbol };
-      }).filter((item): item is { symbol: string; name: string } => !!item);
+        return { symbol, name: typeof row.name === "string" ? row.name : symbol, price: typeof row.price === "number" && Number.isFinite(row.price) ? row.price : null, high5y: typeof row.high5y === "number" && Number.isFinite(row.high5y) ? row.high5y : null };
+      }).filter((item): item is { symbol: string; name: string; price: number | null; high5y: number | null } => !!item);
       if (rows.length) return rows;
     } catch { /* Try the older Suggestions cache key. */ }
   }
@@ -250,6 +250,12 @@ function HoldingsPage() {
             <div className="mt-4 max-h-[68vh] space-y-3 overflow-y-auto overscroll-contain pr-1">
               {rows.map((share, index) => {
                 const q = share.quarter;
+                const drawdown = share.price != null && share.high5y != null && share.high5y > 0 && share.price <= share.high5y
+                  ? ((share.high5y - share.price) / share.high5y) * 100 : null;
+                const ruleThreshold = share.price != null && share.high5y != null && share.high5y > 0
+                  ? share.high5y * (share.price < 20 ? 0.10 : 0.25) : null;
+                const ruleName = share.price != null && share.price < 20 ? "90% Rule Signal" : "75% Rule Signal";
+                const ruleBuy = ruleThreshold != null && share.price != null && share.price <= ruleThreshold;
                 const publicValue = publicResidual(q);
                 const others = othersOutsidePublic(q);
                 const score = q?.fii !== null && q?.fii !== undefined && q?.dii !== null && q?.dii !== undefined
@@ -265,7 +271,7 @@ function HoldingsPage() {
                           {score !== null && <div className="mt-2 inline-flex items-center rounded-lg border border-up/30 bg-up/10 px-3 py-1.5 text-sm font-bold tabular text-up sm:text-base">FII + DII: {score.toFixed(2)}%</div>}
                         </div>
                       </div>
-                      {q?.sourceUrl && <a href={q.sourceUrl} target="_blank" rel="noreferrer" aria-label={`Open source filing for ${share.name}`}
+                      <div className="flex shrink-0 flex-col items-end gap-2">{drawdown !== null && <span className="rounded-lg border border-down/30 bg-down/10 px-2.5 py-1.5 text-right text-xs font-extrabold tabular text-down sm:text-sm">↓ {drawdown.toFixed(2)}% <span className="block text-[10px] font-bold">FROM 5Y / AVAILABLE HIGH</span></span>}{ruleThreshold !== null && <span className={`rounded-lg border px-2.5 py-1.5 text-right text-xs font-extrabold tabular sm:text-sm ${ruleBuy ? "border-up/30 bg-up/10 text-up" : "border-[var(--border)] bg-surface-2 text-muted"}`}>{ruleName}<span className="block text-[10px] font-bold">{ruleBuy ? "BUY RULE MET" : "WAIT"}</span><span className="block text-[10px] font-semibold">Buy only at or below ₹{ruleThreshold.toFixed(2)}</span></span>}{q?.sourceUrl && <a href={q.sourceUrl} target="_blank" rel="noreferrer" aria-label={`Open source filing for ${share.name}`}
                         className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-muted hover:text-fg"><ExternalLink className="size-4" /></a>}
                     </div>
                     <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
