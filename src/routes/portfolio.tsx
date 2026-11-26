@@ -9,7 +9,7 @@ export const Route = createFileRoute("/portfolio")({ component: HoldingsPage });
 
 type SortMode = "institutional" | "alphabetical";
 const SUGGESTIONS_STORAGE_KEYS = ["artha:suggestions:v13", "artha:suggestions:v12", "artha:suggestions:v11", "artha:suggestions:v10"];
-function savedSuggestionFallback(): Array<{ symbol: string; name: string }> {
+function savedSuggestionFallback(): Array<{ symbol: string; name: string; price: number | null; high5y: number | null }> {
   if (typeof window === "undefined") return [];
   for (const key of SUGGESTIONS_STORAGE_KEYS) {
     try {
@@ -17,10 +17,10 @@ function savedSuggestionFallback(): Array<{ symbol: string; name: string }> {
       if (!Array.isArray(parsed)) continue;
       const rows = parsed.map((item: unknown) => {
         if (!item || typeof item !== "object") return null;
-        const row = item as { symbol?: unknown; name?: unknown };
+        const row = item as { symbol?: unknown; name?: unknown; price?: unknown; high5y?: unknown };
         const symbol = typeof row.symbol === "string" ? row.symbol.trim().toUpperCase() : "";
         if (!symbol) return null;
-        return { symbol, name: typeof row.name === "string" ? row.name : symbol };
+        return { symbol, name: typeof row.name === "string" ? row.name : symbol, price: typeof row.price === "number" && Number.isFinite(row.price) ? row.price : null, high5y: typeof row.high5y === "number" && Number.isFinite(row.high5y) ? row.high5y : null };
       }).filter((item): item is { symbol: string; name: string } => !!item);
       if (rows.length) return rows;
     } catch { /* Try the older Suggestions cache key. */ }
@@ -265,7 +265,7 @@ function HoldingsPage() {
                           {score !== null && <div className="mt-2 inline-flex items-center rounded-lg border border-up/30 bg-up/10 px-3 py-1.5 text-sm font-bold tabular text-up sm:text-base">FII + DII: {score.toFixed(2)}%</div>}
                         </div>
                       </div>
-                      {q?.sourceUrl && <a href={q.sourceUrl} target="_blank" rel="noreferrer" aria-label={`Open source filing for ${share.name}`}
+                      <div className="flex shrink-0 flex-col items-end gap-2">{drawdown !== null && <span className="rounded-lg border border-down/30 bg-down/10 px-2.5 py-1.5 text-right text-xs font-extrabold tabular text-down sm:text-sm">↓ {drawdown.toFixed(2)}% <span className="block text-[10px] font-bold">FROM 5Y HIGH</span></span>}{q?.sourceUrl && <a href={q.sourceUrl} target="_blank" rel="noreferrer" aria-label={`Open source filing for ${share.name}`}
                         className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-muted hover:text-fg"><ExternalLink className="size-4" /></a>}
                     </div>
                     <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
