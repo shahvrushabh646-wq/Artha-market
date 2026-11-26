@@ -21,7 +21,7 @@ function savedSuggestionFallback(): Array<{ symbol: string; name: string; price:
         const symbol = typeof row.symbol === "string" ? row.symbol.trim().toUpperCase() : "";
         if (!symbol) return null;
         return { symbol, name: typeof row.name === "string" ? row.name : symbol, price: typeof row.price === "number" && Number.isFinite(row.price) ? row.price : null, high5y: typeof row.high5y === "number" && Number.isFinite(row.high5y) ? row.high5y : null };
-      }).filter((item): item is { symbol: string; name: string } => !!item);
+      }).filter((item): item is { symbol: string; name: string; price: number | null; high5y: number | null } => !!item);
       if (rows.length) return rows;
     } catch { /* Try the older Suggestions cache key. */ }
   }
