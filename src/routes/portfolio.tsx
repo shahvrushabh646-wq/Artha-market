@@ -79,10 +79,10 @@ function HoldingsPage() {
         // render the exact cached Suggestions symbols client-side so the page
         // remains usable and can still request each symbol's verified filing.
         if (!fallback.length) throw error;
-        const unique = new Map<string, { symbol: string; name: string }>();
+        const unique = new Map<string, { symbol: string; name: string; price: number | null; high5y: number | null }>();
         for (const item of fallback) {
           const symbol = item.symbol.trim().toUpperCase();
-          if (symbol && !unique.has(symbol)) unique.set(symbol, { symbol, name: item.name || symbol });
+          if (symbol && !unique.has(symbol)) unique.set(symbol, { symbol, name: item.name || symbol, price: item.price, high5y: item.high5y });
         }
         const holdings = [...unique.values()].map((item) => ({
           ...item, quarter: null, note: "Holdings list recovered from your saved current Suggestions list; checking verified filing data.",
@@ -250,10 +250,7 @@ function HoldingsPage() {
             <div className="mt-4 max-h-[68vh] space-y-3 overflow-y-auto overscroll-contain pr-1">
               {rows.map((share, index) => {
                 const q = share.quarter;
-                const drawdown = share.price != null && share.high5y != null && share.high5y > 0 && share.price <= share.high5y
-                  ? ((share.high5y - share.price) / share.high5y) * 100 : null;
-                const ruleThreshold = share.price != null && share.high5y != null && share.high5y > 0
-                  ? share.high5y * (share.price < 20 ? 0.10 : 0.25) : null;
+                const ruleThreshold = share.price != null && share.high5y != null && share.high5y > 0 ? share.high5y * (share.price < 20 ? 0.10 : 0.25) : null;
                 const ruleName = share.price != null && share.price < 20 ? "90% Rule Signal" : "75% Rule Signal";
                 const ruleBuy = ruleThreshold != null && share.price != null && share.price <= ruleThreshold;
                 const publicValue = publicResidual(q);
@@ -268,10 +265,10 @@ function HoldingsPage() {
                         <div className="min-w-0">
                           <Link to="/shareholding" search={{ symbol: share.symbol }} className="text-left font-semibold text-fg hover:underline">{share.name}</Link>
                           <div className="mt-1 text-xs text-muted">{share.symbol}{q ? ` · ${q.quarter} · As on ${q.asOnDate}` : " · Filing unavailable"}</div>
-                          {score !== null && <div className="mt-2 inline-flex items-center rounded-lg border border-up/30 bg-up/10 px-3 py-1.5 text-sm font-bold tabular text-up sm:text-base">FII + DII: {score.toFixed(2)}%</div>}
+                          {score !== null && <div className="mt-2 inline-flex items-center rounded-lg border border-up/30 bg-up/10 px-3 py-1.5 text-sm font-bold tabular text-up sm:text-base">FII + DII: {score.toFixed(2)}%</div>}{ruleThreshold !== null && <div className={`mt-2 rounded-lg border px-3 py-2 text-xs font-semibold tabular ${ruleBuy ? "border-up/30 bg-up/10 text-up" : "border-[var(--border)] bg-surface-2 text-muted"}`}><span className="block">{ruleName} · {ruleBuy ? "BUY RULE MET" : "WAIT"}</span><span className="mt-1 block text-[11px] font-medium">Buy only at or below ₹{ruleThreshold.toFixed(2)} · 5Y / available high ₹{share.high5y!.toFixed(2)}</span></div>}
                         </div>
                       </div>
-                      <div className="flex shrink-0 flex-col items-end gap-2">{drawdown !== null && <span className="rounded-lg border border-down/30 bg-down/10 px-2.5 py-1.5 text-right text-xs font-extrabold tabular text-down sm:text-sm">↓ {drawdown.toFixed(2)}% <span className="block text-[10px] font-bold">FROM 5Y / AVAILABLE HIGH</span></span>}{ruleThreshold !== null && <span className={`rounded-lg border px-2.5 py-1.5 text-right text-xs font-extrabold tabular sm:text-sm ${ruleBuy ? "border-up/30 bg-up/10 text-up" : "border-[var(--border)] bg-surface-2 text-muted"}`}>{ruleName}<span className="block text-[10px] font-bold">{ruleBuy ? "BUY RULE MET" : "WAIT"}</span><span className="block text-[10px] font-semibold">Buy only at or below ₹{ruleThreshold.toFixed(2)}</span></span>}{q?.sourceUrl && <a href={q.sourceUrl} target="_blank" rel="noreferrer" aria-label={`Open source filing for ${share.name}`}
+                      {q?.sourceUrl && <a href={q.sourceUrl} target="_blank" rel="noreferrer" aria-label={`Open source filing for ${share.name}`}
                         className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-muted hover:text-fg"><ExternalLink className="size-4" /></a>}
                     </div>
                     <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
