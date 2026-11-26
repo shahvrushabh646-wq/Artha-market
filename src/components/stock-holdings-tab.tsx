@@ -21,9 +21,40 @@ function moneyPercent(value: number | null | undefined) {
   return value == null || !Number.isFinite(value) ? "—" : `${value.toFixed(2)}%`;
 }
 
+function buildSharePie(quarter: ShareholdingQuarter | null): Slice[] {
+  if (!quarter) return [];
+  const items: Slice[] = [];
+  if (quarter.promoter != null && Number.isFinite(quarter.promoter) && quarter.promoter >= 0) {
+    items.push({ name: "Promoter", displayName: "Promoter", value: quarter.promoter, color: COLORS.Promoter });
+  }
+  if (quarter.fii != null && Number.isFinite(quarter.fii) && quarter.fii >= 0) {
+    items.push({ name: "FII", displayName: "FII", value: quarter.fii, color: COLORS.FII });
+  }
+  if (quarter.dii != null && Number.isFinite(quarter.dii) && quarter.dii >= 0) {
+    items.push({ name: "DII", displayName: "DII", value: quarter.dii, color: COLORS.DII });
+  }
+  const promoter = quarter.promoter ?? 0;
+  const fii = quarter.fii;
+  const dii = quarter.dii;
+  let residual: number | null = null;
+  if (quarter.public != null && Number.isFinite(quarter.public) && fii != null && dii != null) {
+    residual = quarter.public - fii - dii;
+  } else if (fii != null && dii != null && quarter.promoter != null) {
+    residual = 100 - promoter - fii - dii;
+  } else if (quarter.public != null && fii == null && dii == null) {
+    residual = quarter.public;
+  }
+  if (residual != null && Number.isFinite(residual) && residual > 0.05 && residual <= 100) {
+    items.push({ name: "Other Public", displayName: "Other Public", value: residual, color: COLORS.Other });
+  }
+  const total = items.reduce((sum, item) => sum + item.value, 0);
+  if (total <= 0 || total > 100.5 || items.some(item => item.value < 0)) return [];
+  return items.filter(item => item.value > 0);
+}
+
 export function StockHoldingsTab({ symbol, company }: { symbol: string; company: string }) {
   const query = useQuery({
-    queryKey: ["stock-detail-holdings-v2", symbol],
+    queryKey: ["stock-detail-holdings-v3", symbol],
     queryFn: () => fetchShareholding({ data: { symbol } }),
     staleTime: 5 * 60_000,
     retry: 1,
@@ -37,8 +68,18 @@ export function StockHoldingsTab({ symbol, company }: { symbol: string; company:
     return [...byDate.values()];
   }, [query.data?.quarters]);
 
+  // Prefer a quarter that can actually build a pie (has promoter or FII/DII)
+  const bestShareQuarter = useMemo(() => {
+    const usable = [...quarters].reverse().find(q => buildSharePie(q).length > 0);
+    return usable ?? quarters.at(-1) ?? null;
+  }, [quarters]);
+
   const latest = quarters.at(-1) ?? null;
-  const latestDate = latest ? new Date(latest.asOnDate + "T00:00:00Z") : new Date();
+  const defaultDate = bestShareQuarter
+    ? new Date(bestShareQuarter.asOnDate + "T00:00:00Z")
+    : latest
+      ? new Date(latest.asOnDate + "T00:00:00Z")
+      : new Date();
 
   const [selectedYear, setSelectedYear] = useState<number | null>(null);
   const [selectedQuarter, setSelectedQuarter] = useState<number | null>(null);
@@ -53,8 +94,8 @@ export function StockHoldingsTab({ symbol, company }: { symbol: string; company:
     ])].sort((a, b) => a - b);
   }, [quarters, currentYear]);
 
-  const activeYear = selectedYear ?? latestDate.getUTCFullYear();
-  const activeQuarter = selectedQuarter ?? Math.floor(latestDate.getUTCMonth() / 3) + 1;
+  const activeYear = selectedYear ?? defaultDate.getUTCFullYear();
+  const activeQuarter = selectedQuarter ?? Math.floor(defaultDate.getUTCMonth() / 3) + 1;
 
   const selectedQuarterData = useMemo(() => {
     return quarters.find(q => {
@@ -63,29 +104,18 @@ export function StockHoldingsTab({ symbol, company }: { symbol: string; company:
     }) ?? null;
   }, [quarters, activeYear, activeQuarter]);
 
-  const sharePie = useMemo<Slice[]>(() => {
-    const quarter = selectedQuarterData;
-    if (!quarter || quarter.promoter == null || !Number.isFinite(quarter.promoter)) return [];
-    const promoter = quarter.promoter;
-    const fii = quarter.fii;
-    const dii = quarter.dii;
-    const items: Slice[] = [{ name: "Promoter", displayName: "Promoter", value: promoter, color: COLORS.Promoter }];
-    if (fii != null && Number.isFinite(fii) && fii >= 0) items.push({ name: "FII", displayName: "FII", value: fii, color: COLORS.FII });
-    if (dii != null && Number.isFinite(dii) && dii >= 0) items.push({ name: "DII", displayName: "DII", value: dii, color: COLORS.DII });
-    let residual: number | null = null;
-    if (quarter.public != null && Number.isFinite(quarter.public) && fii != null && dii != null) residual = quarter.public - fii - dii;
-    else if (fii != null && dii != null) residual = 100 - promoter - fii - dii;
-    else if (quarter.public != null && fii == null && dii == null) residual = quarter.public;
-    if (residual != null && residual > 0.05 && residual <= 100) {
-      items.push({ name: "Other Public", displayName: "Other Public", value: residual, color: COLORS.Other });
-    }
-    const total = items.reduce((sum, item) => sum + item.value, 0);
-    return total > 0 && total <= 100.5 && items.every(item => item.value >= 0) ? items.filter(i => i.value > 0) : [];
-  }, [selectedQuarterData]);
+  // If user picked an empty period, still show the best available pie so the chart is never blank when data exists
+  const shareSource = selectedQuarterData && buildSharePie(selectedQuarterData).length
+    ? selectedQuarterData
+    : bestShareQuarter;
+  const sharePie = useMemo(() => buildSharePie(shareSource), [shareSource]);
+  const usingFallbackShare = shareSource !== selectedQuarterData && shareSource != null;
 
-  // Promoter section with nearest verified pledge fallback
+  // Promoter section
   const latestWithPromoter = [...quarters].reverse().find(q => q.promoter != null) ?? latest;
-  const promoterDefaultDate = latestWithPromoter ? new Date(latestWithPromoter.asOnDate + "T00:00:00Z") : latestDate;
+  const promoterDefaultDate = latestWithPromoter
+    ? new Date(latestWithPromoter.asOnDate + "T00:00:00Z")
+    : defaultDate;
   const promoterActiveYear = promoterYear ?? promoterDefaultDate.getUTCFullYear();
   const promoterActiveQuarter = promoterQuarter ?? Math.floor(promoterDefaultDate.getUTCMonth() / 3) + 1;
 
@@ -125,11 +155,23 @@ export function StockHoldingsTab({ symbol, company }: { symbol: string; company:
     : [];
 
   const chart = (items: Slice[]) => (
-    <div className="mx-auto h-52 w-full">
-      <ResponsiveContainer width="100%" height="100%">
+    <div className="mx-auto h-56 w-full min-h-[14rem]">
+      <ResponsiveContainer width="100%" height="100%" minWidth={0}>
         <PieChart>
-          <Pie data={items} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={44} outerRadius={78} paddingAngle={2}>
-            {items.map(item => <Cell key={item.name} fill={item.color} stroke="var(--surface)" strokeWidth={2} />)}
+          <Pie
+            data={items}
+            dataKey="value"
+            nameKey="name"
+            cx="50%"
+            cy="50%"
+            innerRadius={48}
+            outerRadius={88}
+            paddingAngle={2}
+            isAnimationActive={false}
+          >
+            {items.map(item => (
+              <Cell key={item.name} fill={item.color} stroke="var(--surface)" strokeWidth={2} />
+            ))}
           </Pie>
           <Tooltip formatter={(value) => moneyPercent(Number(value))} />
         </PieChart>
@@ -142,7 +184,9 @@ export function StockHoldingsTab({ symbol, company }: { symbol: string; company:
       {items.map(item => (
         <div key={item.name} className="flex items-center gap-2 text-xs text-muted">
           <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: item.color }} />
-          <span>{item.displayName}: <strong className="tabular text-fg">{moneyPercent(item.value)}</strong></span>
+          <span>
+            {item.displayName}: <strong className="tabular text-fg">{moneyPercent(item.value)}</strong>
+          </span>
         </div>
       ))}
     </div>
@@ -173,9 +217,11 @@ export function StockHoldingsTab({ symbol, company }: { symbol: string; company:
         <SkeletonBlock className="h-48" />
       ) : query.isError ? (
         <p className="text-sm text-muted">Shareholding data could not be loaded. Please retry.</p>
+      ) : quarters.length === 0 ? (
+        <p className="text-sm text-muted">No verified shareholding filings found for this symbol.</p>
       ) : (
         <>
-          {/* Shareholding pattern with year/quarter tabs */}
+          {/* Shareholding pattern */}
           <div className="rounded-xl bg-surface-2 p-3 sm:p-4">
             <h3 className="text-sm font-semibold text-fg">Shareholding pattern</h3>
             <p className="mt-1 text-xs text-muted">Promoter · FII · DII · Other Public</p>
@@ -211,7 +257,11 @@ export function StockHoldingsTab({ symbol, company }: { symbol: string; company:
                   </button>
                 ))}
                 <span className="ml-auto text-[10px] text-muted">
-                  {selectedQuarterData ? `Filing · ${selectedQuarterData.asOnDate}` : "No filing this period"}
+                  {selectedQuarterData
+                    ? `Filing · ${selectedQuarterData.asOnDate}`
+                    : usingFallbackShare && shareSource
+                      ? `Showing ${shareSource.asOnDate} (selected period empty)`
+                      : "No filing this period"}
                 </span>
               </div>
             </div>
@@ -220,16 +270,20 @@ export function StockHoldingsTab({ symbol, company }: { symbol: string; company:
               <>
                 {chart(sharePie)}
                 {legend(sharePie)}
+                {usingFallbackShare && shareSource ? (
+                  <p className="mt-2 text-[11px] leading-4 text-subtle">
+                    Q{activeQuarter} {activeYear} has no complete pie. Showing latest usable filing ({shareSource.asOnDate}).
+                  </p>
+                ) : null}
               </>
             ) : (
               <p className="mt-4 text-sm text-muted">
-                No verified filing for Q{activeQuarter} {activeYear}. Try another quarter.
-                {quarters.length ? ` ${quarters.length} other filings available.` : ""}
+                No complete verified shareholding breakdown available for this symbol yet.
               </p>
             )}
           </div>
 
-          {/* Promoter holding & pledge with independent year/quarter tabs */}
+          {/* Promoter holding & pledge */}
           <div className="rounded-xl bg-surface-2 p-3 sm:p-4">
             <h3 className="text-sm font-semibold text-fg">Promoter holding & pledge</h3>
             <p className="mt-1 text-xs text-muted">Pledge as % of promoter shares only</p>
