@@ -226,17 +226,9 @@ function ShareholdingPage() {
             }
           }
           const holding = promoterQuarterData?.promoter;
-          let pledgeRate = promoterPledgeQuarterData?.promoterPledge ?? null;
+          const pledgeRate = promoterPledgeQuarterData?.promoterPledge ?? null;
           if (pledgeRate == null && holding != null) {
-            const verifiedZero = quarters.find(q => q.promoterPledge === 0);
-            if (verifiedZero) {
-              pledgeRate = 0;
-              promoterPledgeQuarterData = verifiedZero;
-              pledgeFallbackNote = `No pledge rate for this quarter; using verified 0% pledge from ${verifiedZero.asOnDate}.`;
-            } else {
-              pledgeRate = 0;
-              pledgeFallbackNote = `No verified pledge filing was found in the loaded data for this symbol. Chart shows 0% pledged for display only — treat as unverified.`;
-            }
+            pledgeFallbackNote = "No verified pledge rate for the selected quarter. The pie is withheld rather than displaying an assumed 0%.";
           }
           const pledgeVerified = pledgeRate != null && Number.isFinite(pledgeRate) && pledgeRate >= 0 && pledgeRate <= 100;
           const pledged = pledgeVerified ? pledgeRate! : null;
