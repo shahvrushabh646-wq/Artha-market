@@ -32,7 +32,6 @@ function percent(value: number | null | undefined) {
 }
 function publicResidual(quarter: { public: number | null; fii: number | null; dii: number | null; sourceName: string } | null) {
   if (!quarter || quarter.public === null) return null;
-  // Screener reports FIIs/DIIs separately from its non-institutional Public row.
   if (quarter.sourceName === "Screener.in") return quarter.public;
   if (quarter.fii === null || quarter.dii === null) return null;
   const value = quarter.public - quarter.fii - quarter.dii;
@@ -40,14 +39,10 @@ function publicResidual(quarter: { public: number | null; fii: number | null; di
 }
 function othersOutsidePublic(quarter: { public: number | null; promoter: number | null; fii: number | null; dii: number | null; sourceName: "NSE" | "Screener.in" } | null) {
   if (!quarter || quarter.public === null || quarter.promoter === null) return null;
-  // On NSE, Public is the aggregate non-promoter block. "Others" is the remaining
-  // government/other bucket after promoter and aggregate public are accounted for.
-  if (quarter.sourceName === "NSE" || quarter.sourceName === "NSE XBRL historical dataset") {
+  if (quarter.sourceName === "NSE" || (quarter as any).sourceName === "NSE XBRL historical dataset") {
     const value = 100 - quarter.promoter - quarter.public;
     return value >= -0.05 ? Math.max(0, value) : null;
   }
-  // Screener reports FIIs, DIIs and non-institutional Public separately; the balance
-  // is the Government/other category, and should not include promoter holdings.
   if (quarter.fii === null || quarter.dii === null) return null;
   const value = 100 - quarter.promoter - quarter.fii - quarter.dii - quarter.public;
   return value >= -0.05 ? Math.max(0, value) : null;
@@ -75,9 +70,6 @@ function HoldingsPage() {
       try {
         return await fetchSuggestedHoldings({ data: { fallback } });
       } catch (error) {
-        // If the server function itself fails (e.g. deployment/server boundary),
-        // render the exact cached Suggestions symbols client-side so the page
-        // remains usable and can still request each symbol's verified filing.
         if (!fallback.length) throw error;
         const unique = new Map<string, { symbol: string; name: string; price: number | null; high5y: number | null }>();
         for (const item of fallback) {
@@ -106,9 +98,6 @@ function HoldingsPage() {
     const hydrate = async () => {
       const symbols = query.data!.holdings.map((item) => item.symbol);
       const resultsBySymbol = new Map<string, { quarter: typeof query.data.holdings[number]["quarter"]; note: string | null }>();
-      // Request the complete Suggestions universe in one hydration run. Each API
-      // call is bounded, while several calls run together to avoid showing only
-      // the first few companies as the final result.
       const requestBatches: string[][] = [];
       for (let start = 0; start < symbols.length; start += 8) {
         requestBatches.push(symbols.slice(start, start + 8));
@@ -128,7 +117,6 @@ function HoldingsPage() {
             for (const item of outcome.value) {
               resultsBySymbol.set(item.symbol.toUpperCase(), { quarter: item.quarter, note: item.note });
             }
-            // If a response unexpectedly omits a symbol, retry that symbol alone.
             const returned = new Set(outcome.value.map((item) => item.symbol.toUpperCase()));
             for (const symbol of batch.filter((s) => !returned.has(s.toUpperCase()))) {
               try {
@@ -140,7 +128,6 @@ function HoldingsPage() {
               }
             }
           } else {
-            // Recover a failed batch per company instead of discarding all rows.
             for (const symbol of batch) {
               try {
                 const single = await fetchSuggestedHoldingsBatch({ data: { symbols: [symbol], refresh: false } });
@@ -161,8 +148,6 @@ function HoldingsPage() {
         };
       });
       const unavailable = holdings.filter((item) => !item.quarter).length;
-      // Publish the full set together so the page doesn't appear to contain only
-      // the first 3 companies while the rest are still being fetched.
       queryClient.setQueryData(queryKey, (previous: typeof query.data) => previous ? {
         ...previous, checked: holdings.length, unavailable, holdings,
       } : previous);
@@ -172,9 +157,6 @@ function HoldingsPage() {
     void hydrate();
     return () => {
       cancelled = true;
-      // React StrictMode runs an effect setup/cleanup/setup cycle in development.
-      // Reset the guard only when this hydration was cancelled before finishing,
-      // otherwise the second setup skips hydration and leaves both counters at 0.
       if (!completed) processedRef.current = false;
     };
   }, [query.data?.totalSuggested, query.data?.holdings.length, query.dataUpdatedAt, hydrateKey]);
@@ -250,6 +232,8 @@ function HoldingsPage() {
             <div className="mt-4 max-h-[68vh] space-y-3 overflow-y-auto overscroll-contain pr-1">
               {rows.map((share, index) => {
                 const q = share.quarter;
+                const drawdown = (share as any).price != null && (share as any).high5y != null && (share as any).high5y > 0 && (share as any).price <= (share as any).high5y
+                  ? (((share as any).high5y - (share as any).price) / (share as any).high5y) * 100 : null;
                 const publicValue = publicResidual(q);
                 const others = othersOutsidePublic(q);
                 const score = q?.fii !== null && q?.fii !== undefined && q?.dii !== null && q?.dii !== undefined
@@ -265,8 +249,19 @@ function HoldingsPage() {
                           {score !== null && <div className="mt-2 inline-flex items-center rounded-lg border border-up/30 bg-up/10 px-3 py-1.5 text-sm font-bold tabular text-up sm:text-base">FII + DII: {score.toFixed(2)}%</div>}
                         </div>
                       </div>
-                      {q?.sourceUrl && <a href={q.sourceUrl} target="_blank" rel="noreferrer" aria-label={`Open source filing for ${share.name}`}
-                        className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-muted hover:text-fg"><ExternalLink className="size-4" /></a>}
+                      <div className="flex shrink-0 flex-col items-end gap-2">
+                        {drawdown !== null && (
+                          <span className="rounded-lg border border-down/30 bg-down/10 px-2.5 py-1.5 text-right text-xs font-extrabold tabular text-down sm:text-sm">
+                            ↓ {drawdown.toFixed(2)}% <span className="block text-[10px] font-bold">FROM 5Y HIGH</span>
+                          </span>
+                        )}
+                        {q?.sourceUrl && (
+                          <a href={q.sourceUrl} target="_blank" rel="noreferrer" aria-label={`Open source filing for ${share.name}`}
+                            className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-muted hover:text-fg">
+                            <ExternalLink className="size-4" />
+                          </a>
+                        )}
+                      </div>
                     </div>
                     <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
                       <div className="rounded-lg bg-surface-2 p-3"><div className="text-xs text-muted">FII</div><div className="mt-1 text-base font-semibold tabular text-fg">{percent(q?.fii)}</div></div>
@@ -286,7 +281,7 @@ function HoldingsPage() {
           )}
         </>
       )}
-      <p className="mt-5 text-xs text-subtle">* NSE Public is its aggregate public bucket less FII/DII; Screener.in Public is its separate non-institutional Public row. ** Others is the remaining source-reported balance. Categories are source-specific to avoid double counting. Latest disclosed quarterly data only; missing or inconsistent values show —, never estimated. Sorted by FII + DII percentage; A–Z mode is scrollable.</p>
+      <p className="mt-5 text-xs text-subtle">* NSE Public is its aggregate public bucket less FII/DII; Screener.in Public is its separate non-institutional Public row. ** Others is the remaining source-reported balance. Categories are source-specific to avoid double counting. Latest disclosed quarterly data only; missing or inconsistent values show —, never estimated. Sorted by FII + DII percentage; A–Z mode is scrollable. 5Y High drawdown uses verified price + high when available.</p>
     </div>
   );
 }
