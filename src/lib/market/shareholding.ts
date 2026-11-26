@@ -151,7 +151,7 @@ function loadBundledQuarter(symbol: string): ShareholdingQuarter | null {
   const row = NSE_SHAREHOLDING_DATA[symbol];
   if (!row) return null;
   const period = row[0] ?? "";
-  if (!/^\\d{4}-\\d{2}$/.test(period)) return null;
+  if (!/^\d{4}-\d{2}$/.test(period)) return null;
   const [year, month] = period.split("-").map(Number);
   if (month < 1 || month > 12) return null;
   const date = new Date(Date.UTC(year, month, 0));
