@@ -62,17 +62,24 @@ function ShareholdingPage() {
   const fourYearQuarterData = yearTabs.map(year => quarters.find(q => { const date = new Date(q.asOnDate + "T00:00:00Z"); return date.getUTCFullYear() === year && Math.floor(date.getUTCMonth() / 3) + 1 === activeQuarter; })).filter((q): q is ShareholdingQuarter => !!q);
   const pieData = useMemo(() => {
     const quarter = selectedQuarterData;
-    if (!quarter || quarter.promoter == null || quarter.public == null) return [];
-    // FII and DII are included within total Public. Split them out and show the residual
-    // as Other Public so the pie has all reported categories without double-counting.
-    const fii = quarter.fii ?? 0;
-    const dii = quarter.dii ?? 0;
-    const otherPublic = Math.max(0, quarter.public - fii - dii);
+    // Build the shareholding pie from verified company-level percentages.
+    // FII and DII are parts of Public, so they are split out and the remainder
+    // is shown as Others. If Public is absent but Promoter/FII/DII are verified,
+    // derive the remainder from 100% rather than hiding the entire pie.
+    if (!quarter || quarter.promoter == null || quarter.fii == null || quarter.dii == null) return [];
+    const promoter = quarter.promoter;
+    const fii = quarter.fii;
+    const dii = quarter.dii;
+    const otherPublic = quarter.public != null
+      ? quarter.public - fii - dii
+      : 100 - promoter - fii - dii;
+    if (![promoter, fii, dii, otherPublic].every(value => Number.isFinite(value) && value >= 0) ||
+        promoter + fii + dii + otherPublic > 100.5) return [];
     return [
-      { name: "Promoter", displayName: "Promoter", value: quarter.promoter, color: COLORS.Promoter },
+      { name: "Promoter", displayName: "Promoter", value: promoter, color: COLORS.Promoter },
       { name: "FII", displayName: "FII", value: fii, color: COLORS.FII },
       { name: "DII", displayName: "DII", value: dii, color: COLORS.DII },
-      { name: "Other Public", displayName: "Other Public", value: otherPublic, color: COLORS.Public },
+      { name: "Others", displayName: "Others", value: otherPublic, color: COLORS.Other },
     ].filter(item => item.value > 0);
   }, [selectedQuarterData]);
   const screening = useMemo(() => {
