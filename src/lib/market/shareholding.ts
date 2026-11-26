@@ -902,52 +902,60 @@ async function loadShareholding(symbolInput: string, refresh = false): Promise<S
     quarters: initialHistory,
     note: flatHistory.length ? "Historical shareholding loaded from parsed NSE XBRL records; pledge remains unverified unless a filing reports it." : null,
   };
-  try {
-    const raw = await nseJson(`https://www.nseindia.com/api/corporate-share-holdings-master?index=equities&symbol=${encodeURIComponent(symbol)}`, page);
-    if (!Array.isArray(raw)) throw new Error("Unexpected response from NSE.");
-    const filings = raw as Array<Record<string, unknown>>;
-    const selected = filings.filter(row => {
-      if (typeof row.xbrl !== "string" || !/^https?:\/\//i.test(row.xbrl as string)) return false;
-      const date = sourceDate(String(row.date ?? ""));
-      return date >= "2021-01-01" && date <= "2026-12-31";
-    }).sort((a, b) => sourceDate(String(b.date ?? "")).localeCompare(sourceDate(String(a.date ?? ""))));
-    // Fetch all 2021–2026 filings in bounded batches to avoid rate limits.
-    const parsedFilings: (ShareholdingQuarter | null)[] = [];
-    for (let start = 0; start < selected.length; start += 6) {
-      const batch = selected.slice(start, start + 6);
-      parsedFilings.push(...await Promise.all(batch.map(async filing => {
-      const url = String(filing.xbrl);
-      try {
-        const response = await fetch(url, { headers: { "User-Agent": UA, Accept: "application/xml,text/xml,*/*", Referer: page }, cache: "no-store" });
-        if (!response.ok) return null;
-        const parsed = parseXbrl(await response.text());
-        if (!parsed) return null;
-        const rawDate = String(filing.date ?? "");
-        const filingDate = sourceDate(rawDate) || rawDate;
-        // XBRL period-end is the shareholding quarter's actual as-on date.
-        // Filing submission date may be weeks later and can shift a report
-        // into the wrong quarter/year in the selector.
-        const asOnDate = parsed.periodEnd || filingDate;
-        const { periodEnd: _periodEnd, ...values } = parsed;
-        return {
-          ...values,
-          quarter: parseDate(asOnDate),
-          asOnDate,
-          sourceUrl: url,
-          sourceName: "NSE" as const,
-        };
-      } catch { return null; }
-      })));
+  // The indexed NSE filing history and parsed flat CSV already provide dated
+  // history for most listed companies. Avoid a second large NSE/XBRL crawl unless
+  // those records are absent or missing core shareholding categories.
+  const latestBase = base.quarters[0];
+  const needsLiveNse = !latestBase || latestBase.promoter === null ||
+    latestBase.fii === null || latestBase.dii === null || latestBase.public === null;
+  if (needsLiveNse) {
+    try {
+      const raw = await nseJson(`https://www.nseindia.com/api/corporate-share-holdings-master?index=equities&symbol=${encodeURIComponent(symbol)}`, page);
+      if (!Array.isArray(raw)) throw new Error("Unexpected response from NSE.");
+      const filings = raw as Array<Record<string, unknown>>;
+      const selected = filings.filter(row => {
+        if (typeof row.xbrl !== "string" || !/^https?:\/\//i.test(row.xbrl as string)) return false;
+        const date = sourceDate(String(row.date ?? ""));
+        return date >= "2021-01-01" && date <= "2026-12-31";
+      }).sort((a, b) => sourceDate(String(b.date ?? "")).localeCompare(sourceDate(String(a.date ?? ""))));
+      // Fetch all 2021–2026 filings in bounded batches to avoid rate limits.
+      const parsedFilings: (ShareholdingQuarter | null)[] = [];
+      for (let start = 0; start < selected.length; start += 6) {
+        const batch = selected.slice(start, start + 6);
+        parsedFilings.push(...await Promise.all(batch.map(async filing => {
+        const url = String(filing.xbrl);
+        try {
+          const response = await fetch(url, { headers: { "User-Agent": UA, Accept: "application/xml,text/xml,*/*", Referer: page }, cache: "no-store" });
+          if (!response.ok) return null;
+          const parsed = parseXbrl(await response.text());
+          if (!parsed) return null;
+          const rawDate = String(filing.date ?? "");
+          const filingDate = sourceDate(rawDate) || rawDate;
+          // XBRL period-end is the shareholding quarter's actual as-on date.
+          // Filing submission date may be weeks later and can shift a report
+          // into the wrong quarter/year in the selector.
+          const asOnDate = parsed.periodEnd || filingDate;
+          const { periodEnd: _periodEnd, ...values } = parsed;
+          return {
+            ...values,
+            quarter: parseDate(asOnDate),
+            asOnDate,
+            sourceUrl: url,
+            sourceName: "NSE" as const,
+          };
+        } catch { return null; }
+        })));
+      }
+      base.quarters = mergeSameQuarterSources(symbol, [
+        ...base.quarters,
+        ...parsedFilings.filter((quarter): quarter is ShareholdingQuarter => quarter !== null),
+        ...flatHistory,
+      ]);
+      if (!base.quarters.length) base.note = "NSE filings were reachable, but no supported shareholding values could be parsed. Figures are not estimated.";
+      else if (base.quarters.some(q => q.fii === null || q.dii === null)) base.note = "Some filings do not expose separate FII/DII values in a format this screen can verify. Missing figures remain unavailable.";
+    } catch {
+      base.note = "NSE shareholding data could not be retrieved right now.";
     }
-    base.quarters = mergeSameQuarterSources(symbol, [
-      ...base.quarters,
-      ...parsedFilings.filter((quarter): quarter is ShareholdingQuarter => quarter !== null),
-      ...flatHistory,
-    ]);
-    if (!base.quarters.length) base.note = "NSE filings were reachable, but no supported shareholding values could be parsed. Figures are not estimated.";
-    else if (base.quarters.some(q => q.fii === null || q.dii === null)) base.note = "Some filings do not expose separate FII/DII values in a format this screen can verify. Missing figures remain unavailable.";
-  } catch {
-    base.note = "NSE shareholding data could not be retrieved right now.";
   }
 
   // Check Screener on each cache refresh. A complete but stale historical
@@ -1008,8 +1016,10 @@ async function loadShareholding(symbolInput: string, refresh = false): Promise<S
   // Cross-check all independent providers when the selected filing has missing fields.
   // Merge only records with the exact same as-on date; never mix quarter values.
   const currentLatest=base.quarters[0];
+  // Missing pledge is common and does not justify a full multi-provider crawl:
+  // the dated NSE pledge feed was already loaded separately above.
   const needsFieldMerge=!currentLatest || currentLatest.promoter===null || currentLatest.fii===null ||
-    currentLatest.dii===null || currentLatest.public===null || currentLatest.promoterPledge===null;
+    currentLatest.dii===null || currentLatest.public===null;
   if(needsFieldMerge){
     const supplemental=await loadSupplementalShareholding(symbol);
     const combined=mergeSameQuarterSources([...base.quarters,...supplemental]);
