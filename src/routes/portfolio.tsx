@@ -3,238 +3,264 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { ExternalLink, RefreshCw, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { fetchSuggestedHoldings, fetchSuggestedHoldingsBatch } from "@/lib/market/suggested-holdings";
+import { fetchHoldingsDrawdowns, type DrawdownRow } from "@/lib/market/drawdown";
 import { Panel } from "@/components/widgets";
 
 export const Route = createFileRoute("/portfolio")({ component: HoldingsPage });
 
 type SortMode = "institutional" | "alphabetical";
-const SUGGESTIONS_STORAGE_KEYS = ["artha:suggestions:v13", "artha:suggestions:v12", "artha:suggestions:v11", "artha:suggestions:v10"];
+
 function savedSuggestionFallback(): Array<{ symbol: string; name: string }> {
-  if (typeof window === "undefined") return [];
-  for (const key of SUGGESTIONS_STORAGE_KEYS) {
-    try {
-      const parsed = JSON.parse(window.localStorage.getItem(key) || "null");
-      if (!Array.isArray(parsed)) continue;
-      const rows = parsed.map((item: unknown) => {
-        if (!item || typeof item !== "object") return null;
-        const row = item as { symbol?: unknown; name?: unknown };
-        const symbol = typeof row.symbol === "string" ? row.symbol.trim().toUpperCase() : "";
-        if (!symbol) return null;
-        return { symbol, name: typeof row.name === "string" ? row.name : symbol };
-      }).filter((item): item is { symbol: string; name: string } => !!item);
-      if (rows.length) return rows;
-    } catch { /* Try the older Suggestions cache key. */ }
+  try {
+    const raw = typeof window !== "undefined" ? window.localStorage.getItem("artha.suggestions.cache") : null;
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    const rows = parsed.map((item: unknown) => {
+      if (!item || typeof item !== "object") return null;
+      const row = item as { symbol?: unknown; name?: unknown };
+      const symbol = typeof row.symbol === "string" ? row.symbol.trim().toUpperCase() : "";
+      if (!symbol) return null;
+      return { symbol, name: typeof row.name === "string" ? row.name : symbol };
+    }).filter((item): item is { symbol: string; name: string } => !!item);
+    return rows;
+  } catch {
+    return [];
   }
-  return [];
 }
+
 function percent(value: number | null | undefined) {
   return value === null || value === undefined || !Number.isFinite(value) ? "—" : `${value.toFixed(2)}%`;
 }
-function publicResidual(quarter: { public: number | null; fii: number | null; dii: number | null; sourceName: string } | null) {
-  if (!quarter || quarter.public === null) return null;
+
+function publicResidual(q: { public: number | null; fii: number | null; dii: number | null } | null) {
   // Screener reports FIIs/DIIs separately from its non-institutional Public row.
-  if (quarter.sourceName === "Screener.in") return quarter.public;
-  if (quarter.fii === null || quarter.dii === null) return null;
-  const value = quarter.public - quarter.fii - quarter.dii;
-  return value >= -0.05 ? Math.max(0, value) : null;
+  if (!q || q.public === null) return null;
+  if (q.fii === null && q.dii === null) return q.public;
+  const residual = q.public - ((q.fii ?? 0) + (q.dii ?? 0));
+  return Number.isFinite(residual) ? residual : null;
 }
-function othersOutsidePublic(quarter: { public: number | null; promoter: number | null; fii: number | null; dii: number | null; sourceName: "NSE" | "Screener.in" } | null) {
-  if (!quarter || quarter.public === null || quarter.promoter === null) return null;
-  // On NSE, Public is the aggregate non-promoter block. "Others" is the remaining
-  // government/other bucket after promoter and aggregate public are accounted for.
-  if (quarter.sourceName === "NSE" || quarter.sourceName === "NSE XBRL historical dataset") {
-    const value = 100 - quarter.promoter - quarter.public;
-    return value >= -0.05 ? Math.max(0, value) : null;
-  }
+
+function othersOutsidePublic(q: { promoter: number | null; fii: number | null; dii: number | null; public: number | null } | null) {
   // Screener reports FIIs, DIIs and non-institutional Public separately; the balance
   // is the Government/other category, and should not include promoter holdings.
-  if (quarter.fii === null || quarter.dii === null) return null;
-  const value = 100 - quarter.promoter - quarter.fii - quarter.dii - quarter.public;
-  return value >= -0.05 ? Math.max(0, value) : null;
+  if (!q || q.promoter === null) return null;
+  const used = (q.promoter ?? 0) + (q.fii ?? 0) + (q.dii ?? 0) + (q.public ?? 0);
+  const residual = 100 - used;
+  return Number.isFinite(residual) && residual > 0.05 ? residual : null;
 }
 
 function HoldingsPage() {
   const queryClient = useQueryClient();
   const [sortMode, setSortMode] = useState<SortMode>("institutional");
+  const [drawdownBySymbol, setDrawdownBySymbol] = useState<Record<string, DrawdownRow>>({});
   const [search, setSearch] = useState("");
   const [hydrateKey, setHydrateKey] = useState(0);
   const [hydrating, setHydrating] = useState(false);
   const processedRef = useRef(false);
   const today = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Kolkata",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
   }).format(new Date());
   const queryKey = ["suggested-holdings-all-v3", today];
+
   const query = useQuery({
     queryKey,
     queryFn: async () => {
-      processedRef.current = false;
-      const fallback = savedSuggestionFallback();
       try {
-        return await fetchSuggestedHoldings({ data: { fallback } });
-      } catch (error) {
-        // If the server function itself fails (e.g. deployment/server boundary),
+        return await fetchSuggestedHoldings({ data: { refresh: false } });
+      } catch {
+        // The live NSE universe/provider can fail at the server boundary. Keep Holdings
+        // usable from the Suggestions cache when available.
+        const fallback = savedSuggestionFallback();
         // render the exact cached Suggestions symbols client-side so the page
         // remains usable and can still request each symbol's verified filing.
-        if (!fallback.length) throw error;
         const unique = new Map<string, { symbol: string; name: string }>();
         for (const item of fallback) {
           const symbol = item.symbol.trim().toUpperCase();
           if (symbol && !unique.has(symbol)) unique.set(symbol, { symbol, name: item.name || symbol });
         }
         const holdings = [...unique.values()].map((item) => ({
-          ...item, quarter: null, note: "Holdings list recovered from your saved current Suggestions list; checking verified filing data.",
+          ...item,
+          quarter: null,
         }));
-        return { holdings, checked:  0, unavailable: 0, totalSuggested: holdings.length };
+        return { holdings, checked: 0, unavailable: 0, totalSuggested: holdings.length };
       }
     },
     staleTime: 5 * 60_000,
-    gcTime: 30 * 60_000,
-    refetchOnWindowFocus: true,
-    refetchInterval: 6 * 60 * 60_000,
     retry: 1,
   });
+
+  useEffect(() => {
+    processedRef.current = false;
+  }, [hydrateKey]);
+
   const data = query.data;
   useEffect(() => {
     if (!query.data || processedRef.current) return;
     processedRef.current = true;
-    let cancelled = false;
     let completed = false;
     setHydrating(true);
-    const hydrate = async () => {
+    (async () => {
       const symbols = query.data!.holdings.map((item) => item.symbol);
       const resultsBySymbol = new Map<string, { quarter: typeof query.data.holdings[number]["quarter"]; note: string | null }>();
-      // Request the complete Suggestions universe in one hydration run. Each API
-      // call is bounded, while several calls run together to avoid showing only
-      // the first few companies as the final result.
+
       const requestBatches: string[][] = [];
       for (let start = 0; start < symbols.length; start += 8) {
         requestBatches.push(symbols.slice(start, start + 8));
       }
-      const concurrency = 4;
-      for (let start = 0; start < requestBatches.length; start += concurrency) {
-        if (cancelled) return;
-        const group = requestBatches.slice(start, start + concurrency);
+
+      for (let i = 0; i < requestBatches.length; i += 2) {
+        const group = requestBatches.slice(i, i + 2);
         const settled = await Promise.allSettled(group.map((batch) =>
           fetchSuggestedHoldingsBatch({ data: { symbols: batch, refresh: true } })
         ));
-        for (let i = 0; i < settled.length; i++) {
-          if (cancelled) return;
-          const batch = group[i];
-          const outcome = settled[i];
+        for (let g = 0; g < settled.length; g++) {
+          const outcome = settled[g];
+          const batch = group[g];
           if (outcome.status === "fulfilled") {
             for (const item of outcome.value) {
               resultsBySymbol.set(item.symbol.toUpperCase(), { quarter: item.quarter, note: item.note });
             }
-            // If a response unexpectedly omits a symbol, retry that symbol alone.
             const returned = new Set(outcome.value.map((item) => item.symbol.toUpperCase()));
-            for (const symbol of batch.filter((s) => !returned.has(s.toUpperCase()))) {
-              try {
-                const single = await fetchSuggestedHoldingsBatch({ data: { symbols: [symbol], refresh: false } });
-                const item = single[0];
-                resultsBySymbol.set(symbol.toUpperCase(), { quarter: item?.quarter ?? null, note: item?.note ?? "No verified latest-quarter filing returned." });
-              } catch {
-                resultsBySymbol.set(symbol.toUpperCase(), { quarter: null, note: "Individual filing retry failed." });
+            for (const symbol of batch) {
+              if (!returned.has(symbol.toUpperCase())) {
+                try {
+                  const solo = await fetchSuggestedHoldingsBatch({ data: { symbols: [symbol], refresh: true } });
+                  for (const item of solo) resultsBySymbol.set(item.symbol.toUpperCase(), { quarter: item.quarter, note: item.note });
+                } catch {
+                  resultsBySymbol.set(symbol.toUpperCase(), { quarter: null, note: "Shareholding provider request failed." });
+                }
               }
             }
           } else {
-            // Recover a failed batch per company instead of discarding all rows.
             for (const symbol of batch) {
               try {
-                const single = await fetchSuggestedHoldingsBatch({ data: { symbols: [symbol], refresh: false } });
-                const item = single[0];
-                resultsBySymbol.set(symbol.toUpperCase(), { quarter: item?.quarter ?? null, note: item?.note ?? "No verified latest-quarter filing returned." });
-              } catch (error) {
-                resultsBySymbol.set(symbol.toUpperCase(), { quarter: null, note: error instanceof Error ? error.message : "Individual filing retry failed." });
+                const solo = await fetchSuggestedHoldingsBatch({ data: { symbols: [symbol], refresh: true } });
+                for (const item of solo) resultsBySymbol.set(item.symbol.toUpperCase(), { quarter: item.quarter, note: item.note });
+              } catch {
+                resultsBySymbol.set(symbol.toUpperCase(), { quarter: null, note: "Shareholding provider request failed." });
               }
             }
           }
         }
       }
-      if (cancelled) return;
+
       const holdings = query.data!.holdings.map((holding) => {
-        const result = resultsBySymbol.get(holding.symbol.toUpperCase());
-        return result ? { ...holding, quarter: result.quarter, note: result.note } : {
-          ...holding, quarter: null, note: "No verified latest-quarter filing returned."
+        const hit = resultsBySymbol.get(holding.symbol.toUpperCase());
+        return {
+          ...holding,
+          quarter: hit?.quarter ?? holding.quarter,
+          note: hit?.note ?? null,
         };
       });
-      const unavailable = holdings.filter((item) => !item.quarter).length;
-      // Publish the full set together so the page doesn't appear to contain only
-      // the first 3 companies while the rest are still being fetched.
+      const checked = holdings.length;
+      const unavailable = holdings.filter((h) => !h.quarter).length;
       queryClient.setQueryData(queryKey, (previous: typeof query.data) => previous ? {
-        ...previous, checked: holdings.length, unavailable, holdings,
+        ...previous,
+        holdings,
+        checked,
+        unavailable,
+        totalSuggested: holdings.length,
       } : previous);
       completed = true;
       setHydrating(false);
-    };
-    void hydrate();
-    return () => {
-      cancelled = true;
-      // React StrictMode runs an effect setup/cleanup/setup cycle in development.
-      // Reset the guard only when this hydration was cancelled before finishing,
-      // otherwise the second setup skips hydration and leaves both counters at 0.
       if (!completed) processedRef.current = false;
-    };
+    })();
   }, [query.data?.totalSuggested, query.data?.holdings.length, query.dataUpdatedAt, hydrateKey]);
+
+  // 5Y high drawdown labels for each holdings card (price vs 5-year high).
+  useEffect(() => {
+    const holdings = query.data?.holdings ?? [];
+    if (!holdings.length) {
+      setDrawdownBySymbol({});
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const symbols = holdings.map((h) => h.symbol);
+      const map: Record<string, DrawdownRow> = {};
+      try {
+        for (let start = 0; start < symbols.length; start += 40) {
+          const batch = symbols.slice(start, start + 40);
+          const rows = await fetchHoldingsDrawdowns({ data: { symbols: batch } });
+          for (const row of rows) {
+            const bare = row.symbol.toUpperCase().replace(/\.NS$/i, "").replace(/\.BO$/i, "");
+            map[bare] = row;
+            map[`${bare}.NS`] = row;
+            map[row.symbol.toUpperCase()] = row;
+          }
+        }
+      } catch {
+        // Partial map is fine; cards without verified price/high stay without a label.
+      }
+      if (!cancelled) setDrawdownBySymbol(map);
+    })();
+    return () => { cancelled = true; };
+  }, [query.data?.holdings]);
+
   const rows = useMemo(() => {
-    const needle = search.trim().toLowerCase();
-    const list = (data?.holdings ?? []).filter((share) =>
-      !needle || share.name.toLowerCase().includes(needle) || share.symbol.toLowerCase().includes(needle)
-    );
-    if (sortMode === "alphabetical") return [...list].sort((a, b) => a.name.localeCompare(b.name) || a.symbol.localeCompare(b.symbol));
+    if (!data?.holdings) return [];
+    const q = search.trim().toLowerCase();
+    let list = data.holdings;
+    if (q) {
+      list = list.filter((h) =>
+        h.symbol.toLowerCase().includes(q) || (h.name || "").toLowerCase().includes(q),
+      );
+    }
+    if (sortMode === "alphabetical") {
+      return [...list].sort((a, b) => (a.name || a.symbol).localeCompare(b.name || b.symbol));
+    }
     return [...list].sort((a, b) => {
-      const aScore = (a.quarter?.fii ?? 0) + (a.quarter?.dii ?? 0);
-      const bScore = (b.quarter?.fii ?? 0) + (b.quarter?.dii ?? 0);
-      return bScore - aScore || a.name.localeCompare(b.name);
+      const sa = (a.quarter?.fii ?? -1) + (a.quarter?.dii ?? -1);
+      const sb = (b.quarter?.fii ?? -1) + (b.quarter?.dii ?? -1);
+      if (sb !== sa) return sb - sa;
+      return (a.name || a.symbol).localeCompare(b.name || b.symbol);
     });
   }, [data?.holdings, search, sortMode]);
 
-  const refresh = () => {
-    processedRef.current = false;
-    void queryClient.fetchQuery({
-      queryKey,
-      queryFn: () => fetchSuggestedHoldings({ data: { refresh: true, fallback: savedSuggestionFallback() } }),
-      staleTime: 0,
-    }).then(() => setHydrateKey((v) => v + 1));
-  };
-
   return (
-    <div className="mx-auto max-w-5xl pb-10">
-      <header className="flex items-center justify-between gap-3 px-1 py-3">
+    <div className="space-y-6 pb-8">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-xs uppercase tracking-[0.2em] text-subtle">Artha scanner</p>
+          <p className="text-xs uppercase tracking-[0.2em] text-subtle">Artha · Suggestion Box</p>
           <h1 className="mt-1 font-display text-3xl tracking-tight text-fg">Holdings</h1>
-          <p className="mt-2 text-sm text-muted">Every share in current Suggestions · highest FII + DII first</p>
+          <p className="mt-2 max-w-2xl text-sm text-muted">
+            Suggested shares with latest verified institutional shareholding. Each card shows FII, DII and public categories from exchange filings.
+          </p>
         </div>
-        <button type="button" onClick={refresh} disabled={query.isFetching}
-          className="flex h-10 shrink-0 items-center gap-2 rounded-lg bg-surface-2 px-3 text-xs text-muted shadow-[var(--shadow-border)] disabled:opacity-60"
-          aria-label="Refresh holdings">
-          <RefreshCw className={`size-4 ${query.isFetching ? "animate-spin" : ""}`} /> Refresh
+        <button
+          type="button"
+          onClick={() => {
+            processedRef.current = false;
+            void queryClient.fetchQuery({ queryKey, queryFn: async () => fetchSuggestedHoldings({ data: { refresh: true } }) }).then(() => setHydrateKey((k) => k + 1));
+          }}
+          className="flex h-10 items-center gap-2 rounded-lg bg-surface-2 px-3 text-xs text-muted shadow-[var(--shadow-border)]"
+          aria-label="Refresh holdings"
+        >
+          <RefreshCw className="size-4" /> Refresh
         </button>
-      </header>
+      </div>
 
       {query.isLoading ? (
-        <Panel className="mt-5 p-6"><p className="text-sm text-muted">Loading every suggested share and checking its latest disclosed shareholding…</p></Panel>
+        <Panel className="p-6"><p className="text-sm text-muted">Loading suggested holdings…</p></Panel>
       ) : query.isError || !data ? (
-        <Panel className="mt-5 p-6"><p className="text-sm text-muted">Holdings could not be loaded. Refresh to try again. No sample figures are shown.</p></Panel>
+        <Panel className="p-6"><p className="text-sm text-muted">Holdings data is temporarily unavailable.</p></Panel>
       ) : (
         <>
-          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
-            <Panel className="p-3"><p className="text-xs text-muted">Suggestions shares</p><p className="mt-1 text-xl font-semibold tabular text-fg">{data.totalSuggested}</p></Panel>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <Panel className="p-3"><p className="text-xs text-muted">Suggested shares</p><p className="mt-1 text-xl font-semibold tabular text-fg">{data.totalSuggested}</p></Panel>
             <Panel className="p-3"><p className="text-xs text-muted">Verified latest filing</p><p className="mt-1 text-xl font-semibold tabular text-fg">{hydrating ? "Checking…" : data.checked - data.unavailable}</p></Panel>
             <Panel className="col-span-2 p-3 sm:col-span-1"><p className="text-xs text-muted">Data unavailable</p><p className="mt-1 text-xl font-semibold tabular text-fg">{hydrating ? "Checking…" : data.unavailable}</p></Panel>
           </div>
 
           <div className="mt-4 space-y-3">
-            <label className="relative block">
+            <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted" />
               <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search company or symbol…"
-                className="h-12 w-full rounded-xl bg-surface-2 pl-10 pr-4 text-sm text-fg shadow-[var(--shadow-border)] outline-none focus:ring-2 focus:ring-current/10" />
-            </label>
+                className="h-11 w-full rounded-xl bg-surface-2 pl-10 pr-4 text-sm text-fg shadow-[var(--shadow-border)] outline-none focus:ring-2 focus:ring-current/10" />
+            </div>
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="inline-flex rounded-xl bg-surface-2 p-1 shadow-[var(--shadow-border)]">
+              <div className="flex rounded-xl bg-surface-2 p-1 shadow-[var(--shadow-border)]">
                 <button type="button" onClick={() => setSortMode("institutional")} aria-pressed={sortMode === "institutional"}
                   className={`rounded-lg px-3 py-2 text-xs font-medium ${sortMode === "institutional" ? "bg-surface text-fg shadow-sm" : "text-muted"}`}>FII + DII leaders</button>
                 <button type="button" onClick={() => setSortMode("alphabetical")} aria-pressed={sortMode === "alphabetical"}
@@ -265,28 +291,40 @@ function HoldingsPage() {
                           {score !== null && <div className="mt-2 inline-flex items-center rounded-lg border border-up/30 bg-up/10 px-3 py-1.5 text-sm font-bold tabular text-up sm:text-base">FII + DII: {score.toFixed(2)}%</div>}
                         </div>
                       </div>
-                      {q?.sourceUrl && <a href={q.sourceUrl} target="_blank" rel="noreferrer" aria-label={`Open source filing for ${share.name}`}
-                        className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-muted hover:text-fg"><ExternalLink className="size-4" /></a>}
+                      <div className="flex shrink-0 flex-col items-end gap-2">
+                        {(() => {
+                          const key = share.symbol.trim().toUpperCase();
+                          const dd = drawdownBySymbol[key] ?? drawdownBySymbol[key.replace(/\.NS$|\.BO$/i, "")] ?? drawdownBySymbol[`${key.replace(/\.NS$|\.BO$/i, "")}.NS`];
+                          const pct = dd?.downFrom5yHighPct;
+                          if (pct == null || !Number.isFinite(pct)) return null;
+                          return (
+                            <span className="max-w-[9.5rem] text-right text-xs font-bold leading-tight tabular text-down sm:text-sm">
+                              ↓ {pct.toFixed(2)}% FROM 5Y HIGH
+                            </span>
+                          );
+                        })()}
+                        {q?.sourceUrl && <a href={q.sourceUrl} target="_blank" rel="noreferrer" aria-label={`Open source filing for ${share.name}`}
+                          className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-muted hover:text-fg"><ExternalLink className="size-4" /></a>}
+                      </div>
                     </div>
                     <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
                       <div className="rounded-lg bg-surface-2 p-3"><div className="text-xs text-muted">FII</div><div className="mt-1 text-base font-semibold tabular text-fg">{percent(q?.fii)}</div></div>
                       <div className="rounded-lg bg-surface-2 p-3"><div className="text-xs text-muted">DII</div><div className="mt-1 text-base font-semibold tabular text-fg">{percent(q?.dii)}</div></div>
                       <div className="rounded-lg bg-surface-2 p-3"><div className="text-xs text-muted">Public*</div><div className="mt-1 text-base font-semibold tabular text-fg">{percent(publicValue)}</div></div>
-                      <div className="rounded-lg bg-surface-2 p-3"><div className="text-xs text-muted">Others**</div><div className="mt-1 text-base font-semibold tabular text-fg">{percent(others)}</div></div>
+                      <div className="rounded-lg bg-surface-2 p-3"><div className="text-xs text-muted">Promoter</div><div className="mt-1 text-base font-semibold tabular text-fg">{percent(q?.promoter)}</div></div>
                     </div>
-                    <div className="mt-3 text-[11px] text-muted">
-                      {q ? `Source: ${q.sourceName} · Latest available quarterly disclosure` : "Source: NSE / Screener.in · no verifiable latest-quarter values"}
-                      {q?.sourceUrl && <> · <a href={q.sourceUrl} target="_blank" rel="noreferrer" className="underline underline-offset-2">Verify source</a></>}
-                    </div>
-                    {!q && share.note && <div className="mt-2 break-words text-[11px] text-muted">Diagnostic: {share.note}</div>}
+                    {others != null && (
+                      <p className="mt-2 text-xs text-subtle">Others** {percent(others)}</p>
+                    )}
                   </Panel>
                 );
               })}
             </div>
           )}
+
+          <p className="mt-5 text-xs text-subtle">* NSE Public is its aggregate public bucket less FII/DII; Screener.in Public is its separate non-institutional Public row. ** Others is the remaining source-reported balance. Categories are source-specific to avoid double counting. Latest disclosed quarterly data only; missing or inconsistent values show —, never estimated. Sorted by FII + DII percentage; A–Z mode is scrollable.</p>
         </>
       )}
-      <p className="mt-5 text-xs text-subtle">* NSE Public is its aggregate public bucket less FII/DII; Screener.in Public is its separate non-institutional Public row. ** Others is the remaining source-reported balance. Categories are source-specific to avoid double counting. Latest disclosed quarterly data only; missing or inconsistent values show —, never estimated. Sorted by FII + DII percentage; A–Z mode is scrollable.</p>
     </div>
   );
 }
