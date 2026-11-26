@@ -441,7 +441,7 @@ async function loadNseFilingHistory(symbol: string): Promise<ShareholdingQuarter
   const inRange = filings.filter(row => {
     if (typeof row.xbrl !== "string" || !/^https?:\/\//i.test(row.xbrl as string)) return false;
     const date = sourceDate(String(row.date ?? ""));
-    return date >= "2021-01-01" && date <= "2026-12-31";
+    return date >= "2018-01-01" && date <= "2026-12-31";
   });
   // Keep only the latest revision for each reported period.
   const latestByPeriod = new Map<string, Filing>();
@@ -454,7 +454,7 @@ async function loadNseFilingHistory(symbol: string): Promise<ShareholdingQuarter
   }
   const selected = [...latestByPeriod.values()].sort((a, b) => sourceDate(String(b.date ?? "")).localeCompare(sourceDate(String(a.date ?? ""))));
   const parsed: (ShareholdingQuarter | null)[] = [];
-  // Fetch all available 2021–2026 filings in small bounded batches.
+  // Fetch all available 2018–2026 filings in small bounded batches.
   for (let start = 0; start < selected.length; start += 5) {
     const batch = selected.slice(start, start + 5);
     parsed.push(...await Promise.all(batch.map(async filing => {
@@ -770,7 +770,7 @@ async function loadBseFallback(symbol:string):Promise<{url:string;quarters:Share
   const indexRes=await fetch(indexUrl,{headers,cache:"no-store"});
   if(!indexRes.ok)throw new Error("BSE filing index HTTP "+indexRes.status);
   const index=await indexRes.json() as {Table?:Array<Record<string,unknown>>};
-  const filings=(index.Table??[]).filter(x=>Number(x.IsXBRL)===1&&typeof x.XBRLAttachment==="string"&&/^\d{4}-\d{2}-\d{2}/.test(String(x.EndDate??""))&&String(x.EndDate).slice(0,10)>="2021-01-01"&&String(x.EndDate).slice(0,10)<="2026-12-31").sort((a,b)=>String(b.EndDate).localeCompare(String(a.EndDate)));
+  const filings=(index.Table??[]).filter(x=>Number(x.IsXBRL)===1&&typeof x.XBRLAttachment==="string"&&/^\d{4}-\d{2}-\d{2}/.test(String(x.EndDate??""))&&String(x.EndDate).slice(0,10)>="2018-01-01"&&String(x.EndDate).slice(0,10)<="2026-12-31").sort((a,b)=>String(b.EndDate).localeCompare(String(a.EndDate)));
   const quarters:ShareholdingQuarter[]=[];
   for(const filing of filings){
     const attachment=String(filing.XBRLAttachment),url=attachment.startsWith("http")?attachment:"https://www.bseindia.com"+(attachment.startsWith("/")?attachment:"/"+attachment);
@@ -924,9 +924,9 @@ async function loadShareholding(symbolInput: string, refresh = false): Promise<S
       const selected = filings.filter(row => {
         if (typeof row.xbrl !== "string" || !/^https?:\/\//i.test(row.xbrl as string)) return false;
         const date = sourceDate(String(row.date ?? ""));
-        return date >= "2021-01-01" && date <= "2026-12-31";
+        return date >= "2018-01-01" && date <= "2026-12-31";
       }).sort((a, b) => sourceDate(String(b.date ?? "")).localeCompare(sourceDate(String(a.date ?? ""))));
-      // Fetch all 2021–2026 filings in bounded batches to avoid rate limits.
+      // Fetch all 2018–2026 filings in bounded batches to avoid rate limits.
       const parsedFilings: (ShareholdingQuarter | null)[] = [];
       for (let start = 0; start < selected.length; start += 6) {
         const batch = selected.slice(start, start + 6);
