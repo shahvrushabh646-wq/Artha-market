@@ -9,8 +9,8 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
 public class MainActivity extends Activity {
-    // Latest Vercel deployment confirmed Ready for today's Artha web changes.
-    private static final String ARTHA_URL = "https://artha-market-git-mobile-sync-latest-artha-web-vs-38ee.vercel.app/";
+    // Stable production alias: Android follows the latest production deployment.
+    private static final String ARTHA_URL = "https://artha-market.vercel.app/";
     private WebView webView;
 
     @Override
