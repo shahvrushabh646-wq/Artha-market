@@ -881,35 +881,24 @@ async function loadShareholding(symbolInput: string, refresh = false): Promise<S
   // Load the full parsed historical dataset for every company, including symbols
   // absent from the latest-snapshot signals file.
   const flatHistory = await loadNseFlatHistory(symbol).catch(() => []);
-  try {
-    const quarter = (await loadNseHistorySnapshot(refresh)).get(symbol);
-    if (quarter) {
-      // The signals CSV is a latest-period snapshot. On company drill-down,
-      // enrich it with dated historical quarters from independent public filing sources.
-      const supplemental = await loadSupplementalShareholding(symbol);
-      // The full parsed NSE XBRL table contains dated historical promoter values;
-      // the signals CSV is only a latest-quarter snapshot. Preserve the full history
-      // and merge exact period dates only. Pledge stays null unless separately reported.
-      const quarters = mergeSameQuarterSources(symbol, [quarter, ...flatHistory, ...supplemental]);
-      const data: ShareholdingResult = { symbol, source: quarter.sourceUrl, sourceName: quarter.sourceName, quarters, note: "Latest NSE historical snapshot enriched with dated quarterly filings from public exchange/provider sources. Each quarter is kept by its exact as-on date; missing history is not interpolated." };
-      cache.set(symbol, { expires: Date.now() + 5 * 60_000, data });
-      return data;
-    }
-  } catch { /* use live exchange/provider fallback below */ }
+  // Snapshot/history feeds can lag the latest exchange filing. Keep them as
+  // historical base records, but continue to live NSE filings and dated provider
+  // comparisons before deciding which quarter is latest.
+  const snapshot = await loadNseHistorySnapshot(refresh).catch(() => new Map<string, ShareholdingQuarter>());
+  const snapshotQuarter = snapshot.get(symbol) ?? null;
   const cached = cache.get(symbol);
   if (!refresh && cached && cached.expires > Date.now()) return cached.data;
   if (refresh) cache.delete(symbol);
-  // Some NSE symbols have no row in the latest-signals snapshot. Still load
-  // their dated filing-index history and pledge disclosures rather than falling
-  // back to only the recent live NSE endpoint.
   const indexedHistory = await loadNseFilingHistory(symbol).catch(() => []);
   const pledgeHistory = await loadNsePledgeSnapshot(symbol).catch(() => []);
-  const initialHistory = mergeSameQuarterSources(symbol, [...flatHistory, ...indexedHistory, ...pledgeHistory]);
+  const initialHistory = mergeSameQuarterSources(symbol, [
+    ...(snapshotQuarter ? [snapshotQuarter] : []), ...flatHistory, ...indexedHistory, ...pledgeHistory,
+  ]);
   const page = `https://www.nseindia.com/companies-listing/corporate-filings-shareholding-pattern?symbol=${encodeURIComponent(symbol)}&tabIndex=equity`;
   const base: ShareholdingResult = {
     symbol,
-    source: flatHistory[0]?.sourceUrl ?? page,
-    sourceName: flatHistory[0]?.sourceName ?? "NSE",
+    source: snapshotQuarter?.sourceUrl ?? flatHistory[0]?.sourceUrl ?? page,
+    sourceName: snapshotQuarter?.sourceName ?? flatHistory[0]?.sourceName ?? "NSE",
     quarters: initialHistory,
     note: flatHistory.length ? "Historical shareholding loaded from parsed NSE XBRL records; pledge remains unverified unless a filing reports it." : null,
   };
@@ -961,28 +950,30 @@ async function loadShareholding(symbolInput: string, refresh = false): Promise<S
     base.note = "NSE shareholding data could not be retrieved right now.";
   }
 
-  // Use Screener when NSE is blocked, returns no usable quarters, or lacks FII/DII figures.
-  const latestNse = base.quarters[0];
-  const needsFallback = !latestNse || latestNse.fii === null || latestNse.dii === null;
-  if (needsFallback) {
+  // Check Screener on each cache refresh. A complete but stale historical
+  // snapshot must not mask a newer dated shareholding quarter.
+  {
+    const latestNse = base.quarters[0];
+    const needsFallback = !latestNse || latestNse.fii === null || latestNse.dii === null;
     try {
       const fallback = await loadScreenerFallback(symbol);
       const fallbackLatest = fallback.quarters[0];
       const nseLatest = base.quarters[0];
       const fallbackIsCurrentOrNewer = !!fallbackLatest && (!nseLatest || fallbackLatest.asOnDate >= nseLatest.asOnDate);
       const fallbackHasScreeningData = !!fallbackLatest && fallbackLatest.fii !== null && fallbackLatest.dii !== null;
-      if (fallbackIsCurrentOrNewer && fallbackHasScreeningData) {
+      const fallbackIsActuallyNewer = !!fallbackLatest && !!nseLatest && fallbackLatest.asOnDate > nseLatest.asOnDate;
+      if (fallbackIsCurrentOrNewer && fallbackHasScreeningData && (needsFallback || fallbackIsActuallyNewer)) {
         base.source = fallback.url;
         base.sourceName = "Screener.in";
         base.quarters = fallback.quarters;
-        base.note = "Using Screener.in because its latest verified quarter is current or newer than the NSE result and includes separate FII/DII values. Verify figures at the linked source. Promoter pledge is not supplied by this fallback.";
+        base.note = "Using Screener.in because its latest dated shareholding quarter is newer than the exchange/history snapshot or fills missing verified FII/DII values. Verify at the linked source. Pledge is shown only when separately disclosed.";
       } else if (!base.quarters.length) {
-        base.note = "NSE and Screener.in did not return verifiable latest-quarter FII/DII figures. No sample values are shown.";
+        base.note = "NSE and Screener.in did not return verifiable latest-quarter shareholding figures. No sample values are shown.";
       } else if (fallbackLatest && nseLatest && fallbackLatest.asOnDate < nseLatest.asOnDate) {
         base.note = "Screener.in data was older than the latest NSE filing, so it was not used to replace newer NSE data. Missing figures remain unavailable.";
       }
     } catch {
-      if (!base.quarters.length) base.note = "NSE and Screener.in shareholding data could not be retrieved. Try again later; no sample figures are shown.";
+      if (!base.quarters.length) base.note = "NSE and Screener.in shareholding data could not be retrieved. Try again later; no sample values are shown.";
     }
   }
   // BSE exchange filing fallback, mapped by ISIN to avoid symbol/name collisions.
