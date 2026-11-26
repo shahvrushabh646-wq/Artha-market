@@ -57,11 +57,13 @@ function parseNseFlatHistory(csv: string): Map<string, ShareholdingQuarter[]> {
     else month = filingMonth;
     const date = new Date(Date.UTC(year, month, 0)), asOnDate = date.toISOString().slice(0, 10);
     const val = (column: number) => safeNumber(cells[column] ?? null);
-    const promoter = val(promoterIdx), fii = val(fiiIdx), dii = val(dii), publicValue = val(publicIdx);
-    if (promoter === null && fii === null && dii === null && publicValue === null) continue;
+    const promoter = val(promoterIdx), fii = val(fiiIdx), dii = val(diiIdx), publicValue = val(publicIdx);
+    const pledgeValue = pledgeIdx >= 0 ? val(pledgeIdx) : null;
+    if (promoter === null && fii === null && dii === null && publicValue === null && pledgeValue === null) continue;
     const quarter: ShareholdingQuarter = {
       quarter: date.toLocaleDateString("en-IN", { month: "short", year: "numeric", timeZone: "UTC" }),
-      asOnDate, promoter, fii, dii, public: publicValue, promoterPledge: null,
+      asOnDate, promoter, fii, dii, public: publicValue,
+      promoterPledge: pledgeValue !== null && pledgeValue >= 0 && pledgeValue <= 100 ? pledgeValue : null,
       sourceUrl: NSE_FLAT_HISTORY_CSV, sourceName: "NSE historical XBRL dataset",
     };
     const rows = bySymbol.get(symbol) ?? [];
@@ -186,7 +188,11 @@ async function nseJson(url: string, referer: string): Promise<unknown> {
 }
 
 function parseXbrl(xml: string): (Omit<ShareholdingQuarter, "quarter" | "asOnDate" | "sourceUrl"> & { periodEnd?: string }) | null {
-  if (!xml.trim().startsWith("<") || !/ShareholdingAsAPercentageOfTotalNumberOfShares/.test(xml)) return null;
+  // Accept both standard XBRL element facts and Inline XBRL facts. Inline facts
+  // carry the taxonomy concept in the `name` attribute, so a tag-only precheck
+  // would reject the entire newer filing before the inline fact parser runs.
+  const hasShareholdingFact = /ShareholdingAsAPercentageOfTotalNumberOfShares/.test(xml);
+  if (!xml.trim().startsWith("<") || !hasShareholdingFact) return null;
   const contexts = new Map<string, string[]>();
   const contextDates = new Map<string, string>();
   const contextPattern = /<(?:[\w.-]+:)?context\b[^>]*\bid="([^"]+)"[^>]*>([\s\S]*?)<\/(?:[\w.-]+:)?context>/g;
