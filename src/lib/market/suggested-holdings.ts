@@ -6,6 +6,8 @@ import { fetchSuggestions } from "@/lib/market/suggestions";
 export type SuggestedHolding = {
   symbol: string;
   name: string;
+  price: number | null;
+  high5y: number | null;
   quarter: ShareholdingQuarter | null;
   note: string | null;
 };
@@ -25,7 +27,7 @@ function istDateKey(): string {
 export const fetchSuggestedHoldings = createServerFn({ method: "GET" })
   .validator((data: unknown) => z.object({
     refresh: z.boolean().optional(),
-    fallback: z.array(z.object({ symbol: z.string().min(1).max(40), name: z.string().max(200).optional() })).max(500).optional(),
+    fallback: z.array(z.object({ symbol: z.string().min(1).max(40), name: z.string().max(200).optional(), price: z.number().nullable().optional(), high5y: z.number().nullable().optional() })).max(500).optional(),
   }).parse(data ?? {}))
   .handler(async ({ data }) => {
     // The live NSE universe/provider can fail at the server boundary. Keep Holdings
@@ -43,6 +45,8 @@ export const fetchSuggestedHoldings = createServerFn({ method: "GET" })
       suggestions = data.fallback.map((item) => ({
         symbol: item.symbol.trim().toUpperCase(),
         name: item.name?.trim() || item.symbol.trim().toUpperCase(),
+        price: item.price ?? null,
+        high5y: item.high5y ?? null,
       })) as typeof suggestions;
     }
     const unique = new Map<string, (typeof suggestions)[number]>();
@@ -53,6 +57,8 @@ export const fetchSuggestedHoldings = createServerFn({ method: "GET" })
     const holdings = [...unique.values()].map((share) => ({
       symbol: String(share.symbol).trim().toUpperCase(),
       name: share.name || share.symbol,
+      price: typeof share.price === "number" && Number.isFinite(share.price) ? share.price : null,
+      high5y: typeof share.high5y === "number" && Number.isFinite(share.high5y) ? share.high5y : null,
       quarter: null,
       note: "Checking latest exchange filing…",
     }));
