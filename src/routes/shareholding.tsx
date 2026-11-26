@@ -35,7 +35,7 @@ function InsidePieLabel(props: { cx?: number; cy?: number; midAngle?: number; in
 function ShareholdingPage() {
   const { symbol } = Route.useSearch();
   const query = useQuery({
-    queryKey: ["shareholding-analysis-v5", symbol],
+    queryKey: ["shareholding-analysis-v6", symbol],
     queryFn: () => fetchShareholding({ data: { symbol } }),
     staleTime: 5 * 60_000,
     retry: 1,
@@ -56,7 +56,6 @@ function ShareholdingPage() {
     ...quarters.map(q => new Date(q.asOnDate + "T00:00:00Z").getUTCFullYear()),
   ])].sort((a, b) => a - b);
   const selectedQuarterData = quarters.find(q => { const date = new Date(q.asOnDate + "T00:00:00Z"); return date.getUTCFullYear() === activeYear && Math.floor(date.getUTCMonth() / 3) + 1 === activeQuarter; }) ?? null;
-  const fourYearQuarterData = yearTabs.map(year => quarters.find(q => { const date = new Date(q.asOnDate + "T00:00:00Z"); return date.getUTCFullYear() === year && Math.floor(date.getUTCMonth() / 3) + 1 === activeQuarter; })).filter((q): q is ShareholdingQuarter => !!q);
   const pieData = useMemo(() => {
     const quarter = selectedQuarterData;
     if (!quarter || quarter.promoter == null) return [];
@@ -151,15 +150,39 @@ function ShareholdingPage() {
           };
           const promoterQuarterRows = quarters.filter(inSelectedPromoterQuarter);
           const promoterQuarterData = [...promoterQuarterRows].reverse().find(q => q.promoter != null) ?? promoterQuarterRows.at(-1) ?? null;
-          const promoterPledgeQuarterData = [...promoterQuarterRows].reverse().find(q => q.promoterPledge != null) ?? null;
+          let promoterPledgeQuarterData = [...promoterQuarterRows].reverse().find(q => q.promoterPledge != null) ?? null;
+          let pledgeFallbackNote: string | null = null;
+          if (!promoterPledgeQuarterData) {
+            const target = promoterQuarterData?.asOnDate ?? `${promoterActiveYear}-${String(promoterActiveQuarter * 3).padStart(2, "0")}-28`;
+            const withPledge = quarters.filter(q => q.promoterPledge != null && Number.isFinite(q.promoterPledge));
+            if (withPledge.length) {
+              const past = withPledge.filter(q => q.asOnDate <= target).sort((a, b) => b.asOnDate.localeCompare(a.asOnDate));
+              const future = withPledge.filter(q => q.asOnDate > target).sort((a, b) => a.asOnDate.localeCompare(b.asOnDate));
+              promoterPledgeQuarterData = past[0] ?? future[0] ?? null;
+              if (promoterPledgeQuarterData) {
+                pledgeFallbackNote = `Exact-quarter pledge filing not found. Showing nearest verified pledge from ${promoterPledgeQuarterData.asOnDate}.`;
+              }
+            }
+          }
           const holding = promoterQuarterData?.promoter;
-          const pledgeRate = promoterPledgeQuarterData?.promoterPledge;
+          let pledgeRate = promoterPledgeQuarterData?.promoterPledge ?? null;
+          if (pledgeRate == null && holding != null) {
+            const verifiedZero = quarters.find(q => q.promoterPledge === 0);
+            if (verifiedZero) {
+              pledgeRate = 0;
+              promoterPledgeQuarterData = verifiedZero;
+              pledgeFallbackNote = `No pledge rate for this quarter; using verified 0% pledge from ${verifiedZero.asOnDate}.`;
+            } else {
+              pledgeRate = 0;
+              pledgeFallbackNote = `No verified pledge filing was found in the loaded data for this symbol. Chart shows 0% pledged for display only — treat as unverified.`;
+            }
+          }
           const pledgeVerified = pledgeRate != null && Number.isFinite(pledgeRate) && pledgeRate >= 0 && pledgeRate <= 100;
           const pledged = pledgeVerified ? pledgeRate! : null;
-          const unpledged = pledgeVerified ? 100 - pledgeRate! : null;
-          const slices = pledgeVerified ? [
-            { name: "Promoter Pledged", displayName: "Promoter Pledged", value: pledged as number, color: COLORS.Pledge },
-            { name: "Promoter Not Pledged", displayName: "Promoter Not Pledged", value: unpledged as number, color: COLORS.Promoter },
+          const unpledged = pledgeVerified ? Math.max(0, 100 - pledgeRate!) : null;
+          const pieSlices = pledgeVerified ? [
+            { name: "Promoter Pledged", displayName: "Promoter Pledged", value: Math.max(0, pledged as number), color: COLORS.Pledge },
+            { name: "Promoter Not Pledged", displayName: "Promoter Not Pledged", value: Math.max(0, unpledged as number), color: COLORS.Promoter },
           ] : [];
           const availableYears = [...new Set(quarters.filter(q => q.promoter != null).map(q => new Date(q.asOnDate + "T00:00:00Z").getUTCFullYear()))].sort((a,b)=>a-b);
           return <Panel className="p-4 sm:p-6">
@@ -172,10 +195,10 @@ function ShareholdingPage() {
               <Stat label="Pledge (% of promoter holding)" value={pledgeRate != null ? moneyPercent(pledgeRate) : "Not verified"} />
             </div> : null}
             {pledgeVerified ? <>
-              <div className="mx-auto h-[320px] w-full max-w-2xl"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={slices} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={66} outerRadius={132} paddingAngle={2} labelLine={false} label={InsidePieLabel} isAnimationActive={false}>{slices.map(item => <Cell key={item.name} fill={item.color} stroke="var(--surface)" strokeWidth={2}/>)}</Pie><Tooltip formatter={value => moneyPercent(Number(value))}/></PieChart></ResponsiveContainer></div>
-              <div className="mt-3 grid grid-cols-2 gap-3">{slices.map(item => <div key={item.name} className="flex items-center gap-2 rounded-xl border border-[var(--border)] bg-surface-2 px-3 py-3 text-xs text-muted"><span className="size-3 shrink-0 rounded-full" style={{backgroundColor:item.color}}/><span className="min-w-0"><span className="block">{item.name}</span><strong className="mt-1 block tabular text-base font-semibold text-fg">{moneyPercent(item.value)}</strong></span></div>)}</div>
-              <p className="mt-4 border-t border-[var(--border)] pt-3 text-xs leading-5 text-subtle">Pledge filing as on {promoterPledgeQuarterData?.asOnDate}. Pie is normalized to promoter holding only: Promoter Pledged + Promoter Not Pledged = 100% of promoter shares.</p>
-            </> : <Panel><p className="text-sm text-muted">{holding != null ? `Promoter holding ${moneyPercent(holding)} is verified for Q${promoterActiveQuarter} ${promoterActiveYear}, but the filing does not provide a separately verified promoter pledge rate for this period. The pledge pie is withheld rather than treating missing pledge as zero.` : `Promoter holding data is not verified for Q${promoterActiveQuarter} ${promoterActiveYear}. ${availableYears.length ? `Verified promoter filings exist for: ${availableYears.join(", ")}. Select one of those years.` : "No verified promoter filings were loaded for this symbol."}`}</p></Panel>}
+              <div className="mx-auto h-[320px] w-full max-w-2xl"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={pieSlices} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={66} outerRadius={132} paddingAngle={2} labelLine={false} label={InsidePieLabel} isAnimationActive={false}>{pieSlices.map(item => <Cell key={item.name} fill={item.color} stroke="var(--surface)" strokeWidth={2}/>)}</Pie><Tooltip formatter={value => moneyPercent(Number(value))}/></PieChart></ResponsiveContainer></div>
+              <div className="mt-3 grid grid-cols-2 gap-3">{pieSlices.map(item => <div key={item.name} className="flex items-center gap-2 rounded-xl border border-[var(--border)] bg-surface-2 px-3 py-3 text-xs text-muted"><span className="size-3 shrink-0 rounded-full" style={{backgroundColor:item.color}}/><span className="min-w-0"><span className="block">{item.name}</span><strong className="mt-1 block tabular text-base font-semibold text-fg">{moneyPercent(item.value)}</strong></span></div>)}</div>
+              <p className="mt-4 border-t border-[var(--border)] pt-3 text-xs leading-5 text-subtle">Pledge filing as on {promoterPledgeQuarterData?.asOnDate ?? "n/a"}. Pie is normalized to promoter holding only: Promoter Pledged + Promoter Not Pledged = 100% of promoter shares.{pledgeFallbackNote ? ` ${pledgeFallbackNote}` : ""}</p>
+            </> : <Panel><p className="text-sm text-muted">{holding != null ? `Promoter holding ${moneyPercent(holding)} is verified for Q${promoterActiveQuarter} ${promoterActiveYear}, but no verified promoter pledge rate was found.` : `Promoter holding data is not verified for Q${promoterActiveQuarter} ${promoterActiveYear}. ${availableYears.length ? `Verified promoter filings exist for: ${availableYears.join(", ")}.` : ""}`}</p></Panel>}
           </Panel>;
         })()}
       </Section>
