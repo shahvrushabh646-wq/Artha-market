@@ -859,15 +859,15 @@ async function loadShareholding(symbolInput: string, refresh = false): Promise<S
       return data;
     }
   } catch { /* use live exchange/provider fallback below */ }
+  const cached = cache.get(symbol);
+  if (!refresh && cached && cached.expires > Date.now()) return cached.data;
+  if (refresh) cache.delete(symbol);
   // Some NSE symbols have no row in the latest-signals snapshot. Still load
   // their dated filing-index history and pledge disclosures rather than falling
   // back to only the recent live NSE endpoint.
   const indexedHistory = await loadNseFilingHistory(symbol).catch(() => []);
   const pledgeHistory = await loadNsePledgeSnapshot(symbol).catch(() => []);
   const initialHistory = mergeSameQuarterSources(symbol, [...flatHistory, ...indexedHistory, ...pledgeHistory]);
-  const cached = cache.get(symbol);
-  if (!refresh && cached && cached.expires > Date.now()) return cached.data;
-  if (refresh) cache.delete(symbol);
   const page = `https://www.nseindia.com/companies-listing/corporate-filings-shareholding-pattern?symbol=${encodeURIComponent(symbol)}&tabIndex=equity`;
   const base: ShareholdingResult = {
     symbol,
