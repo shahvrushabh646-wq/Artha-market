@@ -59,8 +59,8 @@ function parseNseFlatHistory(csv: string): Map<string, ShareholdingQuarter[]> {
     const date = new Date(Date.UTC(year, month, 0)), asOnDate = date.toISOString().slice(0, 10);
     const val = (column: number) => safeNumber(cells[column] ?? null);
     const promoter = val(promoterIdx), fii = val(fiiIdx), dii = val(dii), publicValue = val(publicIdx);
-    if (promoter === null && fii === null && dii === null && publicValue === null) continue;
-    const quarter: ShareholdingQuarter = {
+    const pledgeValue = pledgeIdx >= 0 ? val(pledgeIdx) : null;
+    if (promoter === null && fii === null && dii === null && publicValue === null && pledgeValue === null) continue;    const quarter: ShareholdingQuarter = {
       quarter: date.toLocaleDateString("en-IN", { month: "short", year: "numeric", timeZone: "UTC" }),
       asOnDate, promoter, fii, dii, public: publicValue,
       promoterPledge: pledgeValue !== null && pledgeValue >= 0 && pledgeValue <= 100 ? pledgeValue : null,
