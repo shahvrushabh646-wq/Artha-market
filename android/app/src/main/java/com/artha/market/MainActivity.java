@@ -9,9 +9,8 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
 public class MainActivity extends Activity {
-    // Use the stable Vercel production alias so the app follows the latest
-    // production deployment instead of being pinned to an immutable preview URL.
-    private static final String ARTHA_URL = "https://artha-market.vercel.app/";
+    // Latest Vercel deployment confirmed Ready for today's Artha web changes.
+    private static final String ARTHA_URL = "https://artha-market-git-mobile-sync-latest-artha-web-vs-38ee.vercel.app/";
     private WebView webView;
 
     @Override
@@ -31,7 +30,6 @@ public class MainActivity extends Activity {
         settings.setBuiltInZoomControls(false);
         settings.setDisplayZoomControls(false);
         settings.setMediaPlaybackRequiresUserGesture(false);
-        // Avoid showing an older cached bundle after a new production deploy.
         settings.setCacheMode(WebSettings.LOAD_NO_CACHE);
 
         setContentView(webView);
