@@ -298,6 +298,43 @@ function parseXbrl(xml: string): (Omit<ShareholdingQuarter, "quarter" | "asOnDat
     }
   }
 
+  // Inline XBRL pledge facts (ix:nonFraction) are separate from the SHP
+  // percentage facts. The upstream flat CSV currently does not emit pledge_pct,
+  // so extract pledge directly from the dated filing instead of relying on that
+  // empty optional column.
+  const inlinePledgeFacts: Array<{ concept: string; value: number; members: string[] }> = [];
+  for (const fact of xml.matchAll(inlineFactPattern)) {
+    const attrs = fact[1];
+    const namedConcept = attrs.match(/\\bname=["']([^"']+)["']/i)?.[1];
+    if (!namedConcept) continue;
+    const concept = normalizeConcept(namedConcept);
+    const contextRef = attrs.match(/\\bcontextRef=["']([^"']+)["']/i)?.[1];
+    if (!contextRef) continue;
+    const members = contexts.get(contextRef) ?? [];
+    if (!hasPromoterContext(members) || members.length > 8) continue;
+    const rawText = htmlText(fact[2]).replace(/,/g, "").trim();
+    const numeric = Number(rawText);
+    const scaleAttr = Number(attrs.match(/\\bscale=["'](-?\\d+)["']/i)?.[1] ?? "0");
+    if (!rawText || !Number.isFinite(numeric)) continue;
+    const value = numeric * (Number.isFinite(scaleAttr) ? 10 ** scaleAttr : 1);
+    if (!Number.isFinite(value) || value < 0) continue;
+    inlinePledgeFacts.push({ concept, value, members });
+  }
+  for (const fact of inlinePledgeFacts) {
+    const { concept, value } = fact;
+    const isPledge = /pledge|encumber/.test(concept);
+    if (isPledge) {
+      if (/(percentage|percent|pct)/.test(concept) && value <= 100) {
+        if (/(promoterholding|promotershares|promoterandpromotergroup)/.test(concept)) pledgePctOfPromoter ??= value;
+        else pledgePctOfCompany ??= value;
+      }
+      if (pledgedShares === null && /(numberofshares|shares)/.test(concept)) pledgedShares = value;
+    } else if (promoterShares === null &&
+      /(numberofshares|totalnumberofshares|sharesheld)/.test(concept)) {
+      promoterShares = value;
+    }
+  }
+
   const sum = (values.promoter ?? 0) + (values.public ?? 0);
   const scale = sum > 1000 ? 0.01 : sum > 0 && sum < 2 ? 100 : 1;
   for (const key of ["promoter", "public", "fii", "dii"] as const) if (values[key] !== null) values[key] = Math.round((values[key] as number) * scale * 10000) / 10000;
