@@ -1006,6 +1006,25 @@ async function loadShareholding(symbolInput: string, refresh = false): Promise<S
       if (!base.quarters.length) base.note = "NSE and Screener.in shareholding data could not be retrieved. Try again later; no sample values are shown.";
     }
   }
+  // Merge BSE's dated promoter-pledge facts into the historical NSE/Screener
+  // quarters even when their core shareholding categories are already complete.
+  // Pledge is a separate disclosure and must not be gated by missing FII/DII.
+  // Exact as-on dates only: never carry a pledge percentage into another quarter.
+  try {
+    const bsePledgeHistory = await loadBseFallback(symbol);
+    const pledgeByDate = new Map(bsePledgeHistory.quarters
+      .filter(q => q.promoterPledge !== null)
+      .map(q => [q.asOnDate, q.promoterPledge as number]));
+    if (pledgeByDate.size) {
+      base.quarters = base.quarters.map(q => {
+        const pledge = pledgeByDate.get(q.asOnDate);
+        return q.promoterPledge === null && pledge !== undefined
+          ? { ...q, promoterPledge: pledge, sourceName: q.sourceName + " + BSE pledge" }
+          : q;
+      });
+    }
+  } catch { /* BSE pledge history is supplemental; preserve verified NSE data. */ }
+
   // BSE exchange filing fallback, mapped by ISIN to avoid symbol/name collisions.
   if (!base.quarters[0] || base.quarters[0].fii === null || base.quarters[0].dii === null) {
     try {
