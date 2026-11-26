@@ -388,10 +388,18 @@ async function loadNsePledgeSnapshot(symbol: string): Promise<ShareholdingQuarte
       row.percpromotershares ?? row.percpledgedpromotershares ??
       row.pledgedpercentageofpromoterholding ?? row.promoterpledgepct ??
       row.promoterpledgepercentage ?? row.promotersharespledgedpercentage ??
-      row.pledgedsharespercentofpromoterholding ?? row.promoterpledgedpct
+      row.pledgedsharespercentofpromoterholding ?? row.promoterpledgedpct ??
+      row.percpledgedpromoterholding ?? row.promoterpledgedpercentage
     );
     const promoter = number(row.percpromoterholding ?? row.promoterholdingpct);
-    const period = parseNsePeriod(row.shpquarter ?? row.shp ?? row.periodend ?? row.asondt ?? row.asondatetime ?? row.disclosuredate);
+    // NSE has changed the pledged-data JSON field names across revisions.
+    // Accept the reported quarter/as-on date aliases, but never use a filing
+    // submission date to relabel a different quarter.
+    const period = parseNsePeriod(
+      row.shpquarter ?? row.shp ?? row.periodend ?? row.asondt ??
+      row.asondatetime ?? row.asondate ?? row.quarterenddate ??
+      row.quarterend ?? row.disclosuredate ?? row.date
+    );
     if (pledge === null || pledge < 0 || pledge > 100 || !period) continue;
     const date = new Date(period + "T00:00:00Z");
     quarters.push({
@@ -967,6 +975,20 @@ async function loadShareholding(symbolInput: string, refresh = false): Promise<S
       const fallback = await loadScreenerFallback(symbol);
       const fallbackLatest = fallback.quarters[0];
       const nseLatest = base.quarters[0];
+      // Screener can disclose pledge % of promoter shares even when the NSE
+      // history already has complete promoter/FII/DII/public figures. Merge
+      // pledge only on the exact same reported as-on date; never shift quarters.
+      if (fallback.quarters.some(q => q.promoterPledge !== null)) {
+        const pledgeByDate = new Map(fallback.quarters
+          .filter(q => q.promoterPledge !== null)
+          .map(q => [q.asOnDate, q.promoterPledge as number]));
+        base.quarters = base.quarters.map(q => {
+          const pledge = pledgeByDate.get(q.asOnDate);
+          return q.promoterPledge === null && pledge !== undefined
+            ? { ...q, promoterPledge: pledge, sourceName: q.sourceName + " + Screener.in pledge" }
+            : q;
+        });
+      }
       const fallbackIsCurrentOrNewer = !!fallbackLatest && (!nseLatest || fallbackLatest.asOnDate >= nseLatest.asOnDate);
       const fallbackHasScreeningData = !!fallbackLatest && fallbackLatest.fii !== null && fallbackLatest.dii !== null;
       const fallbackIsActuallyNewer = !!fallbackLatest && !!nseLatest && fallbackLatest.asOnDate > nseLatest.asOnDate;
