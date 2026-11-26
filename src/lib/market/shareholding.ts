@@ -147,6 +147,28 @@ async function loadNseHistorySnapshot(refresh = false): Promise<Map<string, Shar
   try { return await load; } finally { if (nseHistoryLoadPromise === load) nseHistoryLoadPromise = null; }
 }
 
+function loadBundledQuarter(symbol: string): ShareholdingQuarter | null {
+  const row = NSE_SHAREHOLDING_DATA[symbol];
+  if (!row) return null;
+  const period = row[0] ?? "";
+  if (!/^\\d{4}-\\d{2}$/.test(period)) return null;
+  const [year, month] = period.split("-").map(Number);
+  if (month < 1 || month > 12) return null;
+  const date = new Date(Date.UTC(year, month, 0));
+  const asOnDate = date.toISOString().slice(0, 10);
+  const value = (raw: string | null | undefined) => safeNumber(raw ?? null);
+  const promoter = value(row[1]), fii = value(row[2]), dii = value(row[3]), publicValue = value(row[4]);
+  const pledge = value(row[5]);
+  if (promoter === null && fii === null && dii === null && publicValue === null) return null;
+  return {
+    quarter: date.toLocaleDateString("en-IN", { month: "short", year: "numeric", timeZone: "UTC" }),
+    asOnDate, promoter, fii, dii, public: publicValue,
+    promoterPledge: pledge !== null && pledge >= 0 && pledge <= 100 ? pledge : null,
+    sourceUrl: NSE_HISTORY_CSV,
+    sourceName: "Bundled NSE historical fallback",
+  };
+}
+
 function normalizeSymbol(symbol: string) {
   return symbol.trim().toUpperCase().replace(/\.NS$|\.BO$/i, "").replace(/[^A-Z0-9&_-]/g, "");
 }
@@ -894,13 +916,18 @@ async function loadShareholding(symbolInput: string, refresh = false): Promise<S
   // comparisons before deciding which quarter is latest.
   const snapshot = await loadNseHistorySnapshot(refresh).catch(() => new Map<string, ShareholdingQuarter>());
   const snapshotQuarter = snapshot.get(symbol) ?? null;
+  // Always include the repository's last-known verified NSE row. Upstream CSV
+  // feeds can omit a symbol or fail at runtime; that must not blank a stock's
+  // shareholding screen when this fallback has a dated quarter.
+  const bundledQuarter = loadBundledQuarter(symbol);
   const cached = cache.get(symbol);
   if (!refresh && cached && cached.expires > Date.now()) return cached.data;
   if (refresh) cache.delete(symbol);
   const indexedHistory = await loadNseFilingHistory(symbol).catch(() => []);
   const pledgeHistory = await loadNsePledgeSnapshot(symbol).catch(() => []);
   const initialHistory = mergeSameQuarterSources(symbol, [
-    ...(snapshotQuarter ? [snapshotQuarter] : []), ...flatHistory, ...indexedHistory, ...pledgeHistory,
+    ...(snapshotQuarter ? [snapshotQuarter] : []), ...(bundledQuarter ? [bundledQuarter] : []),
+    ...flatHistory, ...indexedHistory, ...pledgeHistory,
   ]);
   const page = `https://www.nseindia.com/companies-listing/corporate-filings-shareholding-pattern?symbol=${encodeURIComponent(symbol)}&tabIndex=equity`;
   const base: ShareholdingResult = {
