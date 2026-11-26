@@ -235,6 +235,10 @@ function ShareholdingPage() {
               <Stat label="Promoter holding" value={moneyPercent(holding)} />
               <Stat label="Pledge (% of promoter holding)" value={pledgeRate != null ? moneyPercent(pledgeRate) : "Not verified"} />
             </div> : null}
+            <div className="mb-4 rounded-xl border border-[var(--border)] bg-surface-2 px-3 py-3">
+              <a href="https://www.samco.in/technology/pledge-monitor" target="_blank" rel="noopener noreferrer" className="text-sm font-semibold text-accent hover:underline">Open SAMCO Pledge Monitor ↗</a>
+              <p className="mt-1 text-xs leading-5 text-muted">External cross-check only. SAMCO's public table currently shows filings dated 30 Sep 2015; do not treat it as current-quarter pledge data.</p>
+            </div>
             {pledgeVerified ? <>
               <div className="mx-auto h-[320px] w-full max-w-2xl"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={pieSlices} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={66} outerRadius={132} paddingAngle={2} labelLine={false} label={InsidePieLabel} isAnimationActive={false}>{pieSlices.map(item => <Cell key={item.name} fill={item.color} stroke="var(--surface)" strokeWidth={2}/>)}</Pie><Tooltip formatter={value => moneyPercent(Number(value))}/></PieChart></ResponsiveContainer></div>
               <div className="mt-3 grid grid-cols-2 gap-3">{pieSlices.map(item => <div key={item.name} className="flex items-center gap-2 rounded-xl border border-[var(--border)] bg-surface-2 px-3 py-3 text-xs text-muted"><span className="size-3 shrink-0 rounded-full" style={{backgroundColor:item.color}}/><span className="min-w-0"><span className="block">{item.name}</span><strong className="mt-1 block tabular text-base font-semibold text-fg">{moneyPercent(item.value)}</strong></span></div>)}</div>
