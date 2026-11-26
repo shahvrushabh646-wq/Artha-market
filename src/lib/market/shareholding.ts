@@ -305,16 +305,16 @@ function parseXbrl(xml: string): (Omit<ShareholdingQuarter, "quarter" | "asOnDat
   const inlinePledgeFacts: Array<{ concept: string; value: number; members: string[] }> = [];
   for (const fact of xml.matchAll(inlineFactPattern)) {
     const attrs = fact[1];
-    const namedConcept = attrs.match(/\\bname=["']([^"']+)["']/i)?.[1];
+    const namedConcept = attrs.match(/\bname=["']([^"']+)["']/i)?.[1];
     if (!namedConcept) continue;
     const concept = normalizeConcept(namedConcept);
-    const contextRef = attrs.match(/\\bcontextRef=["']([^"']+)["']/i)?.[1];
+    const contextRef = attrs.match(/\bcontextRef=["']([^"']+)["']/i)?.[1];
     if (!contextRef) continue;
     const members = contexts.get(contextRef) ?? [];
     if (!hasPromoterContext(members) || members.length > 8) continue;
     const rawText = htmlText(fact[2]).replace(/,/g, "").trim();
     const numeric = Number(rawText);
-    const scaleAttr = Number(attrs.match(/\\bscale=["'](-?\\d+)["']/i)?.[1] ?? "0");
+    const scaleAttr = Number(attrs.match(/\bscale=["'](-?\d+)["']/i)?.[1] ?? "0");
     if (!rawText || !Number.isFinite(numeric)) continue;
     const value = numeric * (Number.isFinite(scaleAttr) ? 10 ** scaleAttr : 1);
     if (!Number.isFinite(value) || value < 0) continue;
