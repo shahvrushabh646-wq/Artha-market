@@ -40,7 +40,7 @@ function StockPage() {
     <SymbolSearch value={symbol} onSelect={(s)=>navigate({ search: (prev)=>({ ...prev, symbol: s }) })} />
     <QuoteHeader quote={quote} /><TopSignal quote={quote} /><CompanyGujarati symbol={symbol} name={quote.name} />
     <div className="mt-4 grid grid-cols-3 gap-2"><Button variant="secondary" size="sm" className="h-11" onClick={()=>{const added=addWatch(symbol);toast(added?`Watching ${displaySymbol(symbol)}`:"Already on your watchlist");}}><Eye className="size-4"/>{watched?"Watching":"Watch"}</Button><Button variant={showHoldings?"default":"secondary"} size="sm" className="h-11" onClick={()=>setShowHoldings(v=>!v)} aria-pressed={showHoldings}><PieChartIcon className="size-4"/>Holdings</Button><Button variant="secondary" size="sm" className="h-11" onClick={()=>{const t=Number(target||quote.price||0);try{addAlert({symbol,targetPrice:t,condition:cond});toast(`Alert on ${displaySymbol(symbol)}`);}catch(err){toast(err instanceof Error?err.message:"Could not create alert");}}}><BellPlus className="size-4"/>Alert</Button></div>
-    <div className="mt-2 grid grid-cols-2 gap-2"><div className="flex gap-1"><select value={cond} onChange={e=>setCond(e.target.value as ">="|"<=")} className="h-11 rounded-lg bg-surface-2 px-1 text-xs text-fg shadow-[var(--shadow-border)]" aria-label="Alert condition"><option value=">=">≥</option><option value="<=">≤</option></select><Input inputMode="decimal" value={target} onChange={e=>setTarget(e.target.value)} placeholder="Alert target" aria-label="Alert target" className="min-w-0"/></div><p className="flex items-center text-xs text-muted">Holdings shows shareholding & pledge pies for this company.</p></div>
+    <div className="mt-2 grid grid-cols-2 gap-2"><div className="flex gap-1"><select value={cond} onChange={e=>setCond(e.target.value as ">="|"<=")} className="h-11 rounded-lg bg-surface-2 px-1 text-xs text-fg shadow-[var(--shadow-border)]" aria-label="Alert condition"><option value=">=">≥</option><option value="<=">≤</option></select><Input inputMode="decimal" value={target} onChange={e=>setTarget(e.target.value)} placeholder="Alert target" aria-label="Alert target" className="min-w-0"/></div><p className="flex items-center text-xs text-muted">Holdings: historical shareholding, promoter & pledge for this company.</p></div>
     {showHoldings ? <StockHoldingsSection symbol={symbol} query={holdingsQ} /> : null}
     <Section title="Valuation rule" hint="Personal rule: buy only at or below 25% of the 5-year high. Not advice.">{derived?.val?<><div className="mb-3"><SignalBadge signal={derived.val.signal}/></div><div className="grid grid-cols-2 gap-2 sm:grid-cols-3"><Stat label="5Y high" value={fmtCurrency(derived.val.high5y)}/><Stat label="75% level" value={fmtCurrency(derived.val.price75)}/><Stat label="80% level" value={fmtCurrency(derived.val.price80)}/><Stat label="85% level" value={fmtCurrency(derived.val.price85)}/><Stat label="90% level" value={fmtCurrency(derived.val.price90)}/><Stat label="Time Drop" value={timeDrop}/><Stat label="Last" value={fmtCurrency(derived.val.currentPrice)}/><Stat label="Gap to 25%" value={fmtCurrency(derived.val.currentPrice-derived.val.price75)}/></div><button type="button" className="mt-3 text-xs text-muted underline-offset-2 hover:text-fg hover:underline" onClick={()=>setShowLevels(v=>!v)}>{showLevels?"Hide optional % levels":"Optional levels (% below 5Y high)"}</button>{showLevels?<div className="mt-2 grid grid-cols-2 gap-2">{optionalBelowHighLevels(derived.val.high5y).map(row=><Stat key={row.label} label={row.label} value={fmtCurrency(row.price)}/>)}</div>:null}</>:<Panel><p className="text-sm text-muted">Need five-year history to run the rule.</p></Panel>}</Section>
     <Section title="Price range" hint="1Y and 5Y extremes from exchange history"><div className="grid grid-cols-2 gap-2 sm:grid-cols-4"><Stat label="1Y high" value={fmtCurrency(derived?.hl1.high??null)}/><Stat label="1Y low" value={fmtCurrency(derived?.hl1.low??null)}/><Stat label="5Y high" value={fmtCurrency(derived?.hl5.high??null)}/><Stat label="5Y low" value={fmtCurrency(derived?.hl5.low??null)}/></div>{derived?<div className="mt-2 grid grid-cols-2 gap-2"><Stat label="% below 1Y high" value={fmtPercent(pctBelowHigh(quote.price,derived.hl1.high))}/><Stat label="% above 1Y low" value={fmtPercent(pctAboveLow(quote.price,derived.hl1.low))}/></div>:null}</Section>
@@ -63,58 +63,133 @@ function StockHoldingsSection({ symbol, query }: { symbol: string; query: { isLo
     for (const q of [...(query.data?.quarters ?? [])].sort((a, b) => a.asOnDate.localeCompare(b.asOnDate))) byDate.set(q.asOnDate, q);
     return [...byDate.values()];
   }, [query.data?.quarters]);
+
   const latest = quarters.at(-1) ?? null;
+  const latestDate = latest ? new Date(latest.asOnDate + "T00:00:00Z") : new Date();
+  const currentYear = new Date().getUTCFullYear();
+  const yearTabs = [...new Set([
+    ...Array.from({ length: Math.max(0, currentYear - 2018 + 1) }, (_, i) => 2018 + i),
+    ...quarters.map(q => new Date(q.asOnDate + "T00:00:00Z").getUTCFullYear()),
+  ])].sort((a, b) => a - b);
+
+  const [selectedYear, setSelectedYear] = useState<number | null>(null);
+  const [selectedQuarter, setSelectedQuarter] = useState<number | null>(null);
+  const [promoterYear, setPromoterYear] = useState<number | null>(null);
+  const [promoterQuarter, setPromoterQuarter] = useState<number | null>(null);
+
+  const activeYear = selectedYear ?? latestDate.getUTCFullYear();
+  const activeQuarter = selectedQuarter ?? Math.floor(latestDate.getUTCMonth() / 3) + 1;
+
+  const selectedQuarterData = quarters.find(q => {
+    const date = new Date(q.asOnDate + "T00:00:00Z");
+    return date.getUTCFullYear() === activeYear && Math.floor(date.getUTCMonth() / 3) + 1 === activeQuarter;
+  }) ?? null;
 
   const pieData = useMemo(() => {
-    if (!latest || latest.promoter == null) return [];
+    const quarter = selectedQuarterData;
+    if (!quarter || quarter.promoter == null) return [];
     const slices: Array<{ name: string; displayName: string; value: number; color: string }> = [
-      { name: "Promoter", displayName: "Promoter", value: latest.promoter, color: HOLDINGS_COLORS.Promoter },
+      { name: "Promoter", displayName: "Promoter", value: quarter.promoter, color: HOLDINGS_COLORS.Promoter },
     ];
-    if (latest.fii != null && latest.fii >= 0) slices.push({ name: "FII", displayName: "FII", value: latest.fii, color: HOLDINGS_COLORS.FII });
-    if (latest.dii != null && latest.dii >= 0) slices.push({ name: "DII", displayName: "DII", value: latest.dii, color: HOLDINGS_COLORS.DII });
+    if (quarter.fii != null && Number.isFinite(quarter.fii) && quarter.fii >= 0) slices.push({ name: "FII", displayName: "FII", value: quarter.fii, color: HOLDINGS_COLORS.FII });
+    if (quarter.dii != null && Number.isFinite(quarter.dii) && quarter.dii >= 0) slices.push({ name: "DII", displayName: "DII", value: quarter.dii, color: HOLDINGS_COLORS.DII });
     let residual: number | null = null;
-    if (latest.public != null) residual = latest.public - ((latest.fii ?? 0) + (latest.dii ?? 0));
-    else if (latest.fii != null && latest.dii != null) residual = 100 - latest.promoter - latest.fii - latest.dii;
+    if (quarter.public != null && Number.isFinite(quarter.public)) residual = quarter.public - ((quarter.fii ?? 0) + (quarter.dii ?? 0));
+    else if (quarter.fii != null && quarter.dii != null) residual = 100 - quarter.promoter - quarter.fii - quarter.dii;
     if (residual != null && residual > 0.05) slices.push({ name: "Others", displayName: "Public / Others", value: residual, color: HOLDINGS_COLORS.Other });
     const total = slices.reduce((s, x) => s + x.value, 0);
     if (total <= 0 || total > 100.5) return [];
     return slices.filter((x) => x.value > 0);
-  }, [latest]);
+  }, [selectedQuarterData]);
 
-  const pledgeSlices = useMemo(() => {
-    const rate = latest?.promoterPledge;
-    if (rate == null || !Number.isFinite(rate) || rate < 0 || rate > 100) return null;
-    return [
-      { name: "Promoter Pledged", displayName: "Promoter Pledged", value: rate, color: HOLDINGS_COLORS.Pledge },
-      { name: "Promoter Not Pledged", displayName: "Promoter Not Pledged", value: Math.max(0, 100 - rate), color: HOLDINGS_COLORS.Promoter },
-    ];
-  }, [latest]);
+  const latestWithPromoter = [...quarters].reverse().find(q => q.promoter != null) ?? latest;
+  const promoterDefaultDate = latestWithPromoter ? new Date(latestWithPromoter.asOnDate + "T00:00:00Z") : latestDate;
+  const promoterActiveYear = promoterYear ?? promoterDefaultDate.getUTCFullYear();
+  const promoterActiveQuarter = promoterQuarter ?? Math.floor(promoterDefaultDate.getUTCMonth() / 3) + 1;
+  const inSelectedPromoterQuarter = (q: ShareholdingQuarter) => {
+    const date = new Date(q.asOnDate + "T00:00:00Z");
+    return date.getUTCFullYear() === promoterActiveYear && Math.floor(date.getUTCMonth() / 3) + 1 === promoterActiveQuarter;
+  };
+  const promoterQuarterRows = quarters.filter(inSelectedPromoterQuarter);
+  const promoterQuarterData = [...promoterQuarterRows].reverse().find(q => q.promoter != null) ?? promoterQuarterRows.at(-1) ?? null;
+  let promoterPledgeQuarterData = [...promoterQuarterRows].reverse().find(q => q.promoterPledge != null) ?? null;
+  let pledgeFallbackNote: string | null = null;
+  if (!promoterPledgeQuarterData) {
+    const target = promoterQuarterData?.asOnDate ?? `${promoterActiveYear}-${String(promoterActiveQuarter * 3).padStart(2, "0")}-28`;
+    const withPledge = quarters.filter(q => q.promoterPledge != null && Number.isFinite(q.promoterPledge));
+    if (withPledge.length) {
+      const past = withPledge.filter(q => q.asOnDate <= target).sort((a, b) => b.asOnDate.localeCompare(a.asOnDate));
+      const future = withPledge.filter(q => q.asOnDate > target).sort((a, b) => a.asOnDate.localeCompare(b.asOnDate));
+      promoterPledgeQuarterData = past[0] ?? future[0] ?? null;
+      if (promoterPledgeQuarterData) pledgeFallbackNote = `Nearest verified pledge from ${promoterPledgeQuarterData.asOnDate}.`;
+    }
+  }
+  const holding = promoterQuarterData?.promoter ?? null;
+  let pledgeRate = promoterPledgeQuarterData?.promoterPledge ?? null;
+  if (pledgeRate == null && holding != null) {
+    const verifiedZero = quarters.find(q => q.promoterPledge === 0);
+    if (verifiedZero) {
+      pledgeRate = 0;
+      promoterPledgeQuarterData = verifiedZero;
+      pledgeFallbackNote = `Using verified 0% pledge from ${verifiedZero.asOnDate}.`;
+    }
+  }
+  const pledgeVerified = pledgeRate != null && Number.isFinite(pledgeRate) && pledgeRate >= 0 && pledgeRate <= 100;
+  const pieSlices = pledgeVerified ? [
+    { name: "Promoter Pledged", displayName: "Promoter Pledged", value: Math.max(0, pledgeRate as number), color: HOLDINGS_COLORS.Pledge },
+    { name: "Promoter Not Pledged", displayName: "Promoter Not Pledged", value: Math.max(0, 100 - (pledgeRate as number)), color: HOLDINGS_COLORS.Promoter },
+  ] : [];
+
+  type ShareholdingKey = "fii" | "dii" | "promoter" | "public" | "promoterPledge";
+  const tableRows: Array<{ label: string; key: ShareholdingKey }> = [
+    { label: "FII", key: "fii" },
+    { label: "DII", key: "dii" },
+    { label: "Promoter", key: "promoter" },
+    { label: "Public", key: "public" },
+    { label: "Pledge (% of promoter)", key: "promoterPledge" },
+  ];
 
   return (
-    <Section title="Holdings" hint={`Shareholding & promoter pledge · ${displaySymbol(symbol)}`}>
+    <Section title="Holdings" hint={`Historical shareholding & promoter pledge · ${displaySymbol(symbol)} · ${quarters.length} filings`}>
       {query.isLoading ? (
-        <Panel className="p-4"><p className="text-sm text-muted">Loading verified shareholding…</p></Panel>
+        <Panel className="p-4"><p className="text-sm text-muted">Loading verified shareholding history…</p></Panel>
       ) : query.isError || !query.data ? (
         <Panel className="p-4"><p className="text-sm text-muted">Shareholding data is temporarily unavailable. No estimated figures are shown.</p></Panel>
       ) : (
         <div className="space-y-4">
           <Panel className="p-4">
             <p className="text-xs uppercase tracking-wider text-subtle">Quarterly shareholding</p>
-            {latest ? <p className="mt-1 text-xs text-muted">{latest.quarter} · as on {latest.asOnDate}</p> : null}
+            <div className="mt-3 space-y-2">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="mr-1 text-[10px] font-medium uppercase tracking-wider text-subtle">Year</span>
+                {yearTabs.map(year => (
+                  <button key={year} type="button" onClick={() => setSelectedYear(year)}
+                    className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition ${activeYear === year ? "bg-accent text-white" : "bg-surface-2 text-muted"}`}>{year}</button>
+                ))}
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="mr-1 text-[10px] font-medium uppercase tracking-wider text-subtle">Quarter</span>
+                {[1, 2, 3, 4].map(q => (
+                  <button key={q} type="button" onClick={() => setSelectedQuarter(q)}
+                    className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition ${activeQuarter === q ? "bg-surface-3 text-fg ring-1 ring-[var(--border)]" : "bg-surface-2 text-muted"}`}>Q{q}</button>
+                ))}
+                <span className="ml-auto text-[10px] text-muted">{selectedQuarterData ? `Filing · ${selectedQuarterData.asOnDate}` : "No filing for this period"}</span>
+              </div>
+            </div>
             {pieData.length ? (
               <>
-                <div className="mx-auto mt-3 h-[260px] w-full max-w-md">
+                <div className="mx-auto mt-3 h-[240px] w-full max-w-md">
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
-                      <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={52} outerRadius={100} paddingAngle={2} isAnimationActive={false}>
-                        {pieData.map((entry) => <Cell key={entry.name} fill={entry.color} stroke="var(--surface)" strokeWidth={2} />)}
+                      <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={48} outerRadius={92} paddingAngle={2} isAnimationActive={false}>
+                        {pieData.map(entry => <Cell key={entry.name} fill={entry.color} stroke="var(--surface)" strokeWidth={2} />)}
                       </Pie>
                       <Tooltip formatter={(v) => moneyPercent(Number(v))} />
                     </PieChart>
                   </ResponsiveContainer>
                 </div>
                 <div className="mt-2 grid grid-cols-2 gap-2">
-                  {pieData.map((entry) => (
+                  {pieData.map(entry => (
                     <span key={entry.name} className="flex items-center gap-2 rounded-lg border border-[var(--border)] bg-surface-2 px-3 py-2 text-xs text-muted">
                       <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: entry.color }} />
                       <span className="min-w-0"><span className="block">{entry.displayName}</span><strong className="mt-0.5 block tabular text-sm text-fg">{moneyPercent(entry.value)}</strong></span>
@@ -123,45 +198,92 @@ function StockHoldingsSection({ symbol, query }: { symbol: string; query: { isLo
                 </div>
               </>
             ) : (
-              <p className="mt-3 text-sm text-muted">Not verified / No filing available for shareholding categories.</p>
+              <p className="mt-3 text-sm text-muted">Not verified / No filing available for Q{activeQuarter} {activeYear}.{quarters.length ? ` ${quarters.length} other filings loaded — try another year/quarter.` : ""}</p>
             )}
           </Panel>
 
           <Panel className="p-4">
             <p className="text-xs uppercase tracking-wider text-subtle">Promoter holding & pledge</p>
-            {latest?.promoter != null ? (
-              <p className="mt-1 text-sm text-fg">Promoter holding <strong className="tabular">{moneyPercent(latest.promoter)}</strong>
-                {latest.promoterPledge != null ? <> · Pledge <strong className="tabular">{moneyPercent(latest.promoterPledge)}</strong> of promoter</> : <> · Pledge not verified</>}
-              </p>
+            <div className="mt-3 space-y-2">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="mr-1 text-[10px] font-medium uppercase tracking-wider text-subtle">Year</span>
+                {yearTabs.map(year => (
+                  <button key={year} type="button" onClick={() => setPromoterYear(year)}
+                    className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition ${promoterActiveYear === year ? "bg-accent text-white" : "bg-surface-2 text-muted"}`}>{year}</button>
+                ))}
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="mr-1 text-[10px] font-medium uppercase tracking-wider text-subtle">Quarter</span>
+                {[1, 2, 3, 4].map(q => (
+                  <button key={q} type="button" onClick={() => setPromoterQuarter(q)}
+                    className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition ${promoterActiveQuarter === q ? "bg-surface-3 text-fg ring-1 ring-[var(--border)]" : "bg-surface-2 text-muted"}`}>Q{q}</button>
+                ))}
+                <span className="ml-auto text-[10px] text-muted">{promoterQuarterData || promoterPledgeQuarterData ? `Filing · ${(promoterPledgeQuarterData?.asOnDate ?? promoterQuarterData?.asOnDate)}` : "No filing for this period"}</span>
+              </div>
+            </div>
+            {holding != null ? (
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <div className="rounded-lg bg-surface-2 p-3"><div className="text-xs text-muted">Promoter holding</div><div className="mt-1 text-base font-semibold tabular text-fg">{moneyPercent(holding)}</div></div>
+                <div className="rounded-lg bg-surface-2 p-3"><div className="text-xs text-muted">Pledge (% of promoter)</div><div className="mt-1 text-base font-semibold tabular text-fg">{pledgeRate != null ? moneyPercent(pledgeRate) : "Not verified"}</div></div>
+              </div>
             ) : (
-              <p className="mt-1 text-sm text-muted">Promoter holding not verified for the latest filing.</p>
+              <p className="mt-3 text-sm text-muted">Promoter holding not verified for Q{promoterActiveQuarter} {promoterActiveYear}.</p>
             )}
-            {pledgeSlices ? (
+            {pledgeVerified ? (
               <>
-                <div className="mx-auto mt-3 h-[260px] w-full max-w-md">
+                <div className="mx-auto mt-3 h-[240px] w-full max-w-md">
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
-                      <Pie data={pledgeSlices} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={52} outerRadius={100} paddingAngle={2} isAnimationActive={false}>
-                        {pledgeSlices.map((entry) => <Cell key={entry.name} fill={entry.color} stroke="var(--surface)" strokeWidth={2} />)}
+                      <Pie data={pieSlices} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={48} outerRadius={92} paddingAngle={2} isAnimationActive={false}>
+                        {pieSlices.map(entry => <Cell key={entry.name} fill={entry.color} stroke="var(--surface)" strokeWidth={2} />)}
                       </Pie>
                       <Tooltip formatter={(v) => moneyPercent(Number(v))} />
                     </PieChart>
                   </ResponsiveContainer>
                 </div>
                 <div className="mt-2 grid grid-cols-2 gap-2">
-                  {pledgeSlices.map((entry) => (
+                  {pieSlices.map(entry => (
                     <span key={entry.name} className="flex items-center gap-2 rounded-lg border border-[var(--border)] bg-surface-2 px-3 py-2 text-xs text-muted">
                       <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: entry.color }} />
                       <span className="min-w-0"><span className="block">{entry.displayName}</span><strong className="mt-0.5 block tabular text-sm text-fg">{moneyPercent(entry.value)}</strong></span>
                     </span>
                   ))}
                 </div>
-                <p className="mt-3 text-xs text-subtle">Pie normalized to promoter holding only. Missing pledge is never shown as zero.</p>
+                <p className="mt-3 text-xs text-subtle">Normalized to promoter holding only.{pledgeFallbackNote ? ` ${pledgeFallbackNote}` : ""}</p>
               </>
-            ) : (
-              <p className="mt-3 text-sm text-muted">Not verified / No filing available for promoter pledge on this quarter.</p>
-            )}
+            ) : holding != null ? (
+              <p className="mt-3 text-sm text-muted">Pledge not verified for this period. Pie withheld rather than treating missing pledge as zero.</p>
+            ) : null}
           </Panel>
+
+          {quarters.length ? (
+            <Panel className="overflow-x-auto p-2">
+              <p className="mb-2 px-2 text-xs uppercase tracking-wider text-subtle">Historical filings</p>
+              <table className="w-full min-w-[640px] border-collapse text-left text-xs">
+                <thead className="text-muted">
+                  <tr>
+                    <th className="sticky left-0 z-10 bg-surface p-2 font-medium">Category</th>
+                    {quarters.map(q => (
+                      <th key={q.asOnDate} className="whitespace-nowrap p-2 font-medium">
+                        <span className="block">{q.quarter || q.asOnDate}</span>
+                        <span className="mt-0.5 block text-[10px] text-subtle">{q.asOnDate}</span>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {tableRows.map(row => (
+                    <tr key={row.key} className="border-t border-[var(--border)]">
+                      <th className="sticky left-0 z-10 bg-surface p-2 font-medium text-fg">{row.label}</th>
+                      {quarters.map(q => (
+                        <td key={q.asOnDate} className="whitespace-nowrap p-2 tabular text-fg">{moneyPercent(q[row.key])}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </Panel>
+          ) : null}
 
           <a href={`/shareholding?symbol=${encodeURIComponent(symbol)}`} className="inline-flex text-xs font-medium text-accent hover:underline">
             Open full Shareholding Analysis →
