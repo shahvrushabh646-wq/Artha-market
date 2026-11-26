@@ -34,6 +34,7 @@ function parseNseFlatHistory(csv: string): Map<string, ShareholdingQuarter[]> {
   const idx = (name: string) => headers.indexOf(name);
   const tickerIdx = idx("ticker"), periodIdx = idx("period"), promoterIdx = idx("promoter_pct");
   const fiiIdx = idx("fii_pct"), diiIdx = idx("dii_pct"), publicIdx = idx("public_pct");
+  const pledgeIdx = idx("pledge_pct");
   if ([tickerIdx, periodIdx, promoterIdx, fiiIdx, diiIdx, publicIdx].some(i => i < 0)) {
     throw new Error("Historical shareholding CSV columns changed");
   }
@@ -61,7 +62,8 @@ function parseNseFlatHistory(csv: string): Map<string, ShareholdingQuarter[]> {
     if (promoter === null && fii === null && dii === null && publicValue === null) continue;
     const quarter: ShareholdingQuarter = {
       quarter: date.toLocaleDateString("en-IN", { month: "short", year: "numeric", timeZone: "UTC" }),
-      asOnDate, promoter, fii, dii, public: publicValue, promoterPledge: null,
+      asOnDate, promoter, fii, dii, public: publicValue,
+      promoterPledge: pledgeValue !== null && pledgeValue >= 0 && pledgeValue <= 100 ? pledgeValue : null,
       sourceUrl: NSE_FLAT_HISTORY_CSV, sourceName: "NSE historical XBRL dataset",
     };
     const rows = bySymbol.get(symbol) ?? [];
